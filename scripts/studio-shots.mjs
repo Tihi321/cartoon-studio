@@ -217,7 +217,7 @@ function bridge({ fix, origin, engine, engineOrigin }) {
       bible: { ...fix.bible, chosenPitch: state.chosen },
       rigs: [],
       episodes: ['ep00-mini'],
-      pipelines: [{ episode: 'ep00-mini', state: state.run, step: state.run === 'waiting-on-user' ? 'pitch_choice' : 'cast_ref', hint: 'STOP: the user must choose a premise.', steps: '', }]
+      pipelines: [{ episode: 'ep00-mini', state: state.run, step: state.run === 'waiting-on-user' ? 'pitch_choice' : 'cast_sheet', hint: 'STOP: the user must choose a premise.', steps: '', }]
     }),
     cts_series_update: () => ({ bible: fix.bible }),
     cts_pitch_choose: (a) => {

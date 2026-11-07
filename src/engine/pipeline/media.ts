@@ -1,10 +1,14 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import sharp from 'sharp'
 import type { z } from 'zod'
 import type { Bible, ClipEntry, Lang, RigVariant } from '../../shared/contracts'
 import { budgetState, localIso } from '../budget/spend'
+import { isAbortError } from '../models/types'
 import { makeSetArt, SET_SIZE } from '../images/background'
-import { REF_SIZE, generateReferences, refPrompt } from '../images/reference'
+import { REF_SIZE, SHEET_CANDIDATES, SHEET_DENOISE, composeSheet, generateFromSketch, readSheetMeta, refPrompt } from '../images/reference'
+import type { SheetMeta } from '../images/reference'
+import { SHEET_POSES, SKETCH_BACKGROUND, SKETCH_SIZE, bodyPlanProblems, poseSketch, renderSketch, sketchProblems } from '../images/sketch'
 import { buildEpisodeTimelines } from '../anim/timeline'
 import { renderEpisode } from '../render/render'
 import { contactSheet, poseSheet } from '../render/sheet'
@@ -27,58 +31,123 @@ import {
 } from './rig'
 import type { RigPath } from './rig'
 import { assertClipId, generateClip, clipSheet, clipLocation, missingClips, readShots, upsertClip, videoDir } from './clips'
-import type { rigRasterAnswer, rigClaudeAnswer, refPickAnswer, refPromptAnswer, setPlanAnswer, setPlaceAnswer, reviewAnswer } from './tasks'
+import type { bodyPlanAnswer, rigRasterAnswer, rigClaudeAnswer, refPickAnswer, setPlanAnswer, setPlaceAnswer, reviewAnswer } from './tasks'
 
 type Raster = z.infer<typeof rigRasterAnswer>
 type Claude = z.infer<typeof rigClaudeAnswer>
 
 const exists = (f: string): Promise<boolean> => fs.stat(f).then((s) => s.isFile(), () => false)
 
-// ---------------------------------------------------------------- step 2: character references
+// ---------------------------------------------------------------- step 2: character sheets
 
-export async function castRefStep(e: Env): Promise<string> {
+const readJson = async <T>(file: string): Promise<T | null> => fs.readFile(file, 'utf8').then((t) => JSON.parse(t) as T, () => null)
+
+/**
+ * Step `cast_sheet` (CTS-12), per character: the designer answers a body plan and an image prompt; the app draws the front sketch; Z-Image image-to-image
+ * (denoise 0.8, seeds seed..seed+2) makes three candidates; the designer picks one -> `ref.png` (the master); three pose sketches (wave, point, shrug) at
+ * the picked seed -> `sheet/<pose>.png`; `sheet.png` puts the master and the poses side by side. The time of every image goes to the log and the result.
+ * The gate `sheet_review` after it waits for `cts_sheet_approve`; a redo note (`sheet-redo.json`) makes that character's sheet again with the note in the prompt.
+ */
+export async function castSheetStep(e: Env): Promise<string> {
   const bible = await requireChosen(e)
   const style = await loadStyleGuide(e.store.dataDir)
   const made: string[] = []
   for (const [i, c] of bible.cast.entries()) {
     const dir = e.store.paths(e.series).castDir(c.id)
-    const refPng = path.join(dir, 'ref.png')
-    if ((await exists(refPng)) && !e.redo) continue
-    e.progress(i / bible.cast.length, `reference of ${c.id}`)
-    const others = bible.cast.filter((o) => o.id !== c.id).map(castView)
-    const p = await ask<z.infer<typeof refPromptAnswer>>(
+    const redoNote = await readJson<{ note: string; attempt: number }>(path.join(dir, 'sheet-redo.json'))
+    const before = await readSheetMeta(dir)
+    const done = before && (await exists(path.join(dir, 'ref.png'))) && (await exists(path.join(dir, 'sheet.png')))
+    if (done && !redoNote && e.detail !== 'redo') continue
+    const attempt = redoNote?.attempt ?? (before ? before.attempt + 1 : 0)
+    const note = redoNote?.note ?? null
+    const baseSeed = seedOf(c.id) + attempt * 10
+    const log = (m: string) => e.log(`${c.id}: ${m}`)
+    e.progress(i / bible.cast.length, `sheet of ${c.id}`)
+    const oldPlan = note ? await readJson<unknown>(path.join(dir, 'body-plan.json')) : null
+    const palette = bible.style.palette
+    const plan = await ask<z.infer<typeof bodyPlanAnswer>>(
       e,
       {
-        id: `ref-prompt-${c.id}`,
+        id: `body-plan-${c.id}${attempt ? `-${attempt}` : ''}`,
         role: 'character-designer',
-        kind: 'ref-prompt',
-        prompt: `Write the image prompt for the reference picture of ${c.name.en}. Describe only the character: body shape, colours, clothes, face, one telling detail. The code adds the pose, the flat grey background and the style.`,
-        inputs: { paths: [], json: { character: castView(c), style: bible.style, otherCharacters: others, audience: bible.audience } },
-        output: { schema: 'ref-prompt', path: `tasks/ref-prompt-${c.id}.json` }
+        kind: 'body-plan',
+        prompt: `Design the character sheet of ${c.name.en}: the image prompt (the character only) and the body plan the app draws the front sketch from (flat palette colours on ${SKETCH_BACKGROUND}, ${SKETCH_SIZE.width}x${SKETCH_SIZE.height}). Z-Image will redraw the sketch at denoise ${SHEET_DENOISE}, so the silhouette you draw is the silhouette you get: read the rules of your guide.${note ? ` The user asked to make it again with this note: "${note}". Change the prompt and the body plan to follow it.` : ''}`,
+        inputs: { paths: [], json: { character: castView(c), style: bible.style, palette, otherCharacters: bible.cast.filter((o) => o.id !== c.id).map(castView), audience: bible.audience, canvas: SKETCH_SIZE, poses: SHEET_POSES, ...(oldPlan ? { previousAnswerToRevise: oldPlan } : {}) } },
+        output: { schema: 'body-plan', path: `tasks/body-plan-${c.id}.json` }
       },
-      { system: style }
+      {
+        // no style guide here: its drawing rules are for SVG parts (CTS-17 rewrites it); the body-plan guide has the sketch rules
+        check: async (v) => {
+          const a = v as z.infer<typeof bodyPlanAnswer>
+          const out = bodyPlanProblems(a.bodyPlan, palette)
+          if (out.length === 0) out.push(...(await sketchProblems(await renderSketch(a.bodyPlan))))
+          return out
+        }
+      }
     )
-    const prompt = refPrompt(p.value.prompt, bible.style)
+    const bodyPlan = plan.value.bodyPlan
+    await e.store.writeFile(e.series, 'body-plan.json', `${JSON.stringify(bodyPlan, null, 2)}\n`, dir)
+    const sketch = await e.store.writeFile(e.series, 'sketch.png', await renderSketch(bodyPlan), dir)
+    const prompt = refPrompt(plan.value.prompt, bible.style, note ?? undefined)
+    const ctx = imageCtx(e, `character ${c.id} sheet`)
     await fs.rm(path.join(dir, 'ref'), { recursive: true, force: true })
-    const gen = await generateReferences({ ctx: imageCtx(e, `character ${c.id} reference`), castDir: dir, prompt, seed: seedOf(c.id), count: 3, log: (m) => e.log(m), signal: e.ctx.signal })
+    await fs.rm(path.join(dir, 'sheet'), { recursive: true, force: true })
+
+    // three candidates of the front view
+    const seconds: Record<string, number> = {}
+    const cands: { k: number; file: string }[] = []
+    const errors: string[] = []
+    let model = ''
+    for (let k = 0; k < SHEET_CANDIDATES; k++) {
+      try {
+        const r = await generateFromSketch({ ctx, prompt, sketch, out: path.join(dir, 'ref', `c${k + 1}`), seed: baseSeed + k, log, signal: e.ctx.signal })
+        cands.push({ k, file: r.file })
+        seconds[`c${k + 1}`] = r.seconds
+        model = r.model
+      } catch (err) {
+        if (isAbortError(err) || e.ctx.signal.aborted) throw err
+        errors.push((err as Error).message.split('\n')[0]!)
+        log(`candidate ${k + 1} failed: ${errors[errors.length - 1]}`)
+      }
+    }
+    if (cands.length === 0) throw new Error(`ComfyUI made no sheet image for ${c.id}: ${errors.join('; ')}`)
     const picked = await ask<z.infer<typeof refPickAnswer>>(
       e,
       {
-        id: `ref-pick-${c.id}`,
+        id: `ref-pick-${c.id}${attempt ? `-${attempt}` : ''}`,
         role: 'character-designer',
         kind: 'ref-pick',
-        prompt: `Pick the best of the ${gen.files.length} reference pictures of ${c.name.en} (numbered in the order attached): the clearest separate arms and legs, the most on-style flat shapes, the colours of the character's look, a readable face.`,
-        inputs: { paths: gen.files.map((f) => relTo(e, f)), json: { character: castView(c), count: gen.files.length } },
+        prompt: `Pick the best of the ${cands.length} master pictures of ${c.name.en} (numbered in the order attached; Z-Image drew them over your sketch): the clearest separate arms and legs attached at the shoulders, the colours of the character's look, a readable face, the closest to your body plan.${note ? ` The user's note: "${note}".` : ''}`,
+        inputs: { paths: cands.map((x) => relTo(e, x.file)), json: { character: castView(c), count: cands.length } },
         output: { schema: 'ref-pick', path: `tasks/ref-pick-${c.id}.json` }
       },
-      { system: style }
+      { system: style, check: (v) => ((v as z.infer<typeof refPickAnswer>).pick > cands.length ? [`pick must be 1 to ${cands.length}`] : []) }
     )
-    const idx = Math.min(gen.files.length, Math.max(1, picked.value.pick)) - 1
-    await fs.copyFile(gen.files[idx]!, refPng)
-    await e.store.writeFile(e.series, 'ref/meta.json', JSON.stringify({ prompt, model: gen.model, seconds: gen.seconds, picked: idx + 1, notes: picked.value.notes, size: REF_SIZE }, null, 2) + '\n', dir)
-    made.push(c.id)
+    const chosen = cands[Math.min(cands.length, Math.max(1, picked.value.pick)) - 1]!
+    const seed = baseSeed + chosen.k
+    const refPng = path.join(dir, 'ref.png')
+    await fs.copyFile(chosen.file, refPng)
+    const dims = await sharp(refPng).metadata()
+    if (dims.width !== REF_SIZE.width || dims.height !== REF_SIZE.height) throw new Error(`the master of ${c.id} is ${dims.width}x${dims.height}, not ${REF_SIZE.width}x${REF_SIZE.height}`)
+
+    // the three pose sketches, the picked seed and prompt (plus the pose in words)
+    const poseFiles: string[] = []
+    for (const pose of SHEET_POSES) {
+      const pSketch = await e.store.writeFile(e.series, `sheet/sketch-${pose}.png`, await poseSketch(bodyPlan, bodyPlan.poses[pose]!), dir)
+      const r = await generateFromSketch({ ctx, prompt: refPrompt(plan.value.prompt, bible.style, note ?? undefined, pose), sketch: pSketch, out: path.join(dir, 'sheet', pose), seed, log, signal: e.ctx.signal })
+      seconds[pose] = r.seconds
+      poseFiles.push(r.file)
+    }
+    await composeSheet([refPng, ...poseFiles], path.join(dir, 'sheet.png'))
+    const meta: SheetMeta = { prompt, seed, denoise: SHEET_DENOISE, model, attempt, note, picked: chosen.k + 1, notes: picked.value.notes, seconds }
+    await e.store.writeFile(e.series, 'sheet/meta.json', `${JSON.stringify(meta, null, 2)}\n`, dir)
+    await fs.rm(path.join(dir, 'sheet-redo.json'), { force: true })
+    // a sheet made again must be approved again
+    const fresh = await e.store.readBible(e.series)
+    if (fresh.cast.some((x) => x.id === c.id && x.sheet)) await e.store.writeBible(e.series, { ...fresh, cast: fresh.cast.map((x) => (x.id === c.id ? { ...x, sheet: undefined } : x)) })
+    made.push(`${c.id} (seed ${seed}; ${Object.entries(seconds).map(([k, s]) => `${k} ${s} s`).join(', ')})`)
   }
-  return made.length ? `references of ${made.join(', ')}` : 'references kept'
+  return made.length ? `sheets of ${made.join('; ')}; waiting for the user's look` : 'sheets kept'
 }
 
 // ---------------------------------------------------------------- step 3: rigs

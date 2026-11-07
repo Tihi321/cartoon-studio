@@ -140,10 +140,17 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
           const checks: Record<string, unknown> = {}
           if (rig) checks.chosen = await checkRig(st, a.series, id)
           for (const v of RIG_VARIANTS) if (variants.variants[v]?.status === 'built') checks[v] = await checkRig(st, a.series, id, v)
-          out.push({ member, rig: rig ? { height: rig.height, kind: rig.kind, parts: rig.parts.map((x) => x.id), gestures: Object.keys(rig.gestures), emotions: Object.keys(rig.emotions) } : null, variants, checks, files: { ref: (await st.exists(path.join(p.castDir(id), 'ref.png'))) ? `cast/${id}/ref.png` : null, sheet: (await st.exists(path.join(p.castDir(id), 'sheet.png'))) ? `cast/${id}/sheet.png` : null } })
+          out.push({ member, rig: rig ? { height: rig.height, kind: rig.kind, parts: rig.parts.map((x) => x.id), gestures: Object.keys(rig.gestures), emotions: Object.keys(rig.emotions) } : null, variants, checks, files: { sketch: (await st.exists(path.join(p.castDir(id), 'sketch.png'))) ? `cast/${id}/sketch.png` : null, ref: (await st.exists(path.join(p.castDir(id), 'ref.png'))) ? `cast/${id}/ref.png` : null, sheet: (await st.exists(path.join(p.castDir(id), 'sheet.png'))) ? `cast/${id}/sheet.png` : null } })
         }
         return a.cast ? out[0] : { cast: out }
       }
+    ),
+
+    def(
+      'cts_sheet_approve',
+      'The user\'s verdict on one character sheet (cast/<id>/sheet.png: the master and the wave, point and shrug poses, drawn by Z-Image over the app\'s sketches). The pipeline stops at "waiting-on-user" (sheet_review) after the sheets and nothing is rigged until EVERY character has been approved. Call it ONLY with the user\'s answer. ok: true records bible.cast[].sheet {approvedAt, seed, denoise, model}; ok: false needs a note (what to change): that character\'s sheet is made again with the note added to the prompt, with new seeds, and has to be approved again. Returns the cast members still open and the resumed pipelines.',
+      z.object({ series, cast, ok: z.boolean().describe('true = the user approves the sheet; false = make it again'), note: z.string().optional().describe('What to change (required when ok is false); added to the image prompt') }),
+      async (a) => pipe().approveSheet(a.series, a.cast, a.ok, a.note)
     ),
 
     // ---------------------------------------------------------------- rigs
@@ -285,7 +292,7 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
     // ---------------------------------------------------------------- the pipeline
     def(
       'cts_run_pipeline',
-      'Start or resume the episode pipeline: pitch (3 premises) -> STOP until the user chooses (cts_pitch_choose) -> bible -> character references -> rigs -> sets -> script -> child-safety review -> voice casting -> voices -> music -> Flow clips -> lip-sync/timelines/lint -> preview renders -> frame review -> final renders (hr and en MP4s). Call it again with the same series and episode to resume (it never skips the pause). The first call needs a brief {idea, title?, ageMin?, ageMax?, notes?, seconds?, lineRange?: [12,16], intro?: false, outro?: false}. retry: true puts failed steps back; from: "<step>" redoes that step and all after it. options: rigPaths {castId: ["claude-svg","raster"]} (extra rig variants), rigChoice {castId: "a"|"c"}, skipClips: true (drop the Flow clips), clipCredits {clipId: max_credits}. Model work is done through cts_get_task / cts_submit_task; the answer says what to do next (hint) and shows every step.',
+      'Start or resume the episode pipeline: pitch (3 premises) -> STOP until the user chooses (cts_pitch_choose) -> bible -> character sheets (sketch, Z-Image master, 3 poses) -> STOP until the user approves every sheet (cts_sheet_approve) -> rigs -> sets -> script -> child-safety review -> voice casting -> voices -> music -> Flow clips -> lip-sync/timelines/lint -> preview renders -> frame review -> final renders (hr and en MP4s). Call it again with the same series and episode to resume (it never skips the pause). The first call needs a brief {idea, title?, ageMin?, ageMax?, notes?, seconds?, lineRange?: [12,16], intro?: false, outro?: false}. retry: true puts failed steps back; from: "<step>" redoes that step and all after it. options: rigPaths {castId: ["claude-svg","raster"]} (extra rig variants), rigChoice {castId: "a"|"c"}, skipClips: true (drop the Flow clips), clipCredits {clipId: max_credits}. Model work is done through cts_get_task / cts_submit_task; the answer says what to do next (hint) and shows every step.',
       z.object({
         series,
         episode,

@@ -34,7 +34,9 @@ The series: title and logline in both languages, audience, tone, style (palette,
 waits (state `waiting-on-user`) until `chosenPitch` is the id of one of them, set by the user (`cts_pitch_choose` or the studio). A cast
 member's `voice` has one entry per language: `provider` (`auto` follows the allocation rule), a Gemini voice name, a VibeTTS voice, and for
 the local OmniVoice engine `comfy`: `engine`, `instruct` (attribute tags such as "female, child, high pitch", not free style words),
-an optional reference clip `ref` with its transcript `refText`, and a `seed`.
+an optional reference clip `ref` with its transcript `refText`, and a `seed`. A cast member's optional `sheet` (CTS-12) is set by `cts_sheet_approve` when the user approved
+the character sheet `cast/<id>/sheet.png`: `approvedAt` (local ISO time) and the `seed`, `denoise` and image `model` the master `cast/<id>/ref.png` was made with. It is absent until the approval
+(and for characters made before the sheet step); the pipeline stops at the gate `sheet_review` until every cast member has one.
 
 ```json
 {
@@ -57,6 +59,7 @@ an optional reference clip `ref` with its transcript `refText`, and a `seed`.
       "personality": "curious, talks fast, a bit bossy",
       "catchphrases": { "hr": ["Hajde!"], "en": ["Come on!"] },
       "rig": "cast/mia/rig.json",
+      "sheet": { "approvedAt": "2026-11-07T21:30:00+01:00", "seed": 412345, "denoise": 0.8, "model": "z-image-turbo" },
       "voice": {
         "hr": { "provider": "auto", "gemini": "Leda", "comfy": { "engine": "omnivoice", "instruct": "female, child, high pitch", "ref": null, "refText": null, "seed": 7 }, "vibetts": "supertonic:F3", "speed": 1.0 },
         "en": { "provider": "auto", "gemini": "Leda", "vibetts": "af_bella", "speed": 1.0, "style": "bright child-like" }

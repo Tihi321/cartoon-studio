@@ -81,7 +81,9 @@ export const castMemberSchema = z.strictObject({
   catchphrases: z.strictObject({ hr: z.array(z.string()), en: z.array(z.string()) }).optional(),
   /** The default rig, relative to the series folder (`cast/<id>/rig.json`). */
   rig: relPath,
-  voice: z.partialRecord(langSchema, voiceSpecSchema)
+  voice: z.partialRecord(langSchema, voiceSpecSchema),
+  /** CTS-12: set by `cts_sheet_approve` when the user approved the character sheet (`cast/<id>/sheet.png`): when, and the seed, denoise and image model the master was made with. Absent before the approval (and for characters made before the sheet step). */
+  sheet: z.strictObject({ approvedAt: z.string(), seed: z.number().int(), denoise: z.number(), model: z.string() }).optional()
 })
 export type CastMember = z.infer<typeof castMemberSchema>
 

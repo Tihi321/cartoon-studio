@@ -20,6 +20,7 @@ import {
 import { parseMd } from '../../shared/md'
 import type { ChatMessage } from '../models/types'
 import type { JobContext } from '../queue/scheduler'
+import { bodyPlanSchema } from '../images/sketch'
 import { findSeedDir } from '../store/dataFolder'
 import type { SeriesStore } from '../series/service'
 import { chatJson } from './llm'
@@ -87,7 +88,8 @@ export const bibleAnswer = z.strictObject({
   sets: z.array(z.strictObject({ id: idSchema, name: loc, description: z.string().min(5) })).min(1).max(3)
 })
 
-export const refPromptAnswer = z.strictObject({ prompt: z.string().min(20) })
+/** The character sheet's first answer: the image prompt and the body plan the app draws the sketch from (`images/sketch.ts`). */
+export const bodyPlanAnswer = z.strictObject({ prompt: z.string().min(20), bodyPlan: bodyPlanSchema, notes: z.string().default('') })
 export const refPickAnswer = z.strictObject({ pick: z.number().int().min(1).max(3), notes: z.string().default('') })
 
 /** The claude-svg rig: `rig` and `parts` (the part SVGs by their path in the rig or by file name), or `viaTool: true` after `cts_rig_set` wrote them. */
@@ -188,7 +190,7 @@ export interface TaskSchema {
 export const TASK_SCHEMAS: Record<string, TaskSchema> = {
   pitches: { zod: pitchesAnswer },
   bible: { zod: bibleAnswer },
-  'ref-prompt': { zod: refPromptAnswer },
+  'body-plan': { zod: bodyPlanAnswer },
   'ref-pick': { zod: refPickAnswer },
   'rig-claude': { zod: rigClaudeAnswer },
   'rig-raster': { zod: rigRasterAnswer },

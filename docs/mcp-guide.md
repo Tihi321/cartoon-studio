@@ -73,6 +73,7 @@ The model work of the pipeline is done through the client task tools above; `doc
 |---|---|
 | `cts_run_pipeline {series, episode, brief?, options?, retry?, from?}` | Starts or resumes the episode pipeline (creates the series from the brief when it does not exist). The first call needs `brief {idea, title?, ageMin?, ageMax?, notes?, seconds?, lineRange?, intro?, outro?}`. Answers with the state, the current step, every step, a `hint` on what to do next, the pitches while they wait and the `summary` when done. Re-calling with the same ids resumes; it never skips the pitch pause. `retry: true` puts failed steps back; `from: "<step>"` redoes a step and everything after it; `options {rigPaths, rigChoice, skipClips, clipCredits}`. |
 | `cts_pitch_choose {series, pitch}` | The user's pick of premise p1/p2/p3: writes `bible.chosenPitch` and `chosenAt`, and lets every pipeline that waits go on. Call it only with the pitch the user chose. |
+| `cts_sheet_approve {series, cast, ok, note?}` | The user's verdict on one character sheet (`cast/<id>/sheet.png`: master + wave, point, shrug). The pipeline waits at `sheet_review` until every character is approved; `ok: true` writes `bible.cast[].sheet`; `ok: false` needs a note and makes that sheet again with new seeds. Call it only with the user's answer. |
 | `cts_series_create {slug, title?, logline?, ageMin?, ageMax?, languages?}` | A stub bible. Usually not needed. |
 | `cts_series_get {series}` | The bible, pitches and the chosen one, the rig variants per character, the episodes and the pipelines. |
 | `cts_series_update {series, title?, logline?, tone?, rules?, audience?, languages?, style?, music?, cast?, sets?}` | Changes the bible (validated). The pitches and the choice cannot be changed here. |
@@ -93,14 +94,14 @@ The model work of the pipeline is done through the client task tools above; `doc
 
 `cts_status {series}` also lists the pipelines of the series: `state` (`running`, `waiting-on-user` after the pitches until `cts_pitch_choose`, or while Flow clips wait for a credit cap; `waiting-on-client`; `failed`; `done`), the current step and a hint.
 
-UNTESTED against the real services (checked with fakes): ComfyUI image jobs (`cast_ref`, `set`), Flow video (`flow.generateVideo` is new in `studios/flow.ts` and follows `flow_generate` in `flow-music-mcp/src/flow/tools.ts`), the player still of a clip (Chromium), the Chiptune and VibeTTS calls of the pipeline, and the pose sheets and renders (Chromium).
+UNTESTED against the real services (checked with fakes): ComfyUI image jobs (`cast_sheet` in the app's flow, `set`; the sheet images were probed live with a hand-made body plan, not through a model task), Flow video (`flow.generateVideo` is new in `studios/flow.ts` and follows `flow_generate` in `flow-music-mcp/src/flow/tools.ts`), the player still of a clip (Chromium), the Chiptune and VibeTTS calls of the pipeline, and the pose sheets and renders (Chromium).
 
 ## All tools
 
 | Group | Tools |
 |---|---|
 | Queue and client provider | `cts_status`, `cts_wait`, `cts_pause_all`, `cts_resume_all`, `cts_stop_now`, `cts_client_tasks`, `cts_get_task`, `cts_submit_task`, `cts_release_task`, `cts_studios_status` |
-| Series, cast, sets, episodes | `cts_series_create`, `cts_series_get`, `cts_series_update`, `cts_pitch_choose`, `cts_cast_get`, `cts_set_get`, `cts_set_update`, `cts_episode_create`, `cts_episode_get`, `cts_script_set`, `cts_text_set` |
+| Series, cast, sets, episodes | `cts_series_create`, `cts_series_get`, `cts_series_update`, `cts_pitch_choose`, `cts_sheet_approve`, `cts_cast_get`, `cts_set_get`, `cts_set_update`, `cts_episode_create`, `cts_episode_get`, `cts_script_set`, `cts_text_set` |
 | Rigs | `cts_rig_set`, `cts_rig_check`, `cts_rig_build`, `cts_rig_compare`, `cts_rig_choose`, `cts_pose_sheet` |
 | Pipeline and clips | `cts_run_pipeline`, `cts_timeline_build`, `cts_lint`, `cts_clip_plan`, `cts_clip_generate`, `cts_clip_review` |
 | Voices and music | `cts_voice_plan`, `cts_voice_generate`, `cts_voice_status`, `cts_voice_quota`, `cts_music_generate` |

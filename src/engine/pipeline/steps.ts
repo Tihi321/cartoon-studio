@@ -25,7 +25,8 @@ export const STEPS: readonly StepDef[] = [
   { id: 'pitch', no: '1', label: 'Three premises (showrunner)', role: 'showrunner', kind: 'role' },
   { id: 'pitch_choice', no: '1', label: 'The user picks a premise', role: 'showrunner', kind: 'gate' },
   { id: 'bible', no: '1b', label: 'Series bible from the chosen premise (showrunner)', role: 'showrunner', kind: 'role' },
-  { id: 'cast_ref', no: '2', label: 'Character references (character-designer, ComfyUI)', role: 'character-designer', kind: 'role', vision: true },
+  { id: 'cast_sheet', no: '2', label: 'Character sheets: sketch, Z-Image master, pose sheet (character-designer, ComfyUI)', role: 'character-designer', kind: 'role', vision: true },
+  { id: 'sheet_review', no: '2', label: 'The user approves every character sheet', role: 'character-designer', kind: 'gate' },
   { id: 'rig', no: '3', label: 'Rigs (character-designer): claude-svg, raster', role: 'character-designer', kind: 'role', vision: true },
   { id: 'set', no: '4', label: 'Sets (background-artist, ComfyUI)', role: 'background-artist', kind: 'role', vision: true },
   { id: 'script', no: '5', label: 'Script and texts (writer)', role: 'writer', kind: 'role' },
@@ -68,6 +69,17 @@ export function resetFrom(state: PipelineState, id: string): void {
 
 /** The steps that exist in the state, in order, with a pending step for any the file does not know yet (a state written by an older version). */
 export function normalise(state: PipelineState): PipelineState {
+  // CTS-12: `cast_ref` (pilot 1) became `cast_sheet` + the gate `sheet_review`. A finished `cast_ref` finishes both (that run made its
+  // references before the sheet step existed and its characters were never reviewed as sheets); anything else starts again at `cast_sheet`.
+  const old = state.steps.cast_ref
+  if (old) {
+    if (!state.steps.cast_sheet) {
+      const finished = old.state === 'done' || old.state === 'skipped'
+      state.steps.cast_sheet = finished ? { ...old, detail: `from cast_ref${old.detail ? `: ${old.detail}` : ''}` } : { state: 'pending', detail: `was cast_ref (${old.state})` }
+      state.steps.sheet_review = finished ? { state: 'done', ...(old.endedAt ? { endedAt: old.endedAt } : {}), detail: 'made before the sheet step: no review' } : { state: 'pending' }
+    }
+    delete state.steps.cast_ref
+  }
   for (const id of STEP_IDS) state.steps[id] ??= { state: 'pending' }
   return state
 }

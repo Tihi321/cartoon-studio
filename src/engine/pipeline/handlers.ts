@@ -18,7 +18,7 @@ import { INTRO_ID, OUTRO_ID, badClipIds, buildScreenplay, clipBeats, missingClip
 import { lintSeries } from '../series/lint'
 import { ask, castView, makeEnv, relTo, requireChosen } from './env'
 import type { Env } from './env'
-import { buildRig, clipsStep, finalRenderStep, castRefStep, makeClip, previewRenderStep, reviewClip, rigStep, setStep, timelineStep, voiceStep, frameReviews } from './media'
+import { buildRig, clipsStep, finalRenderStep, castSheetStep, makeClip, previewRenderStep, reviewClip, rigStep, setStep, timelineStep, voiceStep, frameReviews } from './media'
 import { RIG_PATHS } from './rig'
 import type { RigPath } from './rig'
 import { Pipeline } from './run'
@@ -494,7 +494,7 @@ type StepFn = (e: Env) => Promise<StepResult>
 const STEP_FNS: Record<string, StepFn> = {
   pitch: pitchStep,
   bible: bibleStep,
-  cast_ref: castRefStep,
+  cast_sheet: castSheetStep,
   rig: rigStep,
   set: setStep,
   script: scriptStep,

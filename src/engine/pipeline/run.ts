@@ -1,8 +1,9 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import type { PipelineState } from '../../shared/contracts'
+import type { Bible, PipelineState } from '../../shared/contracts'
 import type { SeriesRunState } from '../../shared/protocol'
 import { localIso } from '../budget/spend'
+import { readSheetMeta } from '../images/reference'
 import type { JobState } from '../queue/jobs'
 import { assertId, assertSlug } from '../series/paths'
 import { SeriesStore } from '../series/service'
@@ -207,7 +208,7 @@ export class Pipeline {
         if (step.kind === 'gate') {
           st.state = 'done'
           st.endedAt = this.now()
-          st.detail = 'chosen'
+          st.detail = step.id === 'sheet_review' ? 'approved' : 'chosen'
           continue outer
         }
         const id = await this.enqueue(state, step)
@@ -231,6 +232,12 @@ export class Pipeline {
       if (bible.pitches.length === 0) return 'redo-pitch'
       if (bible.chosenPitch && bible.pitches.some((p) => p.id === bible.chosenPitch)) return null
       return `waiting for the user to choose one of the ${bible.pitches.length} premises: show them (cts_series_get {series}), then cts_pitch_choose {series, pitch}. Nothing visual is made before that.`
+    }
+    if (step.id === 'sheet_review') {
+      const bible = await store.readBible(state.series)
+      const open = bible.cast.filter((c) => !c.sheet?.approvedAt).map((c) => c.id)
+      if (open.length === 0) return null
+      return `waiting for the user to look at the character sheet of ${open.join(', ')} (cast/<id>/sheet.png) and approve it: cts_sheet_approve {series, cast, ok: true}, or ok: false with a note to make it again. Nothing is rigged before every character is approved.`
     }
     if (step.id === 'clips') return clipsGate(store, state.series, state.episode, optionsOf(state))
     return null
@@ -312,6 +319,48 @@ export class Pipeline {
     return { chosenPitch: pitch, chosenAt, resumed }
   }
 
+  /**
+   * The user's verdict on one character sheet. `ok`: the bible's cast entry gets `sheet { approvedAt, seed, denoise, model }` (from the sheet's own record) and
+   * every pipeline that waits at `sheet_review` goes on once the last character is approved. Not `ok`: the sheet is made again with the note added to the
+   * prompt (`cast_sheet` and `sheet_review` are reopened; a new seed range is used), and the approval of that character is withdrawn.
+   */
+  async approveSheet(series: string, castId: string, ok: boolean, note?: string): Promise<{ cast: string; ok: boolean; approvedAt?: string; sheet?: NonNullable<Bible['cast'][number]['sheet']>; stillOpen: string[]; resumed: PipelineReport[]; warning?: string }> {
+    assertSlug(series)
+    const store = this.store
+    const bible = await store.readBible(series)
+    const member = bible.cast.find((c) => c.id === castId)
+    if (!member) throw new Error(`no cast member "${castId}" in "${series}" (${bible.cast.map((c) => c.id).join(', ') || 'none yet'})`)
+    const castDir = store.paths(series).castDir(castId)
+    const meta = await readSheetMeta(castDir)
+    if (!meta || !(await store.exists(path.join(castDir, 'sheet.png')))) throw new Error(`"${castId}" has no character sheet yet (cast/${castId}/sheet.png): the cast_sheet step makes it`)
+    if (!ok && !note?.trim()) throw new Error('a redo needs a note: say what to change (the note is added to the image prompt)')
+    const at = this.now()
+    await store.writeFile(series, 'sheet/review.json', `${JSON.stringify({ ok, note: note ?? null, at, seed: meta.seed, attempt: meta.attempt }, null, 2)}\n`, castDir)
+    const resumed: PipelineReport[] = []
+    if (!ok) {
+      await store.writeFile(series, 'sheet-redo.json', `${JSON.stringify({ note: note!.trim(), at, attempt: meta.attempt + 1 }, null, 2)}\n`, castDir)
+      await store.writeBible(series, { ...bible, cast: bible.cast.map((c) => (c.id === castId ? { ...c, sheet: undefined } : c)) })
+      let past = false
+      for (const ep of await this.episodesWithPipeline(series)) {
+        const st = await this.read(series, ep)
+        if (!st) continue
+        if (st.steps.rig?.state !== 'pending') past = true
+        await this.reopen(series, ep, ['cast_sheet', 'sheet_review'], `revise sheet ${castId}`)
+        resumed.push(await this.advance(series, ep))
+      }
+      return { cast: castId, ok, stillOpen: bible.cast.map((c) => c.id), resumed, ...(past ? { warning: 'the rig step had already started: run cts_run_pipeline {from: "rig"} after the new sheet is approved' } : {}) }
+    }
+    const sheet = { approvedAt: at, seed: meta.seed, denoise: meta.denoise, model: meta.model }
+    await store.writeBible(series, { ...bible, cast: bible.cast.map((c) => (c.id === castId ? { ...c, sheet } : c)) })
+    const fresh = await store.readBible(series)
+    const stillOpen = fresh.cast.filter((c) => !c.sheet?.approvedAt).map((c) => c.id)
+    for (const ep of await this.episodesWithPipeline(series)) {
+      const st = await this.read(series, ep)
+      if (st && st.state === 'waiting-on-user' && st.steps.sheet_review?.state !== 'done') resumed.push(await this.advance(series, ep))
+    }
+    return { cast: castId, ok, approvedAt: at, sheet, stillOpen, resumed }
+  }
+
   async episodesWithPipeline(series: string): Promise<string[]> {
     const dir = this.store.paths(series).episodesDir
     const names = await fs.readdir(dir).catch(() => [] as string[])
@@ -364,7 +413,9 @@ function hintFor(state: PipelineState, step: string | null): string {
     case 'waiting-on-user':
       return step === 'pitch_choice'
         ? `STOP: the user must choose a premise. Show them the pitches (title, logline, leads, sets, why), wait for their answer, then cts_pitch_choose {series: "${s}", pitch: "<id>"}. Calling cts_run_pipeline again does not skip this.`
-        : `Waiting for you or the user: ${state.waitingOn ?? ''}`
+        : step === 'sheet_review'
+          ? `STOP: the user must look at the character sheets (cast/<id>/sheet.png: the master and three poses; cts_cast_get shows them). Show every sheet, wait for the answer per character, then cts_sheet_approve {series: "${s}", cast: "<id>", ok: true} or ok: false with a note to make that sheet again. Nothing is rigged before every character is approved.`
+          : `Waiting for you or the user: ${state.waitingOn ?? ''}`
     case 'waiting-on-client':
       return `Model calls wait for you: cts_get_task -> answer -> cts_submit_task until none, then cts_wait {series: "${s}"}.`
     case 'running':
