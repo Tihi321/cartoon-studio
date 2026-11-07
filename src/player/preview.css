@@ -1,0 +1,45 @@
+html,
+body {
+  margin: 0;
+  background: #111;
+  color: #eee;
+  font-family: system-ui, sans-serif;
+}
+#app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+#stage {
+  display: block;
+  max-width: 100vw;
+  height: auto;
+}
+body.preview #stage {
+  max-height: calc(100vh - 56px);
+  width: auto;
+}
+.cts-controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 16px;
+  background: #1c1c1c;
+}
+.cts-controls button {
+  min-width: 72px;
+  padding: 6px 12px;
+}
+.cts-controls input[type='range'] {
+  flex: 1;
+}
+.cts-controls [data-testid='cts-time'] {
+  font-variant-numeric: tabular-nums;
+  min-width: 120px;
+}
+.cts-message {
+  padding: 24px;
+  color: #ccc;
+}
