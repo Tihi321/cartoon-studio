@@ -1,0 +1,70 @@
+{
+  "schema": "cts.episode/1",
+  "series": "mini",
+  "id": "ep00-mini",
+  "titleKey": "title",
+  "cast": [
+    "mia",
+    "bobo"
+  ],
+  "scenes": [
+    {
+      "id": "s1",
+      "set": "park",
+      "start": {
+        "mia": {
+          "mark": "left",
+          "facing": "right",
+          "emotion": "happy"
+        },
+        "bobo": {
+          "mark": "offR",
+          "facing": "left"
+        }
+      },
+      "shot": "wide",
+      "beats": [
+        {
+          "id": "b01",
+          "type": "move",
+          "who": "bobo",
+          "to": "right",
+          "seconds": 1
+        },
+        {
+          "id": "b02",
+          "type": "line",
+          "line": "l01",
+          "speaker": "mia",
+          "emotion": "happy",
+          "gesture": "wave",
+          "look": "bobo",
+          "pauseAfter": 0.3
+        },
+        {
+          "id": "b03",
+          "type": "camera",
+          "shot": "cuLeft",
+          "transition": "cut"
+        },
+        {
+          "id": "b04",
+          "type": "line",
+          "line": "l02",
+          "speaker": "bobo",
+          "emotion": "surprised",
+          "with": "prev"
+        },
+        {
+          "id": "b05",
+          "type": "line",
+          "line": "l03",
+          "speaker": "mia",
+          "emotion": "happy"
+        }
+      ]
+    }
+  ],
+  "music": {},
+  "sfx": {}
+}

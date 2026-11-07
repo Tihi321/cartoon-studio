@@ -13,6 +13,7 @@ import type { ChiptuneClient } from './studios/chiptune'
 import type { FlowClient } from './studios/flow'
 import type { VibeTtsClient } from './studios/vibetts'
 import type { ServiceStarter } from './studios/autostart'
+import { assertSlug, seriesDir } from './series/paths'
 import { chiptuneClientFor, flowClientFor, flowStartHint, loadStudiosConfig, startHint, studioRepo, studioUrl, STUDIO_NAMES, vibettsClientFor, vibettsStartHint } from './studios/config'
 import type { StudioId, StudiosConfig } from './studios/config'
 
@@ -65,14 +66,8 @@ export interface JobCounts {
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/
 
-/** A series slug (`[a-z0-9-]+`); throws on anything else, so a slug never leaves the `series/` folder. */
-export function assertSlug(slug: string): string {
-  if (!SLUG_RE.test(slug)) throw new Error(`invalid series slug "${slug}" (lower-case letters, digits and -)`)
-  return slug
-}
-
-/** `<data>/series`, one folder per series. */
-export const seriesDir = (dataDir: string): string => path.join(dataDir, 'series')
+// the path helpers live in `series/paths.ts` (the guard that keeps a series inside its folder); re-exported for the callers of this module
+export { assertSlug, seriesDir }
 
 const runOf = (id: string): number => {
   const m = /--r(\d+)$/.exec(id)

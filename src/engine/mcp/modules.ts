@@ -1,4 +1,5 @@
 import type { CtsService } from '../service'
+import { seriesCheckTools } from '../series/tools'
 import type { McpOptions, Tool, ToolDef } from './tools'
 
 /**
@@ -14,4 +15,4 @@ import type { McpOptions, Tool, ToolDef } from './tools'
  */
 export type ToolModule = (svc: CtsService, def: ToolDef, opts: McpOptions) => Tool[]
 
-export const TOOL_MODULES: ToolModule[] = []
+export const TOOL_MODULES: ToolModule[] = [seriesCheckTools]

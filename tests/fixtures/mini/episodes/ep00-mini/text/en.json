@@ -1,0 +1,20 @@
+{
+  "schema": "cts.text/1",
+  "lang": "en",
+  "strings": {
+    "title": "A Small Test"
+  },
+  "lines": {
+    "l01": {
+      "text": "Hi! I am Mia.",
+      "delivery": "cheerful"
+    },
+    "l02": {
+      "text": "Wow, what a nice day!"
+    },
+    "l03": {
+      "text": "Let us play!",
+      "delivery": "cheerful"
+    }
+  }
+}

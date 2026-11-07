@@ -1,0 +1,45 @@
+{
+  "schema": "cts.voice/1",
+  "episode": "ep00-mini",
+  "lang": "en",
+  "allocation": {
+    "provider": "vibetts",
+    "reason": "fixture: placeholder tones"
+  },
+  "lines": {
+    "l01": {
+      "file": "voice/en/l01.wav",
+      "seconds": 1,
+      "provider": "vibetts",
+      "engine": "fixture",
+      "voice": "tone",
+      "speed": 1,
+      "hash": "fixture-en-l01",
+      "words": null,
+      "status": "ok"
+    },
+    "l02": {
+      "file": "voice/en/l02.wav",
+      "seconds": 0.8,
+      "provider": "vibetts",
+      "engine": "fixture",
+      "voice": "tone",
+      "speed": 1,
+      "hash": "fixture-en-l02",
+      "words": null,
+      "status": "ok"
+    },
+    "l03": {
+      "file": "voice/en/l03.wav",
+      "seconds": 1.2,
+      "provider": "vibetts",
+      "engine": "fixture",
+      "voice": "tone",
+      "speed": 1,
+      "hash": "fixture-en-l03",
+      "words": null,
+      "status": "ok"
+    }
+  },
+  "costUsd": 0
+}

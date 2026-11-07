@@ -1,0 +1,20 @@
+{
+  "schema": "cts.text/1",
+  "lang": "hr",
+  "strings": {
+    "title": "Mala proba"
+  },
+  "lines": {
+    "l01": {
+      "text": "Bok! Ja sam Mia.",
+      "delivery": "cheerful"
+    },
+    "l02": {
+      "text": "Vau, kakav lijep dan!"
+    },
+    "l03": {
+      "text": "Hajdemo se igrati!",
+      "delivery": "cheerful"
+    }
+  }
+}

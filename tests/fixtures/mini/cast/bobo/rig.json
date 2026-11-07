@@ -1,0 +1,222 @@
+{
+  "schema": "cts.rig/1",
+  "id": "bobo",
+  "kind": "vector",
+  "drawnFacing": "right",
+  "height": 120,
+  "parts": [
+    {
+      "id": "body",
+      "src": "parts/body.svg",
+      "parent": null,
+      "pivot": [
+        30,
+        70
+      ],
+      "at": [
+        0,
+        0
+      ],
+      "z": 10
+    },
+    {
+      "id": "feet",
+      "src": "parts/feet.svg",
+      "parent": "body",
+      "pivot": [
+        20,
+        5
+      ],
+      "at": [
+        30,
+        68
+      ],
+      "z": 8
+    },
+    {
+      "id": "head",
+      "src": "parts/head.svg",
+      "parent": "body",
+      "pivot": [
+        30,
+        50
+      ],
+      "at": [
+        30,
+        5
+      ],
+      "z": 20,
+      "rot": [
+        -12,
+        12
+      ]
+    },
+    {
+      "id": "arm_l",
+      "src": "parts/arm_l.svg",
+      "parent": "body",
+      "pivot": [
+        6,
+        4
+      ],
+      "at": [
+        4,
+        15
+      ],
+      "z": 5,
+      "rot": [
+        -160,
+        40
+      ]
+    },
+    {
+      "id": "arm_r",
+      "src": "parts/arm_r.svg",
+      "parent": "body",
+      "pivot": [
+        6,
+        4
+      ],
+      "at": [
+        56,
+        15
+      ],
+      "z": 25,
+      "rot": [
+        -160,
+        40
+      ]
+    }
+  ],
+  "face": {
+    "parent": "head",
+    "eyes": {
+      "at": [
+        30,
+        20
+      ],
+      "z": 30,
+      "states": {
+        "open": "parts/eyes_open.svg",
+        "half": "parts/eyes_half.svg",
+        "closed": "parts/eyes_closed.svg"
+      }
+    },
+    "brows": {
+      "at": [
+        30,
+        10
+      ],
+      "z": 31,
+      "states": {
+        "neutral": "parts/brows_neutral.svg",
+        "happy": "parts/brows_happy.svg",
+        "sad": "parts/brows_sad.svg",
+        "surprised": "parts/brows_surprised.svg"
+      }
+    },
+    "mouth": {
+      "at": [
+        30,
+        38
+      ],
+      "z": 32,
+      "shapes": {
+        "rest": "parts/mouth_rest.svg",
+        "A": "parts/mouth_A.svg",
+        "E": "parts/mouth_E.svg",
+        "O": "parts/mouth_O.svg",
+        "U": "parts/mouth_U.svg",
+        "MBP": "parts/mouth_MBP.svg",
+        "FV": "parts/mouth_FV.svg",
+        "L": "parts/mouth_L.svg"
+      }
+    }
+  },
+  "emotions": {
+    "neutral": {
+      "brows": "neutral",
+      "eyes": "open"
+    },
+    "happy": {
+      "brows": "happy",
+      "eyes": "open"
+    },
+    "sad": {
+      "brows": "sad",
+      "eyes": "half"
+    },
+    "surprised": {
+      "brows": "surprised",
+      "eyes": "open"
+    }
+  },
+  "gestures": {
+    "wave": {
+      "part": "arm_r",
+      "seconds": 1,
+      "keys": [
+        [
+          0,
+          -10
+        ],
+        [
+          0.25,
+          -150
+        ],
+        [
+          0.5,
+          -120
+        ],
+        [
+          0.75,
+          -150
+        ],
+        [
+          1,
+          -10
+        ]
+      ]
+    },
+    "point": {
+      "part": "arm_r",
+      "seconds": 0.8,
+      "keys": [
+        [
+          0,
+          -10
+        ],
+        [
+          0.3,
+          -85
+        ],
+        [
+          1,
+          -85
+        ]
+      ]
+    },
+    "shrug": {
+      "part": "arm_l",
+      "seconds": 0.8,
+      "keys": [
+        [
+          0,
+          -10
+        ],
+        [
+          0.4,
+          -40
+        ],
+        [
+          1,
+          -10
+        ]
+      ]
+    }
+  },
+  "move": {
+    "bobPx": 3,
+    "stepSeconds": 0.33
+  }
+}

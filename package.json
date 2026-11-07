@@ -29,7 +29,8 @@
     "test:e2e": "vitest run -c vitest.e2e.config.ts",
     "test:all": "yarn test && yarn test:e2e",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.player.json",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "docs:check": "tsx scripts/check-contracts-doc.mts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",

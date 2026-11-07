@@ -64,11 +64,12 @@ function raw(method: string, url: string, headers: Record<string, string>, body?
 const call = async (c: Client, name: string, args: Record<string, unknown> = {}) => (await c.callTool({ name, arguments: args })).structuredContent as Record<string, unknown>
 
 describe('MCP over HTTP', () => {
-  it('session: lists exactly the ten core cts_ tools, calls one (an unknown series is an error result), reads the guide', async () => {
+  it('session: lists the ten core cts_ tools (modules add more), calls one (an unknown series is an error result), reads the guide', async () => {
     const s = await start()
     const client = await connect(s.url()!)
     expect(client.getServerVersion()).toMatchObject({ name: 'cartoon-studio' })
-    const names = (await client.listTools()).tools.map((t) => t.name).sort()
+    const CORE = new Set(['cts_client_tasks', 'cts_get_task', 'cts_pause_all', 'cts_release_task', 'cts_resume_all', 'cts_status', 'cts_stop_now', 'cts_studios_status', 'cts_submit_task', 'cts_wait'])
+    const names = (await client.listTools()).tools.map((t) => t.name).filter((n) => CORE.has(n)).sort()
     expect(names).toEqual(['cts_client_tasks', 'cts_get_task', 'cts_pause_all', 'cts_release_task', 'cts_resume_all', 'cts_status', 'cts_stop_now', 'cts_studios_status', 'cts_submit_task', 'cts_wait'])
     expect(await call(client, 'cts_status')).toMatchObject({ series: [], clientTasks: { waiting: 0, leased: 0 } })
     expect((await client.callTool({ name: 'cts_status', arguments: { series: 'nope' } })).isError).toBe(true)
@@ -89,7 +90,7 @@ describe('MCP over HTTP', () => {
     expect((await raw('POST', url, { host: good.host, authorization: 'Bearer nope' }, INIT)).status).toBe(401)
     expect((await raw('POST', url.replace('/mcp', '/other'), good, INIT)).status).toBe(404)
     await expect(connect(url)).rejects.toThrow()
-    expect((await (await connect(url, 's3cret')).listTools()).tools).toHaveLength(10)
+    expect((await (await connect(url, 's3cret')).listTools()).tools.length).toBeGreaterThanOrEqual(10)
   })
 
   it('client tasks: a queued model call is taken, filtered by client and series, answered and released over MCP', async () => {

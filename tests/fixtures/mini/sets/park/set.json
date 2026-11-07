@@ -1,0 +1,70 @@
+{
+  "schema": "cts.set/1",
+  "id": "park",
+  "size": [
+    320,
+    180
+  ],
+  "groundY": 150,
+  "actorScale": 1,
+  "layers": [
+    {
+      "id": "bg",
+      "src": "layers/bg.png",
+      "z": 0,
+      "parallax": 1
+    }
+  ],
+  "marks": {
+    "offL": [
+      -40,
+      150
+    ],
+    "left": [
+      90,
+      150
+    ],
+    "center": [
+      160,
+      150
+    ],
+    "right": [
+      230,
+      150
+    ],
+    "offR": [
+      360,
+      150
+    ]
+  },
+  "shots": {
+    "wide": {
+      "center": [
+        160,
+        90
+      ],
+      "zoom": 1
+    },
+    "two": {
+      "center": [
+        160,
+        80
+      ],
+      "zoom": 1.25
+    },
+    "cuLeft": {
+      "center": [
+        100,
+        70
+      ],
+      "zoom": 1.5
+    },
+    "cuRight": {
+      "center": [
+        220,
+        70
+      ],
+      "zoom": 1.5
+    }
+  }
+}
