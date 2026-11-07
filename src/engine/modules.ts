@@ -1,4 +1,5 @@
 import type { Engine } from './engine'
+import { registerVoice } from './voice/tools'
 
 /**
  * The engine modules: functions that get the engine when it is constructed and register what they own, before `start()`:
@@ -12,4 +13,4 @@ import type { Engine } from './engine'
  */
 export type EngineModule = (engine: Engine) => void
 
-export const ENGINE_MODULES: EngineModule[] = []
+export const ENGINE_MODULES: EngineModule[] = [registerVoice]

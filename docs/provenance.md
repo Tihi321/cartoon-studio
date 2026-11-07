@@ -71,6 +71,7 @@ Totals at CTS-01: 143 files, 41 copied unchanged, 87 copied and changed, 15 new.
 | `src/engine/comfy/custom-workflow.ts` | unchanged |  |
 | `src/engine/comfy/graphs.ts` | unchanged |  |
 | `src/engine/comfy/tts-engines.ts` | unchanged |  |
+| `src/engine/comfy/kind-switch.ts` | new | CTS-06: `comfyKindSwitch(kind)` frees ComfyUI memory (`POST /free`) when the work switches between voice and image; T7 and T9 call it before their ComfyUI batches |
 | `src/engine/engine.ts` | changed |  |
 | `src/engine/headless.ts` | new | `startHeadless` of Edu's `educli.ts`, without the course CLI |
 | `src/engine/index.ts` | changed |  |
@@ -109,6 +110,18 @@ Totals at CTS-01: 143 files, 41 copied unchanged, 87 copied and changed, 15 new.
 | `src/engine/store/seedMigrations.ts` | changed |  |
 | `src/engine/store/seedRefresh.ts` | changed |  |
 | `src/engine/store/watcher.ts` | unchanged |  |
+| `src/engine/music/chiptune.ts` | new | CTS-06: theme loop (`compose_track` + `render_audio`) and up to 2 effects (`compose_sfx`) as `.ogg` under `series/<slug>/music/` |
+| `src/engine/voice/allocate.ts` | changed | CTS-06: Edu `46b6ec1` `src/engine/voice/allocate.ts` with one change: the local chain per language comes from `config/voice.md` `localOrder` (default `hr: [comfy, vibetts]`, `en: [vibetts, comfy]`; Edu always tried VibeTTS first). The allocation types moved here from Edu's `shared/voice.ts` |
+| `src/engine/voice/audio.ts` | new | CTS-06: ffprobe length, normalise to 44.1 kHz mono WAV with the edge silence trimmed to 0.15 s, silent placeholder WAV |
+| `src/engine/voice/manifest.ts` | new | CTS-06: voice manifest read/write, `clipHash` (Edu's formula over the speaker's whole voice key) |
+| `src/engine/voice/providers/comfy.ts` | new | CTS-06: OmniVoice through ComfyUI (the speaker of Edu's `speak.ts` `comfySpeaker`, with OmniVoice tag validation) |
+| `src/engine/voice/providers/gemini.ts` | new | CTS-06: ported from Edu's `speak.ts` `geminiSpeaker` (retry and quota handling), writes files instead of bytes |
+| `src/engine/voice/providers/paid.ts` | new | CTS-06: the paid slot behind `charge`; throws `NOT_IMPLEMENTED` after the gate |
+| `src/engine/voice/providers/types.ts` | new | CTS-06: shared provider shapes |
+| `src/engine/voice/providers/vibetts.ts` | new | CTS-06: ported from Edu's `speak.ts` `vibettsSpeaker` and `vibeVoiceFor` |
+| `src/engine/voice/quota.ts` | unchanged | CTS-06: Edu `46b6ec1` `src/engine/voice/quota.ts` |
+| `src/engine/voice/run.ts` | new | CTS-06: written for lines x languages (Edu's `run.ts` worked on a course asset manifest); `config/voice.md` loader |
+| `src/engine/voice/tools.ts` | new | CTS-06: `cts_voice_*` and `cts_music_generate` tools and the `voice` / `music` job handlers |
 | `src/engine/studios/autostart.ts` | changed |  |
 | `src/engine/studios/chiptune.ts` | changed |  |
 | `src/engine/studios/config.ts` | changed |  |
@@ -150,6 +163,7 @@ Totals at CTS-01: 143 files, 41 copied unchanged, 87 copied and changed, 15 new.
 | `src/shared/protocol.ts` | changed |  |
 | `src/shared/schemas.ts` | changed |  |
 | `src/shared/ui-strings.ts` | changed |  |
+| `tests/voice-allocate.test.ts` | changed | CTS-06: Edu `46b6ec1` `tests/voice-allocate.test.ts`; hr expectations follow the new default chain, plus the `localOrder` test |
 | `tests/engine-lock.test.ts` | changed |  |
 | `tests/helpers.ts` | changed |  |
 | `tests/main-files.test.ts` | changed |  |
