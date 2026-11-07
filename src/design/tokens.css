@@ -1,0 +1,108 @@
+/*
+ * Cartoon Studio design tokens: the one vocabulary the studio UI and the preview page share.
+ *
+ * This file holds the structure tokens (type scale, space, radius, motion, focus, tap size) and the colour and font slots with their
+ * defaults. The studio's dark scheme overrides the colour slots in `src/renderer/styles.css`.
+ *
+ * Rules the colours keep:
+ *  - text on bg/surface >= 4.5:1, text-dim >= 4.5:1, accent-ink on accent >= 4.5:1, focus ring >= 3:1 against bg (WCAG AA);
+ *  - right and wrong are never colour alone;
+ *  - motion durations go to 0 under prefers-reduced-motion (below), so `transition: x var(--cts-dur-med)` is always safe.
+ */
+:root {
+  /* ---- colour slots (a theme overrides all of them) ---- */
+  --cts-bg: #f4f5f3; /* the page */
+  --cts-bg-2: #e9ece9; /* a band or well on the page */
+  --cts-surface: #ffffff; /* a card or panel */
+  --cts-surface-2: #f0f2f0; /* a raised control on a surface */
+  --cts-line: #c9d0d3; /* hairlines and borders that only group */
+  --cts-line-strong: #6b7480; /* borders of inputs and controls (>= 3:1) */
+  --cts-text: #1c2541;
+  --cts-text-dim: #47506a;
+  --cts-accent: #2747c9; /* primary actions */
+  --cts-accent-ink: #ffffff; /* text on the accent */
+  --cts-accent-2: #c8283f; /* the second voice: a highlight, a rule */
+  --cts-good: #1f7a4d;
+  --cts-good-ink: #ffffff;
+  --cts-bad: #b3263a;
+  --cts-bad-ink: #ffffff;
+  --cts-warn: #8a5a00;
+  --cts-warn-bg: #fff1c2;
+  --cts-mark: #ffe066; /* the highlighter: selection, the current place */
+  --cts-mark-ink: #1c2541;
+  --cts-focus: #2747c9;
+  --cts-shadow-1: 0 1px 0 rgb(28 37 65 / 0.08), 0 2px 6px rgb(28 37 65 / 0.08);
+  --cts-shadow-2: 0 2px 0 rgb(28 37 65 / 0.08), 0 12px 28px rgb(28 37 65 / 0.16);
+  /* series colours: six fills that tell things apart without a legend (paired items, sort groups, found words, tabs of a chart). Text on them is --cts-series-ink. */
+  --cts-series-1: #f2c94c;
+  --cts-series-2: #8fc4ec;
+  --cts-series-3: #eba3bd;
+  --cts-series-4: #9fd49a;
+  --cts-series-5: #f0a867;
+  --cts-series-6: #bfaaf0;
+  --cts-series-ink: #1c2541;
+
+  /* ---- font slots ---- */
+  --cts-font-display: 'Young Serif', Georgia, 'Times New Roman', serif;
+  --cts-font-body: 'Atkinson Hyperlegible Next', 'Segoe UI', system-ui, -apple-system, Roboto, Arial, sans-serif;
+  --cts-font-mono: ui-monospace, 'Cascadia Mono', Consolas, 'SF Mono', Menlo, monospace;
+
+  /* ---- type scale: a 1.2 ratio on a 16px body, 13px is the floor for any text ---- */
+  --cts-text-xs: 0.8125rem; /* 13 */
+  --cts-text-s: 0.875rem; /* 14 */
+  --cts-text-m: 1rem; /* 16 */
+  --cts-text-l: 1.2rem; /* 19 */
+  --cts-text-xl: 1.44rem; /* 23 */
+  --cts-text-2xl: clamp(1.5rem, 1.1rem + 1.6vw, 1.728rem); /* 28 */
+  --cts-text-3xl: clamp(1.75rem, 1.2rem + 2.4vw, 2.488rem); /* 40 */
+  --cts-text-4xl: clamp(2.1rem, 1.3rem + 4vw, 3.583rem); /* 57 */
+  --cts-leading-tight: 1.15;
+  --cts-leading: 1.5;
+  --cts-leading-loose: 1.65; /* serif body text */
+  --cts-measure: 68ch; /* the longest line of running text */
+
+  /* ---- space: a 4px base ---- */
+  --cts-space-1: 4px;
+  --cts-space-2: 8px;
+  --cts-space-3: 12px;
+  --cts-space-4: 16px;
+  --cts-space-5: 24px;
+  --cts-space-6: 32px;
+  --cts-space-7: 48px;
+  --cts-space-8: 64px;
+
+  /* ---- shape ---- */
+  --cts-radius-s: 4px;
+  --cts-radius-m: 8px;
+  --cts-radius-l: 14px;
+  --cts-radius-control: var(--cts-radius-m); /* buttons, choices, inputs: a theme may give them its own shape */
+  --cts-radius-pill: 999px;
+  --cts-border: 1px;
+  --cts-tap: 44px; /* the smallest touch target */
+
+  /* ---- focus ---- */
+  --cts-focus-width: 3px;
+  --cts-focus-offset: 2px;
+
+  /* ---- motion ---- */
+  --cts-dur-fast: 120ms;
+  --cts-dur-med: 240ms;
+  --cts-dur-slow: 520ms;
+  --cts-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --cts-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --cts-ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ---- layers ---- */
+  --cts-z-raised: 10;
+  --cts-z-overlay: 100;
+  --cts-z-toast: 200;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root,
+  [data-cts-theme] {
+    --cts-dur-fast: 0ms;
+    --cts-dur-med: 0ms;
+    --cts-dur-slow: 0ms;
+  }
+}
