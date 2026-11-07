@@ -61,7 +61,19 @@ export async function ffprobe(file: string): Promise<ProbeResult> {
 
 // ---------------------------------------------------------------- config/render.md
 
-const encoderSchema = z.looseObject({ name: z.string(), preset: z.string().optional(), crf: z.number().optional() })
+/** `mix` of render.md: every level is relative to the voice level (LUFS) and in dB. */
+const mixConfigSchema = z.object({
+  voiceLufs: z.number(),
+  musicUnderVoiceDb: z.number().min(0),
+  musicGapUnderVoiceDb: z.number().min(0),
+  sfxUnderVoiceDb: z.number().min(0),
+  clipUnderVoiceDb: z.number().min(0),
+  minUnderVoiceDb: z.number().min(0)
+})
+export type MixConfig = z.output<typeof mixConfigSchema>
+export const DEFAULT_MIX: MixConfig = { voiceLufs: -20, musicUnderVoiceDb: 18, musicGapUnderVoiceDb: 8, sfxUnderVoiceDb: 6, clipUnderVoiceDb: 10, minUnderVoiceDb: 15 }
+
+const encoderSchema =z.looseObject({ name: z.string(), preset: z.string().optional(), crf: z.number().optional() })
 const renderConfigSchema = z.looseObject({
   preview: z.object({ width: z.number().int(), height: z.number().int() }).default({ width: 960, height: 540 }),
   final: z.object({ width: z.number().int(), height: z.number().int() }).default({ width: 1920, height: 1080 }),
@@ -70,7 +82,8 @@ const renderConfigSchema = z.looseObject({
   pixelFormat: z.string().default('yuv420p'),
   frameFormat: z.enum(['jpeg', 'png']).default('jpeg'),
   audio: z.object({ codec: z.string(), bitrate: z.string() }).default({ codec: 'aac', bitrate: '160k' }),
-  loudness: z.object({ lufs: z.number(), truePeak: z.number() }).default({ lufs: -16, truePeak: -1.5 })
+  loudness: z.object({ lufs: z.number(), truePeak: z.number() }).default({ lufs: -16, truePeak: -1.5 }),
+  mix: mixConfigSchema.default(DEFAULT_MIX)
 })
 export type RenderConfig = z.output<typeof renderConfigSchema>
 export type EncoderSpec = z.output<typeof encoderSchema>

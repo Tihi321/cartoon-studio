@@ -12,6 +12,7 @@ import { chooseEncoder, FramePipe, ffmpeg, ffprobe, encoderArgs, forgetEncoder, 
 import type { EncoderSpec, RenderConfig } from './ffmpeg'
 import { muxEpisode } from './mix'
 import type { LoudnessMeasure, MixInput } from './mix'
+import type { MixCheck } from './mixcheck'
 
 /**
  * Renders one episode in one language to an MP4.
@@ -60,6 +61,8 @@ export interface RenderResult {
   frameDigest: string
   /** Pass-1 loudness measure of the mix (input_i = LUFS before normalising); null for a silent mix. */
   loudness: LoudnessMeasure | null
+  /** The mix check (also in `render/<lang>/mix-check.json`); only a final render makes one. */
+  mixCheck: MixCheck | null
   logFile: string
   warnings: string[]
 }
@@ -261,7 +264,7 @@ async function audioInputs(tl: Timeline, root: string, seconds: number, real: re
   for (const c of real) {
     if (c.audio !== 'keep' || c.t0 >= seconds) continue
     const file = paths.resolve(c.file, root)
-    if (await hasAudio(file)) inputs.push({ file, kind: 'clip', t: c.t0, gain: 0.3, length: Math.min(c.t1, seconds) - c.t0 })
+    if (await hasAudio(file)) inputs.push({ file, kind: 'clip', t: c.t0, gain: 1, length: Math.min(c.t1, seconds) - c.t0 })
   }
   return inputs
 }
@@ -308,6 +311,7 @@ export async function renderEpisode(req: RenderRequest): Promise<RenderResult> {
   let encoder: EncoderSpec = { name: '?' }
   let digest = ''
   let loudness: LoudnessMeasure | null = null
+  let mixCheck: MixCheck | null = null
 
   const attempt = async (forced?: string): Promise<void> => {
     const choice = await chooseEncoder(req.dataDir, cfg, forced ?? req.encoder)
@@ -349,7 +353,25 @@ export async function renderEpisode(req: RenderRequest): Promise<RenderResult> {
     const s = Date.now()
     const inputs = await audioInputs(tl, root, seconds, real, store, req.series, warnings)
     const voice = tl.lines.filter((l) => l.t0 < seconds).map((l) => [l.t0, Math.min(l.t1, seconds)] as [number, number])
-    loudness = await muxEpisode(video, inputs, { voice, seconds, lufs: cfg.loudness.lufs, truePeak: cfg.loudness.truePeak, audio: cfg.audio }, outFile)
+    const lines = tl.lines.filter((l) => l.t0 < seconds).map((l) => ({ id: l.id, t0: l.t0, t1: Math.min(l.t1, seconds) }))
+    const mixed = await muxEpisode(
+      video,
+      inputs,
+      {
+        voice,
+        lines,
+        mix: cfg.mix,
+        levelsFile: path.join(renderDir, 'levels.json'),
+        ...(req.quality === 'final' ? { checkFile: path.join(renderDir, 'mix-check.json') } : {}),
+        seconds,
+        lufs: cfg.loudness.lufs,
+        truePeak: cfg.loudness.truePeak,
+        audio: cfg.audio
+      },
+      outFile
+    )
+    loudness = mixed.loudness
+    mixCheck = mixed.check
     stages.mux = Date.now() - s
   }
 
@@ -380,6 +402,7 @@ export async function renderEpisode(req: RenderRequest): Promise<RenderResult> {
     `stage splice: ${((stages.splice ?? 0) / 1000).toFixed(1)} s (${real.length} clip${real.length === 1 ? '' : 's'})`,
     `stage mux: ${((stages.mux ?? 0) / 1000).toFixed(1)} s (audio mix, loudnorm, mux; ffmpeg encode runs inside "frames")`,
     `loudness before normalising: ${loudness ? (loudness as LoudnessMeasure).input_i + ' LUFS' : 'silent'}`,
+    `mix check: ${mixCheck ? `min ${(mixCheck as MixCheck).minUnderDb ?? 'n/a'} dB, median ${(mixCheck as MixCheck).medianUnderDb ?? 'n/a'} dB music under the voice, gaps ${(mixCheck as MixCheck).gapMusicUnderVoiceDb ?? 'n/a'} dB` : 'not made (preview or no voice)'}`,
     `wall: ${wallSeconds.toFixed(1)} s`,
     `file: ${path.relative(root, outFile).split(path.sep).join('/')} (${outSeconds.toFixed(3)} s)`,
     `frame digest: ${digest}`,
@@ -388,5 +411,5 @@ export async function renderEpisode(req: RenderRequest): Promise<RenderResult> {
   await fs.mkdir(renderDir, { recursive: true })
   await fs.writeFile(path.join(renderDir, 'render.log'), log.join('\n') + '\n')
 
-  return { file: outFile, seconds: outSeconds, wallSeconds, encoder: (encoder as EncoderSpec).name, frames: total, frameDigest: digest, loudness, logFile: path.join(renderDir, 'render.log'), warnings }
+  return { file: outFile, seconds: outSeconds, wallSeconds, encoder: (encoder as EncoderSpec).name, frames: total, frameDigest: digest, loudness, mixCheck, logFile: path.join(renderDir, 'render.log'), warnings }
 }

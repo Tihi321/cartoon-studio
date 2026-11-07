@@ -23,7 +23,10 @@ export interface RenderJob {
   state: 'running' | 'done' | 'failed'
   progress: { done: number; total: number }
   startedAt: string
-  result?: Pick<RenderResult, 'file' | 'seconds' | 'wallSeconds' | 'encoder' | 'frames' | 'logFile' | 'warnings'>
+  result?: Pick<RenderResult, 'file' | 'seconds' | 'wallSeconds' | 'encoder' | 'frames' | 'logFile' | 'warnings'> & {
+    /** The least dB the music is under the voice over the lines (final renders; null without music or voice). */
+    minUnderDb: number | null
+  }
   error?: string
 }
 
@@ -45,7 +48,7 @@ export function renderTools(svc: CtsService, def: ToolDef): Tool[] {
   return [
     def(
       'cts_render',
-      'Render an episode to MP4 with the Canvas player in headless Chromium and ffmpeg: out/<lang>.mp4 (quality final, 1920x1080, real Flow clips spliced in) or out/<lang>.preview.mp4 (quality preview, 960x540, clips show a placeholder card), under the episode folder. Audio is mixed (voices, music ducked under voices, sfx), normalised to -16 LUFS. Long: returns one job id per language at once; follow with cts_render_status, or pass wait true to get the results. render/<lang>/render.log has the frame count, stage times and encoder.',
+      'Render an episode to MP4 with the Canvas player in headless Chromium and ffmpeg: out/<lang>.mp4 (quality final, 1920x1080, real Flow clips spliced in) or out/<lang>.preview.mp4 (quality preview, 960x540, clips show a placeholder card), under the episode folder. Audio is mixed (voices, music ducked under voices, sfx), normalised to -16 LUFS. Every input is brought to its level relative to the voice first (render.md mix: music 18 dB under while a voice plays, 8 dB under in the gaps); a final render writes render/<lang>/mix-check.json and the result has minUnderDb (the least dB the music is under the voice over the lines). Long: returns one job id per language at once; follow with cts_render_status, or pass wait true to get the results. render/<lang>/render.log has the frame count, stage times and encoder.',
       z.object({
         series,
         episode,
@@ -77,7 +80,7 @@ export function renderTools(svc: CtsService, def: ToolDef): Tool[] {
             (r) => {
               job.state = 'done'
               job.progress = { done: r.frames, total: r.frames }
-              job.result = { file: r.file, seconds: r.seconds, wallSeconds: r.wallSeconds, encoder: r.encoder, frames: r.frames, logFile: r.logFile, warnings: r.warnings }
+              job.result = { file: r.file, seconds: r.seconds, wallSeconds: r.wallSeconds, encoder: r.encoder, frames: r.frames, logFile: r.logFile, warnings: r.warnings, minUnderDb: r.mixCheck?.minUnderDb ?? null }
               svc.log(`render ${job.id} done: ${r.file} (${r.wallSeconds.toFixed(1)} s, ${r.encoder})`)
             },
             (err: Error) => {

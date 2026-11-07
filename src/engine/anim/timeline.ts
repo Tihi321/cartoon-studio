@@ -19,9 +19,10 @@ export const DEFAULT_SEED = 29
 export const DEFAULT_PAUSE_AFTER = 0.25
 export const WORDS_PER_SECOND = 2.5
 const DEFAULT_PAN_SECONDS = 1
-const DEFAULT_MUSIC_GAIN = 0.35
-/** `duckTo` is this share of the music gain while a voice plays. */
-const DUCK_SHARE = 0.35
+/** The music `gain` is only a trim (1 = 0 dB, never above); the level under the voice comes from render.md `mix` (CTS-16). */
+const DEFAULT_MUSIC_GAIN = 1
+/** `duckTo` is this share of the music gain while a voice plays. The mix ignores it (it ducks by `mix.musicUnderVoiceDb`); 0.126 is the same 18 - 8 = 10 dB, kept so the timeline schema is unchanged. */
+const DUCK_SHARE = 0.126
 
 export interface TimelineOptions {
   /** Blink seed. Default: `CTS_SEED`, else 29. */
@@ -304,7 +305,7 @@ export async function buildTimeline(store: SeriesStore, series: string, episode:
           if (beat.action === 'start') {
             if (!script.music[beat.cue]) warn(`music cue "${beat.cue}" is not in the script`)
             else {
-              const gain = beat.gain ?? DEFAULT_MUSIC_GAIN
+              const gain = Math.min(1, beat.gain ?? DEFAULT_MUSIC_GAIN)
               audio.push({ kind: 'music', file: script.music[beat.cue]!, t: round3(start), until: -1, gain, duckTo: round3(gain * DUCK_SHARE) })
               openMusic.set(beat.cue, audio.length - 1)
             }

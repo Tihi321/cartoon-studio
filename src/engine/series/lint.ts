@@ -1,7 +1,10 @@
 import { promises as fs } from 'node:fs'
+import path from 'node:path'
 import sharp from 'sharp'
 import { BROW_STATES, EYE_STATES, MOUTH_SHAPES } from '../../shared/contracts'
 import type { Bible, Episode, Lang, Rig, RigVariant, SetFile, TextCatalog, Timeline, VoiceManifest } from '../../shared/contracts'
+import { loadRenderConfig } from '../render/ffmpeg'
+import { readMixCheck } from '../render/mixcheck'
 import { sampleCamera, sampleNumber, sampleStep } from '../../shared/sample'
 import { SeriesFileError, SeriesStore, hashScript } from './service'
 import type { SeriesPaths } from './paths'
@@ -28,7 +31,8 @@ export const LINT_CODES = [
   'W_LINE_LONG',
   'W_OFF_FRAME',
   'W_LANG_DRIFT',
-  'W_PLACEHOLDER'
+  'W_PLACEHOLDER',
+  'W_MIX_MUSIC_LOUD'
 ] as const
 export type LintCode = (typeof LINT_CODES)[number]
 
@@ -457,6 +461,7 @@ async function lintEpisode(
       if (tl.scriptHash !== hash) issues.add('E_TIMELINE_STALE', `timeline.${lang}.json was built from another script.json (rebuild it)`, { file: tlRel, lang })
       lintMouth(issues, tl, tlRel, lang)
       lintOffFrame(issues, tl, tlRel, lang, setOf)
+      await lintMix(issues, p, ep, lang, store.dataDir)
     }
     stats.push(...(await lineStats(store, series, ep, lang, tl ?? null, lines)))
   }
@@ -496,6 +501,18 @@ async function lintEpisode(
 /** The order the beats ran in; when a timeline has no `beats`, the lines then the clips. */
 function sequenceOf(tl: Timeline): string[] {
   return tl.beats ? tl.beats.map((b) => b.id) : [...tl.lines.map((l) => `line:${l.id}`), ...tl.clips.map((c) => `clip:${c.id}`)]
+}
+
+/** W_MIX_MUSIC_LOUD: the mix check of the last final render (render/<lang>/mix-check.json) has the music closer to the voice than `mix.minUnderVoiceDb`. */
+async function lintMix(issues: Issues, p: SeriesPaths, ep: string, lang: Lang, dataDir: string): Promise<void> {
+  const file = path.join(p.episodeDir(ep), 'render', lang, 'mix-check.json')
+  const check = await readMixCheck(file)
+  if (!check || check.minUnderDb === null) return
+  const { mix } = await loadRenderConfig(dataDir)
+  if (check.minUnderDb < mix.minUnderVoiceDb) {
+    const worst = [...check.lines].filter((l) => l.underDb !== null).sort((a, b) => a.underDb! - b.underDb!)[0]
+    issues.add('W_MIX_MUSIC_LOUD', `the music is only ${check.minUnderDb} dB under the voice at its loudest line${worst ? ` ("${worst.id}")` : ''} (floor ${mix.minUnderVoiceDb} dB); lower the music gain or the mix levels in config/render.md`, { file: relTo(p, file), ...(worst ? { where: worst.id } : {}), lang })
+  }
 }
 
 /** E_MOUTH_SILENT: the mouth of an actor is not `rest` outside every line interval of that actor. */

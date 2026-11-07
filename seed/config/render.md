@@ -15,6 +15,11 @@ frameFormat: jpeg
 audio: { codec: aac, bitrate: 160k }
 # The mix: integrated loudness in LUFS and true peak in dBTP.
 loudness: { lufs: -16, truePeak: -1.5 }
+# The levels, all relative to the voice. Each input file is measured (integrated LUFS) and brought to its level first; the whole mix is
+# normalised to `loudness` after that, so the distances stay. The music sits `musicGapUnderVoiceDb` under the voice in the gaps and
+# `musicUnderVoiceDb` under it while someone speaks. The mix check (render/<lang>/mix-check.json) warns (W_MIX_MUSIC_LOUD) when the
+# quietest line has the music less than `minUnderVoiceDb` under the voice.
+mix: { voiceLufs: -20, musicUnderVoiceDb: 18, musicGapUnderVoiceDb: 8, sfxUnderVoiceDb: 6, clipUnderVoiceDb: 10, minUnderVoiceDb: 15 }
 ---
 # Render
 
@@ -24,3 +29,4 @@ How an episode becomes an MP4 (CTS-05 reads this file). The base animation is dr
 - `fps.anim` and `fps.out`: the pose rate (12) and the video rate (24).
 - `encoders`: tried in order; `h264_amf` is the AMD hardware encoder, `libx264` the CPU fallback.
 - `loudness`: the mix is normalised to this target.
+- `mix`: the levels relative to the voice (voices are brought to `voiceLufs`; music `musicGapUnderVoiceDb` under in the gaps and `musicUnderVoiceDb` under while a voice plays; sfx and clip audio `sfxUnderVoiceDb` / `clipUnderVoiceDb` under). A script's music `gain` is only a trim (at most 0 dB), never a boost. `minUnderVoiceDb` is the floor the mix check lints against.
