@@ -107,6 +107,12 @@ export class Stage {
       return
     }
 
+    const title = (tl.titles ?? []).find((c) => t >= c.t0 && t < c.t1)
+    if (title) {
+      this.drawTitleCard(ctx, title.text, W, H)
+      return
+    }
+
     ctx.fillStyle = '#202020'
     ctx.fillRect(0, 0, W, H)
     const scene = this.sceneAt(tl, t)
@@ -199,6 +205,34 @@ export class Stage {
     ctx.drawImage(sprite.bitmap, x, y, w, h)
   }
 
+  /** A static title card: flat fixed-palette card, the text centred, wrapped and shrunk to fit. System sans-serif only (no late-loading fonts). */
+  private drawTitleCard(ctx: CanvasRenderingContext2D, text: string, W: number, H: number): void {
+    ctx.fillStyle = '#0d3b66'
+    ctx.fillRect(0, 0, W, H)
+    ctx.fillStyle = '#f4d35e'
+    const m = Math.round(H * 0.06)
+    ctx.fillRect(m, m, W - 2 * m, Math.round(H * 0.012))
+    ctx.fillRect(m, H - m - Math.round(H * 0.012), W - 2 * m, Math.round(H * 0.012))
+    const boxW = W * 0.8
+    const boxH = H * 0.6
+    let size = Math.round(H * 0.16)
+    let lines: string[] = []
+    for (; size >= 12; size -= 2) {
+      ctx.font = `700 ${size}px sans-serif`
+      lines = wrapText(ctx, text, boxW)
+      const widest = Math.max(...lines.map((l) => ctx.measureText(l).width))
+      if (widest <= boxW && lines.length * size * 1.2 <= boxH) break
+    }
+    ctx.fillStyle = '#faf0ca'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    const lh = size * 1.2
+    const y0 = H / 2 - ((lines.length - 1) * lh) / 2
+    lines.forEach((l, n) => ctx.fillText(l, W / 2, y0 + n * lh))
+    ctx.textAlign = 'start'
+    ctx.textBaseline = 'alphabetic'
+  }
+
   /** A flat card: clip id and length, plus the clip's first-frame still when `load` got one. Same pixels for every frame of the range. */
   private drawClipCard(ctx: CanvasRenderingContext2D, clip: TimelineClip, W: number, H: number): void {
     ctx.fillStyle = '#16213e'
@@ -222,4 +256,20 @@ export class Stage {
     ctx.textAlign = 'start'
     ctx.textBaseline = 'alphabetic'
   }
+}
+
+function wrapText(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
+  const out: string[] = []
+  for (const para of text.split('\n')) {
+    let line = ''
+    for (const word of para.split(/\s+/).filter(Boolean)) {
+      const next = line ? `${line} ${word}` : word
+      if (line && ctx.measureText(next).width > maxW) {
+        out.push(line)
+        line = word
+      } else line = next
+    }
+    out.push(line)
+  }
+  return out
 }

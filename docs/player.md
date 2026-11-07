@@ -23,6 +23,7 @@ const dataUrl = await page.evaluate(() => window.cts.canvas.toDataURL('image/jpe
   `variant` takes `cast/<id>/variants/<variant>/rig.json` instead.
 - `renderFrame(i)` draws frame `i` (time `i / fps.out`) and depends only on `(timeline, i)`: no clock, no randomness, no I/O. Inside a
   `clips` range it draws a placeholder card (clip id and length, plus the still): the final render must not use those frames.
+- Inside a `titles` range (`[t0, t1)`) it draws a static title card: fixed palette (navy card, yellow rules, cream text), the already translated text centred, wrapped and shrunk to fit, in the system `sans-serif` (no web font, so nothing loads late). Clips win over titles.
 - Helpers: `cts.frameCount()`, `cts.frameTime(i)` (seconds), `cts.frameAt(t)` (frame shown at `t`). The pure versions `frameCountFor`,
   `frameTime`, `frameAt` are exported by `src/player/stage.ts`.
 - `cts.ready` is a promise that resolves when the url-driven start (preview or sheet mode) has loaded (it is already resolved with no
