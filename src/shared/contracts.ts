@@ -75,6 +75,8 @@ export const castMemberSchema = z.strictObject({
   name: localizedSchema,
   role: z.string(),
   personality: z.string(),
+  /** What the character looks like, in a few concrete words (colours, shape, one telling detail): the reference prompt and the Flow clip prompts start from it. */
+  look: z.string().optional(),
   catchphrases: z.strictObject({ hr: z.array(z.string()), en: z.array(z.string()) }).optional(),
   /** The default rig, relative to the series folder (`cast/<id>/rig.json`). */
   rig: relPath,
@@ -117,7 +119,9 @@ export const bibleSchema = z.strictObject({
   episodes: z.array(z.strictObject({ id: idSchema, title: localizedSchema, status: z.enum(EPISODE_STATUSES) })),
   /** The showrunner's 3 premises; the pipeline waits until `chosenPitch` (a pitch id) is set by the user. */
   pitches: z.array(pitchSchema).default([]),
-  chosenPitch: idSchema.nullable().default(null)
+  chosenPitch: idSchema.nullable().default(null),
+  /** When the pitch was chosen (local ISO time); set by `cts_pitch_choose` (CTS-07). */
+  chosenAt: z.string().optional()
 })
 export type Bible = z.infer<typeof bibleSchema>
 
@@ -464,10 +468,19 @@ export const pipelineStateSchema = z.strictObject({
       state: z.enum(['pending', 'running', 'done', 'failed', 'skipped']),
       startedAt: z.string().optional(),
       endedAt: z.string().optional(),
-      error: z.string().optional()
+      error: z.string().optional(),
+      /** CTS-07: the job that runs the step, a short note on how it ended, and the attempts so far. */
+      job: z.string().optional(),
+      detail: z.string().optional(),
+      attempts: z.number().int().nonnegative().optional()
     })
   ),
-  updatedAt: z.string()
+  updatedAt: z.string(),
+  /** CTS-07: the run counter (job ids end in `--r<run>`), what the run was asked (brief, options), why it waits, and the end summary. */
+  run: z.number().int().nonnegative().optional(),
+  brief: z.record(z.string(), z.unknown()).optional(),
+  waitingOn: z.string().optional(),
+  summary: z.record(z.string(), z.unknown()).optional()
 })
 export type PipelineState = z.infer<typeof pipelineStateSchema>
 

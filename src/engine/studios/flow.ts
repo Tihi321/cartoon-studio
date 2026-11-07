@@ -73,6 +73,33 @@ export interface FlowImage {
   project?: string
 }
 
+/** A video scene (HUB-29 decision 12): Omni model, an 8 s clip from a keyframe, behind the Flow credit gate (`charge`) and a per-call `max_credits`. */
+export interface FlowVideoArgs {
+  prompt: string
+  aspect: '16:9' | '9:16'
+  /** A model as Flow's menu shows it (`Omni 1.1 Flash`). Missing: Flow's current video model. */
+  model?: string
+  duration: 4 | 6 | 8 | 10
+  resolution: '360p' | '720p'
+  /** The keyframe: an absolute image path or `asset:<media id>`. */
+  firstFrame: string
+  /** Flow refuses the scene before it starts when its live quote is above this. */
+  maxCredits: number
+  project: string
+  out: string
+  name: string
+  timeoutMs: number
+  signal?: AbortSignal
+}
+
+export interface FlowVideo {
+  file: string
+  mediaId: string
+  /** The composer's quote and the balance change, when Flow reported them. */
+  creditsQuote?: number
+  creditsSpent?: number
+}
+
 export interface NarrateArgs {
   text: string
   engine: 'gemini' | 'windows'
@@ -116,6 +143,8 @@ export interface FlowClient {
   readonly url: string
   status(signal?: AbortSignal): Promise<FlowStatus>
   generateImage(args: FlowImageArgs): Promise<FlowImage>
+  /** Optional so older fakes still type-check: a video scene (`flow_generate` `type: "video"`). The callers check it exists. */
+  generateVideo?(args: FlowVideoArgs): Promise<FlowVideo>
   voices(signal?: AbortSignal): Promise<FlowVoices>
   narrate(args: NarrateArgs): Promise<{ file: string; durationSec?: number }>
   song(args: SongArgs): Promise<FlowSong>
@@ -146,6 +175,7 @@ interface JobView {
   songs?: { id: string; title?: string; url?: string; file?: string }[]
   project?: { id: string; name: string }
   credits_spent?: number
+  credits_quote?: number
   failed_scenes?: number[]
 }
 
@@ -269,6 +299,43 @@ export function createFlowClient(opts: FlowClientOptions): FlowClient {
       const file = image?.file ?? job.files?.[0]
       if (!file) throw new FlowError(`Flow made no image${job.failed_scenes?.length ? ' (the scene failed)' : ''}${job.note ? `: ${job.note}` : ''}`, 'tool')
       return { file, mediaId: image?.media_id ?? '', project: job.project?.name ?? a.project }
+    },
+
+    async generateVideo(a) {
+      const started = await call(
+        'flow_generate',
+        {
+          scenes: [
+            {
+              prompt: a.prompt,
+              type: 'video',
+              aspect_ratio: a.aspect,
+              ...(a.model ? { model: a.model } : {}),
+              duration: a.duration,
+              resolution: a.resolution,
+              first_frame: a.firstFrame,
+              max_credits: a.maxCredits,
+              download_quality: 'original',
+              retries: 1
+            }
+          ],
+          project: a.project,
+          create_project: true,
+          out: a.out,
+          name: a.name,
+          start_number: 1,
+          wait: 0
+        },
+        timeoutMs,
+        a.signal
+      )
+      const first = ((started.jobs as JobView[] | undefined) ?? [])[0]
+      if (!first?.job_id) throw new FlowError('flow_generate returned no job', 'tool')
+      const job = first.status === 'done' ? first : await waitJob('flow', first.job_id, { timeoutMs: a.timeoutMs, signal: a.signal })
+      const clip = job.images?.find((i) => /.(mp4|webm|mov)$/i.test(i.file)) ?? job.images?.[0]
+      const file = clip?.file ?? job.files?.find((f) => /.(mp4|webm|mov)$/i.test(f)) ?? job.files?.[0]
+      if (!file) throw new FlowError(`Flow made no video${job.failed_scenes?.length ? ' (the scene failed)' : ''}${job.note ? `: ${job.note}` : ''}`, 'tool')
+      return { file, mediaId: clip?.media_id ?? '', ...(job.credits_quote !== undefined ? { creditsQuote: job.credits_quote } : {}), ...(job.credits_spent !== undefined ? { creditsSpent: job.credits_spent } : {}) }
     },
 
     async voices(signal) {

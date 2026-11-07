@@ -4,6 +4,7 @@ import type { CtsService } from '../service'
 import type { ClientTaskQueue } from '../models/client'
 import { clientTools } from './tools-client'
 import { TOOL_MODULES } from './modules'
+import { pipelineSummaries } from '../pipeline/tools'
 
 /**
  * The MCP tools. They drive the same `CtsService` as the app, so a shared engine shows what an agent does in the UI (the service emits its
@@ -70,10 +71,10 @@ export function buildTools(svc: CtsService, opts: McpOptions = {}): Tool[] {
   return [
     def(
       'cts_status',
-      'The state of the job queue: with a series slug, the jobs of that series (queued, running, done, failed, and the failures); without one, the series in the data folder. clientTasks: the model calls waiting for you or leased (see cts_get_task).',
+      'The state of the job queue: with a series slug, the jobs of that series (queued, running, done, failed, and the failures) and its pipelines (state: running, waiting-on-user after the pitches until cts_pitch_choose, waiting-on-client, failed, done; the current step, a hint, the run summary); without one, the series in the data folder. clientTasks: the model calls waiting for you or leased (see cts_get_task).',
       z.object({ series: series.optional() }),
       async (a) => {
-        if (a.series) return { series: a.series, ...(await svc.status(a.series)), clientTasks: queue().counts() }
+        if (a.series) return { series: a.series, ...(await svc.status(a.series)), pipelines: await pipelineSummaries(svc, a.series), clientTasks: queue().counts() }
         const list = await svc.listSeries()
         return { dataDir: svc.dataDir, series: await Promise.all(list.map(async (s) => ({ slug: s.slug, title: s.title, jobs: await svc.jobCounts(s.slug) }))), clientTasks: queue().counts() }
       }

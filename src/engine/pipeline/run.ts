@@ -1,0 +1,381 @@
+import { promises as fs } from 'node:fs'
+import path from 'node:path'
+import type { PipelineState } from '../../shared/contracts'
+import type { SeriesRunState } from '../../shared/protocol'
+import { localIso } from '../budget/spend'
+import type { JobState } from '../queue/jobs'
+import { assertId, assertSlug } from '../series/paths'
+import { SeriesStore } from '../series/service'
+import type { CtsService } from '../service'
+import { clipsGate } from './clips'
+import { STEPS, emptyState, normalise, resetFrom, stepDef, taskOf } from './steps'
+import type { StepDef } from './steps'
+
+/**
+ * The pipeline runner (CTS-07). `cts_run_pipeline { series, episode, brief?, retry?, from? }` calls `run`; calling it again with the same ids resumes
+ * (Edu's `edu_run_pipeline` pattern): the state is read from `episodes/<ep>/pipeline.json` and the job store, never from memory, so `advance` can run
+ * after every step, from a tool call, and after a restart.
+ *
+ * The pause after the pitches is a gate: step `pitch_choice` is done only when `bible.chosenPitch` names one of `bible.pitches`, which only
+ * `pitchChoose` (`cts_pitch_choose`) writes. Nothing past it is enqueued before, whatever `from` or `retry` say, and every visual handler checks it again.
+ */
+
+export interface RunOptions {
+  series: string
+  episode: string
+  brief?: Record<string, unknown>
+  /** Choices of the run (rigPaths, rigChoice, skipClips, clipCredits ...); merged into the stored ones. */
+  options?: Record<string, unknown>
+  retry?: boolean
+  from?: string
+}
+
+export interface StepView {
+  id: string
+  no: string
+  label: string
+  role: string
+  kind: string
+  state: string
+  detail?: string
+  error?: string
+  job?: string
+  startedAt?: string
+  endedAt?: string
+}
+
+export interface PipelineReport {
+  series: string
+  episode: string
+  state: PipelineState['state']
+  /** The step that runs, waits or failed (null: all done). */
+  step: string | null
+  waitingOn?: string
+  hint: string
+  steps: StepView[]
+  chosenPitch: string | null
+  chosenAt?: string
+  pitches?: { id: string; title: { hr: string; en: string }; logline: { hr: string; en: string }; leads: { name: string; what: string }[]; sets: string[]; why: string }[]
+  brief?: Record<string, unknown>
+  options?: Record<string, unknown>
+  summary?: Record<string, unknown>
+}
+
+const locks = new Map<string, Promise<unknown>>()
+/** One promise chain per episode: a handler ending and a tool call cannot advance the same pipeline at once. */
+function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const next = (locks.get(key) ?? Promise.resolve()).then(fn, fn)
+  locks.set(key, next.catch(() => undefined))
+  return next
+}
+
+const OPTION_KEY = 'options'
+
+/** The pipeline `options` are stored in the state's `brief` under one key, so the state file keeps its shape. */
+export function optionsOf(state: PipelineState): Record<string, unknown> {
+  const o = state.brief?.[OPTION_KEY]
+  return o && typeof o === 'object' ? (o as Record<string, unknown>) : {}
+}
+export function briefOf(state: PipelineState): Record<string, unknown> {
+  const { [OPTION_KEY]: _o, ...rest } = state.brief ?? {}
+  return rest
+}
+
+export class Pipeline {
+  constructor(readonly svc: CtsService) {}
+
+  get store(): SeriesStore {
+    return new SeriesStore(this.svc.dataDir)
+  }
+
+  private now(): string {
+    return localIso(new Date())
+  }
+
+  async read(series: string, episode: string): Promise<PipelineState | null> {
+    const s = await this.store.readPipeline(series, episode)
+    return s ? normalise(s) : null
+  }
+
+  private async save(state: PipelineState, step: string | null): Promise<PipelineState> {
+    const before = await this.store.readPipeline(state.series, state.episode).catch(() => null)
+    state.updatedAt = this.now()
+    const saved = await this.store.writePipeline(state.series, state.episode, state)
+    if (!before || before.state !== saved.state || before.waitingOn !== saved.waitingOn) {
+      this.svc.emit({ type: 'series.state', series: saved.series, episode: saved.episode, state: saved.state as SeriesRunState, ...(step ? { step } : {}) })
+    }
+    return saved
+  }
+
+  /** Creates the series when it does not exist, stores the brief and options, applies `from` / `retry`, then advances. */
+  async run(o: RunOptions): Promise<PipelineReport> {
+    assertSlug(o.series)
+    assertId(o.episode, 'episode id')
+    return withLock(`${o.series}/${o.episode}`, async () => {
+      const store = this.store
+      if (!(await store.seriesExists(o.series))) {
+        const b = o.brief ?? {}
+        const title = typeof b.title === 'string' && b.title ? b.title : o.series
+        await store.createSeries(o.series, { title, ...(typeof b.idea === 'string' ? { logline: b.idea } : {}), ...(typeof b.ageMin === 'number' ? { ageMin: b.ageMin } : {}), ...(typeof b.ageMax === 'number' ? { ageMax: b.ageMax } : {}) })
+      }
+      const state = (await this.read(o.series, o.episode)) ?? emptyState(o.series, o.episode, this.now())
+      if (o.brief || o.options) {
+        state.brief = { ...briefOf(state), ...(o.brief ?? {}), [OPTION_KEY]: { ...optionsOf(state), ...(o.options ?? {}) } }
+      }
+      if (!state.brief || Object.keys(briefOf(state)).length === 0) {
+        if (!state.steps.pitch || state.steps.pitch.state !== 'done') throw new Error('the first call needs a brief: {idea, ageMin?, ageMax?, notes?} (what the series is about)')
+      }
+      if (o.from) {
+        resetFrom(state, o.from)
+        if (o.from === 'pitch') {
+          const bible = await store.readBible(o.series)
+          await store.writeBible(o.series, { ...bible, pitches: [], chosenPitch: null, chosenAt: undefined })
+        }
+      }
+      if (o.retry) {
+        for (const [id, st] of Object.entries(state.steps)) if (st.state === 'failed') Object.assign(st, { state: 'pending', error: undefined, detail: 'retry', ...(id === 'safety' ? { attempts: 0 } : {}) })
+        if (state.state === 'failed') state.state = 'idle'
+      }
+      state.run = (state.run ?? 0) + 1
+      await this.save(state, null)
+      return this.advanceLocked(o.series, o.episode)
+    })
+  }
+
+  /** Looks at the state and the job store and moves one step on. Safe to call at any time. */
+  advance(series: string, episode: string): Promise<PipelineReport> {
+    return withLock(`${series}/${episode}`, () => this.advanceLocked(series, episode))
+  }
+
+  /** `advance` that never throws: a handler's own work is done, a later call can advance again. */
+  async advanceQuietly(series: string, episode: string): Promise<void> {
+    try {
+      await this.advance(series, episode)
+    } catch (e) {
+      this.svc.log(`pipeline ${series}/${episode}: could not advance: ${(e as Error).message}`)
+    }
+  }
+
+  private async advanceLocked(series: string, episode: string): Promise<PipelineReport> {
+    const state = await this.read(series, episode)
+    if (!state) throw new Error(`the episode "${episode}" of "${series}" has no pipeline run (cts_run_pipeline starts one)`)
+    const jobs = this.svc.deps.jobs
+    const queue = this.svc.deps.registry.clientQueue
+    outer: for (let guard = 0; guard < STEPS.length * 3; guard++) {
+      for (const step of STEPS) {
+        const st = state.steps[step.id]!
+        if (st.state === 'done' || st.state === 'skipped') continue
+        if (st.state === 'failed') {
+          state.state = 'failed'
+          delete state.waitingOn
+          return this.report(await this.save(state, step.id), step.id)
+        }
+        if (st.state === 'running' && st.job) {
+          const j = await jobs.find(st.job)
+          const js: JobState | 'missing' = j?.state ?? 'missing'
+          if (js === 'queued' || js === 'running') {
+            state.state = queue.countFor((id) => id === st.job) > 0 ? 'waiting-on-client' : 'running'
+            delete state.waitingOn
+            return this.report(await this.save(state, step.id), step.id)
+          }
+          if (js === 'failed') {
+            st.state = 'failed'
+            st.error = String((j?.data as Record<string, unknown> | undefined)?.failure ?? 'the job failed')
+            st.endedAt = this.now()
+            continue outer
+          }
+          if (js === 'done') {
+            // the handler ends by marking its own step; a done job that did not means a crash between the two: the step ran
+            st.state = 'done'
+            st.endedAt = this.now()
+            continue outer
+          }
+          st.state = 'pending' // the job is gone (a crash): ask again
+        }
+        // pending
+        const reason = await this.gate(state, step)
+        if (reason === 'redo-pitch') {
+          st.state = 'pending'
+          state.steps.pitch = { state: 'pending', detail: 'redo' }
+          continue outer
+        }
+        if (reason) {
+          state.state = 'waiting-on-user'
+          state.waitingOn = reason
+          return this.report(await this.save(state, step.id), step.id)
+        }
+        if (step.kind === 'gate') {
+          st.state = 'done'
+          st.endedAt = this.now()
+          st.detail = 'chosen'
+          continue outer
+        }
+        const id = await this.enqueue(state, step)
+        Object.assign(st, { state: 'running', job: id, startedAt: this.now(), endedAt: undefined, error: undefined, attempts: (st.attempts ?? 0) + 1 })
+        state.state = 'running'
+        delete state.waitingOn
+        return this.report(await this.save(state, step.id), step.id)
+      }
+      state.state = 'done'
+      delete state.waitingOn
+      return this.report(await this.save(state, null), null)
+    }
+    throw new Error('the pipeline did not settle (a bug): see pipeline.json')
+  }
+
+  /** Why a step cannot start yet (the user must act), or null. */
+  private async gate(state: PipelineState, step: StepDef): Promise<string | null> {
+    const store = this.store
+    if (step.id === 'pitch_choice') {
+      const bible = await store.readBible(state.series)
+      if (bible.pitches.length === 0) return 'redo-pitch'
+      if (bible.chosenPitch && bible.pitches.some((p) => p.id === bible.chosenPitch)) return null
+      return `waiting for the user to choose one of the ${bible.pitches.length} premises: show them (cts_series_get {series}), then cts_pitch_choose {series, pitch}. Nothing visual is made before that.`
+    }
+    if (step.id === 'clips') return clipsGate(store, state.series, state.episode, optionsOf(state))
+    return null
+  }
+
+  private async enqueue(state: PipelineState, step: StepDef): Promise<string> {
+    // belt and braces: nothing visual before the user's pick, whatever called us
+    const idx = STEPS.findIndex((s) => s.id === step.id)
+    if (idx > STEPS.findIndex((s) => s.id === 'pitch_choice')) {
+      const bible = await this.store.readBible(state.series)
+      if (!bible.chosenPitch || !bible.pitches.some((p) => p.id === bible.chosenPitch)) throw new Error('refusing to start a step before the user has chosen a premise (cts_pitch_choose)')
+    }
+    const task = taskOf(step)
+    for (let run = 1; run <= 999; run++) {
+      const id = `${state.series}--${task}--${state.episode}--r${run}`
+      const body = JSON.stringify({ episode: state.episode, step: step.id }, null, 2)
+      if (await this.svc.deps.jobs.enqueue({ id, task, role: step.role, book: state.series, unit: state.episode, round: run, requested_by: 'engine', label: step.label, ...(step.vision ? { vision: true } : {}) }, body)) {
+        this.svc.deps.kick?.()
+        return id
+      }
+    }
+    throw new Error(`too many jobs for step ${step.id}`)
+  }
+
+  // ---- what handlers report ----
+
+  async markDone(series: string, episode: string, step: string, detail: string): Promise<void> {
+    await withLock(`${series}/${episode}`, async () => {
+      const state = await this.read(series, episode)
+      if (!state) return
+      state.steps[step] = { ...state.steps[step], state: 'done', endedAt: this.now(), detail: detail.slice(0, 400), error: undefined }
+      await this.save(state, step)
+    })
+  }
+
+  /** A step goes back to pending (a revise round): `detail` says why; the next `advance` makes a new job. */
+  async reopen(series: string, episode: string, steps: string[], detail: string): Promise<void> {
+    await withLock(`${series}/${episode}`, async () => {
+      const state = await this.read(series, episode)
+      if (!state) return
+      for (const id of steps) state.steps[id] = { state: 'pending', detail, attempts: state.steps[id]?.attempts }
+      await this.save(state, steps[0] ?? null)
+    })
+  }
+
+  async noteFailure(series: string, episode: string, step: string, error: string): Promise<void> {
+    await withLock(`${series}/${episode}`, async () => {
+      const state = await this.read(series, episode)
+      if (!state) return
+      state.steps[step] = { ...state.steps[step]!, error: error.slice(0, 600) }
+      await this.save(state, step)
+    })
+  }
+
+  async setSummary(series: string, episode: string, summary: Record<string, unknown>): Promise<void> {
+    await withLock(`${series}/${episode}`, async () => {
+      const state = await this.read(series, episode)
+      if (!state) return
+      state.summary = summary
+      await this.save(state, null)
+    })
+  }
+
+  // ---- the user's pick ----
+
+  async choosePitch(series: string, pitch: string): Promise<{ chosenPitch: string; chosenAt: string; resumed: PipelineReport[] }> {
+    assertSlug(series)
+    const store = this.store
+    const bible = await store.readBible(series)
+    if (!bible.pitches.some((p) => p.id === pitch)) throw new Error(`no pitch "${pitch}" in "${series}" (${bible.pitches.map((p) => p.id).join(', ') || 'none yet: run the pipeline first'})`)
+    const chosenAt = this.now()
+    await store.writeBible(series, { ...bible, chosenPitch: pitch, chosenAt })
+    this.svc.emit({ type: 'pitch.chosen', series, pitch })
+    const resumed: PipelineReport[] = []
+    for (const ep of await this.episodesWithPipeline(series)) {
+      const st = await this.read(series, ep)
+      if (st && st.state === 'waiting-on-user' && st.steps.pitch_choice?.state !== 'done') resumed.push(await this.advance(series, ep))
+    }
+    return { chosenPitch: pitch, chosenAt, resumed }
+  }
+
+  async episodesWithPipeline(series: string): Promise<string[]> {
+    const dir = this.store.paths(series).episodesDir
+    const names = await fs.readdir(dir).catch(() => [] as string[])
+    const out: string[] = []
+    for (const n of names) if (await this.store.exists(path.join(dir, n, 'pipeline.json'))) out.push(n)
+    return out.sort()
+  }
+
+  // ---- reading ----
+
+  /** The report of an episode: steps, the state, the premises while they wait, and a hint on what to do next. */
+  async status(series: string, episode: string): Promise<PipelineReport | null> {
+    const state = await this.read(series, episode)
+    if (!state) return null
+    // a run that is going looks at its jobs again (a job that failed for good, a step that finished): advance is safe to call at any time
+    if (state.state === 'running' || state.state === 'waiting-on-client') return this.advance(series, episode)
+    const cur = STEPS.find((s) => !['done', 'skipped'].includes(state.steps[s.id]!.state))
+    return this.report(state, cur?.id ?? null)
+  }
+
+  private async report(state: PipelineState, step: string | null): Promise<PipelineReport> {
+    const bible = await this.store.readBible(state.series).catch(() => null)
+    const views: StepView[] = STEPS.map((s) => {
+      const st = state.steps[s.id]!
+      return { id: s.id, no: s.no, label: s.label, role: s.role, kind: s.kind, state: st.state, ...(st.detail ? { detail: st.detail } : {}), ...(st.error ? { error: st.error } : {}), ...(st.job ? { job: st.job } : {}), ...(st.startedAt ? { startedAt: st.startedAt } : {}), ...(st.endedAt ? { endedAt: st.endedAt } : {}) }
+    })
+    const waiting = state.state === 'waiting-on-user'
+    const showPitches = bible && bible.pitches.length > 0 && (waiting || !bible.chosenPitch)
+    const hint = hintFor(state, step)
+    return {
+      series: state.series,
+      episode: state.episode,
+      state: state.state,
+      step,
+      ...(state.waitingOn ? { waitingOn: state.waitingOn } : {}),
+      hint,
+      steps: views,
+      chosenPitch: bible?.chosenPitch ?? null,
+      ...(bible?.chosenAt ? { chosenAt: bible.chosenAt } : {}),
+      ...(showPitches && bible ? { pitches: bible.pitches } : {}),
+      ...(state.brief ? { brief: briefOf(state), options: optionsOf(state) } : {}),
+      ...(state.summary ? { summary: state.summary } : {})
+    }
+  }
+}
+
+function hintFor(state: PipelineState, step: string | null): string {
+  const s = state.series
+  switch (state.state) {
+    case 'waiting-on-user':
+      return step === 'pitch_choice'
+        ? `STOP: the user must choose a premise. Show them the pitches (title, logline, leads, sets, why), wait for their answer, then cts_pitch_choose {series: "${s}", pitch: "<id>"}. Calling cts_run_pipeline again does not skip this.`
+        : `Waiting for you or the user: ${state.waitingOn ?? ''}`
+    case 'waiting-on-client':
+      return `Model calls wait for you: cts_get_task -> answer -> cts_submit_task until none, then cts_wait {series: "${s}"}.`
+    case 'running':
+      return `Running step ${step}: cts_wait {series: "${s}"} (it returns when a model call waits for you or nothing is left), then cts_run_pipeline {series, episode} to see the state.`
+    case 'failed':
+      return `Step ${step} failed (see its error). Fix the cause, then cts_run_pipeline {series, episode, retry: true}, or from: "<step>" to redo from a step.`
+    case 'done':
+      return 'All steps are done: see summary for the files, durations and open problems.'
+    default:
+      return 'Call cts_run_pipeline to start.'
+  }
+}
+
+export { resetFrom, stepDef }
