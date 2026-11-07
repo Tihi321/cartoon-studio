@@ -125,14 +125,14 @@ export interface CastInfo {
   /** `cts_rig_check` of the chosen rig. */
   check: RigCheckView | null
 }
-/** `cts_cast_get { series, cast }` -> `{ member, rig, variants: variants.json, checks: {chosen, a, b, c}, files: {ref, sheet} }`. */
+/** `cts_cast_get { series, cast }` -> `{ member, rig, variants: variants.json, checks: {chosen, a, c}, files: {ref, sheet} }`. */
 export function normalizeCast(r: Record<string, unknown>): CastInfo {
   const member = (r.member ?? {}) as { id?: string }
   const file = (r.variants ?? {}) as { chosen?: RigVariant | null; variants?: Partial<Record<RigVariant, { status: string; wallSeconds: number; spendUsd: number; spendCredits?: number; note: string }>> }
   const checks = (r.checks ?? {}) as Record<string, RigCheckView | undefined>
   const files = (r.files ?? {}) as { ref?: string | null; sheet?: string | null }
   const id = member.id ?? ''
-  const variants: VariantInfo[] = (['a', 'b', 'c'] as const).map((v) => {
+  const variants: VariantInfo[] = (['a', 'c'] as const).map((v) => {
     const rec = file.variants?.[v]
     if (!rec) return { variant: v, state: 'not-run' as const }
     return {

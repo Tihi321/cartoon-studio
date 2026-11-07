@@ -54,7 +54,7 @@ export class SeriesPaths {
   castDir(cast: string): string {
     return path.join(this.root, 'cast', assertId(cast, 'cast id'))
   }
-  /** The folder of a rig: the cast folder, or `variants/<a|b|c>` under it. Part paths in `rig.json` are relative to it. */
+  /** The folder of a rig: the cast folder, or `variants/<a|c>` under it. Part paths in `rig.json` are relative to it. */
   rigDir(cast: string, variant?: RigVariant): string {
     return variant ? path.join(this.castDir(cast), 'variants', variant) : this.castDir(cast)
   }

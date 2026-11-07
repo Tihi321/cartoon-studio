@@ -14,7 +14,7 @@ import { checkOmniInstruct, comfySpeaker } from '../voice/providers/comfy'
 import { vibettsSpeaker } from '../voice/providers/vibetts'
 import { voiceDeps } from '../voice/tools'
 import type { ClipJob } from '../voice/providers/types'
-import { INTRO_ID, MAX_HERO_CLIPS, buildScreenplay, clipBeats, heroCount, missingClips, readClipEntry, readShots, upsertClip, videoDir } from './clips'
+import { INTRO_ID, OUTRO_ID, badClipIds, buildScreenplay, clipBeats, missingClips, readClipEntry, readShots, upsertClip, videoDir } from './clips'
 import { lintSeries } from '../series/lint'
 import { ask, castView, makeEnv, relTo, requireChosen } from './env'
 import type { Env } from './env'
@@ -180,7 +180,8 @@ export function scriptProblems(a: z.infer<typeof scriptAnswer>, o: { series: str
   }
   const clips = clipBeats(s)
   if (clips.filter((c) => c.clip === INTRO_ID).length > 1) out.push('the intro clip appears twice')
-  if (heroCount(s) > MAX_HERO_CLIPS) out.push(`at most ${MAX_HERO_CLIPS} hero clip per episode (a clip beat that is not "intro")`)
+  if (clips.filter((c) => c.clip === OUTRO_ID).length > 1) out.push('the outro clip appears twice')
+  for (const id of badClipIds(s)) out.push(`clip "${id}" is not allowed: the only clips are "intro" and "outro" (no hero clip)`)
   for (const [cue, file] of [...Object.entries(s.music), ...Object.entries(s.sfx)]) if (!/^music\/[A-Za-z0-9_.-]+\.(ogg|wav)$/.test(file)) out.push(`cue ${cue}: file "${file}" must be music/<name>.ogg`)
   return out
 }
@@ -199,14 +200,14 @@ async function scriptStep(e: Env): Promise<string> {
   const revise = e.detail.startsWith('revise') ? await e.store.readReview(e.series, e.episode, 'safety').catch(() => null) : null
   const previous = revise ? await e.store.readScript(e.series, e.episode).catch(() => null) : null
   const wantIntro = b.intro !== false
-  const wantHero = b.heroClip !== false
+  const wantOutro = b.outro !== false
   const r = await ask<z.infer<typeof scriptAnswer>>(
     e,
     {
       id: 'script',
       role: 'writer',
       kind: 'script',
-      prompt: `Write episode "${e.episode}" for the series: the language-independent script (scenes, beats in order) and the texts in Croatian and English. ${range[0]} to ${range[1]} spoken lines in all, each at most 12 words in BOTH languages. Use only the beat types ${ALLOWED_BEATS.join(', ')}, only the marks, shots, gestures and emotions listed in "facts". ${wantIntro ? 'Start with one clip beat {"type":"clip","clip":"intro","seconds":8,"audio":"keep"} (the series intro; no beat runs "with":"prev" over it).' : 'No intro clip.'} ${wantHero ? 'At most one more clip beat for a hero moment (8 s, an id like "hero"), where a flat Flow shot would help the story.' : 'No hero clip.'} Music cue "theme" is music/theme.ogg; a sound effect cue is music/sfx-<cue>.ogg (at most two). The target length is about ${b.seconds ?? 60} seconds.${revise ? ' This is a REVISION: fix every problem of the safety review and keep what was fine.' : ''}`,
+      prompt: `Write episode "${e.episode}" for the series: the language-independent script (scenes, beats in order) and the texts in Croatian and English. ${range[0]} to ${range[1]} spoken lines in all, each at most 12 words in BOTH languages. Use only the beat types ${ALLOWED_BEATS.join(', ')}, only the marks, shots, gestures and emotions listed in "facts". ${wantIntro ? 'Start with one clip beat {"type":"clip","clip":"intro","seconds":8,"audio":"keep"} (the series intro; no beat runs "with":"prev" over it).' : 'No intro clip.'} ${wantOutro ? 'End with one clip beat {"type":"clip","clip":"outro","seconds":8,"audio":"keep"} (the series outro, the last beat). There is no other clip: no hero clip.' : 'No outro clip, and no other clip either.'} Music cue "theme" is music/theme.ogg; a sound effect cue is music/sfx-<cue>.ogg (at most two). The target length is about ${b.seconds ?? 60} seconds.${revise ? ' This is a REVISION: fix every problem of the safety review and keep what was fine.' : ''}`,
       inputs: {
         paths: [],
         json: {
@@ -424,7 +425,7 @@ async function clipShotsStep(e: Env): Promise<string> {
       id: 'clip-shots',
       role: 'showrunner',
       kind: 'clip-shots',
-      prompt: `Write the shot for each missing Flow clip (${ids.join(', ')}): who is in it (cast ids, at most 3), what happens in 8 seconds as flat 2D cutout motion, the framing and move, and what the first frame (keyframe) shows. The intro is the series intro with the two leads; a hero clip is one big moment of the episode. No speech, no 3D, no shading.`,
+      prompt: `Write the shot for each missing Flow clip (${ids.join(', ')}): who is in it (cast ids, at most 3), what happens in 8 seconds as flat 2D cutout motion, the framing and move, and what the first frame (keyframe) shows. The intro is the series intro with the two leads; the outro is the closing moment with the two leads. Also give staging for the keyframe still that our own player draws: the set, a camera shot of it, and each lead's mark, facing, emotion and optional gesture (only names listed in the input; the sets' marks and shots are in "sets", the emotions and gestures in "cast"). No speech, no 3D, no shading.`,
       inputs: { paths: [], json: { missing: need, series: { title: bible.title, logline: bible.logline, style: bible.style }, cast: bible.cast.map(castView), sets: bible.sets, scriptBeatsAround: script.scenes.map((s) => ({ scene: s.id, set: s.set, beats: s.beats.map((b) => ({ id: b.id, type: b.type, ...('clip' in b ? { clip: b.clip } : {}), ...('speaker' in b ? { speaker: b.speaker } : {}) })) })) } },
       output: { schema: 'clip-shots', path: 'tasks/clip-shots-new.json' }
     },
@@ -547,7 +548,7 @@ export function registerPipeline(engine: Engine): void {
       const req = requestOf(ctx.jobBody)
       const episode = String(req.episode)
       const e = makeEnv({ svc, pipe, ctx, series, episode, stepId: 'clips', state: (await pipe.read(series, episode)) ?? (await emptyFor(svc, series, episode)) })
-      return { result: await makeClip(e, String(req.clip), Number(req.maxCredits)) }
+      return { result: await makeClip(e, String(req.clip), Number(req.maxCredits), req.polish === true) }
     },
     {}
   )

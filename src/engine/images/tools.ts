@@ -1,4 +1,3 @@
-import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
 import { budgetState, localIso } from '../budget/spend'
@@ -7,9 +6,8 @@ import type { CtsService } from '../service'
 import { assertId } from '../series/paths'
 import { SeriesStore } from '../series/service'
 import { IMAGE_PROVIDERS, pick } from './provider'
-import { sliceSheet, splitSvg } from './svg-split'
 
-/** MCP tools of CTS-08: the production budget (`cts_budget_set`, `cts_budget_get`), image generation, and the SVG split. */
+/** MCP tools of CTS-08: the production budget (`cts_budget_set`, `cts_budget_get`), and image generation. */
 export function imageTools(svc: CtsService, def: ToolDef): Tool[] {
   const store = () => new SeriesStore(svc.dataDir)
   const series = z.string().describe('The series slug')
@@ -48,7 +46,7 @@ export function imageTools(svc: CtsService, def: ToolDef): Tool[] {
     ),
     def(
       'cts_image_generate',
-      'Make one picture with an image provider and save it in the series folder. comfy (default/auto): local ComfyUI, free, model from config/providers.md; with refs it edits them (Qwen edit). flow: free Google Flow image. fal and recraft: paid, behind the episode budget (BUDGET_EXCEEDED with no approved cap; KEY_MISSING <provider> when the key is not stored: run node out/engine/index.js key-set <provider>); recraft with format svg returns a vector. Returns { file, costUsd, provider, model, styleId? }.',
+      'Make one picture with an image provider and save it in the series folder. comfy (default/auto): local ComfyUI, free, model from config/providers.md; with refs it edits them (Qwen edit). gemini (Nano Banana, not written yet) and fal: paid, behind the episode budget (BUDGET_EXCEEDED with no approved cap; KEY_MISSING <provider> when the key is not stored: run node out/engine/index.js key-set <provider>). No image goes through Google Flow. Returns { file, costUsd, provider, model }.',
       z.object({
         series,
         episode,
@@ -59,7 +57,6 @@ export function imageTools(svc: CtsService, def: ToolDef): Tool[] {
         format: z.enum(['png', 'svg']).default('png'),
         out: z.string().optional().describe('Output path without extension, relative to the series folder (default images/<provider>-<time>)'),
         refs: z.array(z.string()).max(5).optional().describe('Reference images: absolute, or relative to the series folder'),
-        styleId: z.string().optional().describe('Recraft style id (default: the bible style.recraftStyleId)'),
         model: z.string().optional(),
         seed: z.number().int().optional(),
         what: z.string().optional().describe('Text for the ledger')
@@ -69,31 +66,7 @@ export function imageTools(svc: CtsService, def: ToolDef): Tool[] {
         assertId(a.episode, 'episode id')
         const provider = await pick(a.provider, { svc, store: st, series: a.series, episode: a.episode, what: a.what ?? a.prompt.slice(0, 60) })
         const out = place(a.series, a.out ?? `images/${provider.id}-${Date.now().toString(36)}`)
-        return provider.generate({ prompt: a.prompt, size: { width: a.width, height: a.height }, format: a.format, out, ...(a.refs ? { refs: a.refs.map((r) => place(a.series, r)) } : {}), ...(a.styleId ? { styleId: a.styleId } : {}), ...(a.model ? { model: a.model } : {}), ...(a.seed !== undefined ? { seed: a.seed } : {}) })
-      }
-    ),
-    def(
-      'cts_svg_split',
-      'Split an SVG. mode "parts": give polygons (viewBox coordinates) per part id; every path/shape goes to the first polygon containing its centre, one SVG per part with the original viewBox. mode "grid": cut a sheet SVG into cols x rows cells (viewBox = the cell). Paths are relative to the series folder. Returns the files, element counts and how many elements matched nothing.',
-      z.object({
-        series,
-        svg: z.string().describe('The SVG, relative to the series folder'),
-        outDir: z.string().describe('Output folder, relative to the series folder'),
-        mode: z.enum(['parts', 'grid']).default('parts'),
-        parts: z.array(z.object({ id: z.string().regex(/^[A-Za-z0-9_-]+$/), polygon: z.array(z.tuple([z.number(), z.number()])).min(3) })).optional(),
-        cols: z.number().int().min(1).optional(),
-        rows: z.number().int().min(1).optional(),
-        ids: z.array(z.string().regex(/^[A-Za-z0-9_-]+$/)).optional()
-      }),
-      async (a) => {
-        const text = await fs.readFile(place(a.series, a.svg), 'utf8')
-        const outDir = place(a.series, a.outDir)
-        if (a.mode === 'grid') {
-          if (!a.cols || !a.rows) throw new Error('mode "grid" needs cols and rows')
-          return sliceSheet(text, { cols: a.cols, rows: a.rows, ...(a.ids ? { ids: a.ids } : {}) }, outDir)
-        }
-        if (!a.parts?.length) throw new Error('mode "parts" needs parts')
-        return splitSvg(text, a.parts, outDir)
+        return provider.generate({ prompt: a.prompt, size: { width: a.width, height: a.height }, format: a.format, out, ...(a.refs ? { refs: a.refs.map((r) => place(a.series, r)) } : {}), ...(a.model ? { model: a.model } : {}), ...(a.seed !== undefined ? { seed: a.seed } : {}) })
       }
     )
   ]

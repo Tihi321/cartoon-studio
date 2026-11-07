@@ -12,7 +12,7 @@ import { checkRig } from '../series/lint'
 import { SeriesStore } from '../series/service'
 import type { CtsService } from '../service'
 import { readManifest } from '../voice/manifest'
-import { clipLocation, missingClips, videoDir } from './clips'
+import { CLIP_IDS, clipLocation, missingClips, videoDir } from './clips'
 import { RIG_PATHS, chooseVariant, compareVariants, readVariants, writeRigSet } from './rig'
 import { Pipeline } from './run'
 
@@ -149,13 +149,13 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
     // ---------------------------------------------------------------- rigs
     def(
       'cts_rig_set',
-      'Write a rig: rig.json plus its part SVGs. rig is the rig object (cts.rig/1), parts maps a file of the rig (its path "parts/body.svg", or just "body.svg" or "body") to the SVG text; a file the rig names that is not in parts must already be on disk. variant a|b|c writes under cast/<id>/variants/<v>/ (without it: cast/<id>/). Validates the schema, writes the files, then runs cts_rig_check and returns its result: fix every error and call again. Nothing is written when the rig does not parse or a file is missing.',
+      'Write a rig: rig.json plus its part SVGs. rig is the rig object (cts.rig/1), parts maps a file of the rig (its path "parts/body.svg", or just "body.svg" or "body") to the SVG text; a file the rig names that is not in parts must already be on disk. variant a|c writes under cast/<id>/variants/<v>/ (without it: cast/<id>/). Validates the schema, writes the files, then runs cts_rig_check and returns its result: fix every error and call again. Nothing is written when the rig does not parse or a file is missing.',
       z.object({ series, cast, variant: variant.optional(), rig: z.unknown(), parts: z.record(z.string(), z.string()).default({}) }),
       async (a) => writeRigSet(store(), a.series, a.cast, a.variant, a.rig, a.parts)
     ),
     def(
       'cts_rig_build',
-      'Build one rig path of one character as a variant under cast/<id>/variants/<v>/ (claude-svg = a, recraft-svg = b, raster = c): the character-designer role task (answer it with cts_get_task / cts_submit_task), the pose sheet, and the wall time and spend recorded in variants.json. recraft-svg is paid and is refused at a $0 cap (recorded as not-run). Returns a job id at once.',
+      'Build one rig path of one character as a variant under cast/<id>/variants/<v>/ (claude-svg = a, raster = c): the character-designer role task (answer it with cts_get_task / cts_submit_task), the pose sheet, and the wall time and spend recorded in variants.json. Returns a job id at once.',
       z.object({ series, episode, cast, path: z.enum(RIG_PATHS).default('claude-svg') }),
       async (a) => {
         if (!(await svc.seriesExists(a.series))) throw new Error(`no series "${a.series}"`)
@@ -174,7 +174,7 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
     ),
     def(
       'cts_rig_choose',
-      'Choose the variant (a, b or c) that becomes the character\'s rig: copies variants/<v>/rig.json, parts/ and sheet.png up to cast/<id>/ and runs cts_rig_check on it. Returns the check.',
+      'Choose the variant (a or c) that becomes the character\'s rig: copies variants/<v>/rig.json, parts/ and sheet.png up to cast/<id>/ and runs cts_rig_check on it. Returns the check.',
       z.object({ series, cast, variant }),
       async (a) => ({ chosen: a.variant, check: await chooseVariant(store(), a.series, a.cast, a.variant) })
     ),
@@ -285,7 +285,7 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
     // ---------------------------------------------------------------- the pipeline
     def(
       'cts_run_pipeline',
-      'Start or resume the episode pipeline: pitch (3 premises) -> STOP until the user chooses (cts_pitch_choose) -> bible -> character references -> rigs -> sets -> script -> child-safety review -> voice casting -> voices -> music -> Flow clips -> lip-sync/timelines/lint -> preview renders -> frame review -> final renders (hr and en MP4s). Call it again with the same series and episode to resume (it never skips the pause). The first call needs a brief {idea, title?, ageMin?, ageMax?, notes?, seconds?, lineRange?: [12,16], intro?: false, heroClip?: false}. retry: true puts failed steps back; from: "<step>" redoes that step and all after it. options: rigPaths {castId: ["claude-svg","raster"]} (extra rig variants), rigChoice {castId: "a"|"b"|"c"}, skipClips: true (drop the Flow clips), clipCredits {clipId: max_credits}. Model work is done through cts_get_task / cts_submit_task; the answer says what to do next (hint) and shows every step.',
+      'Start or resume the episode pipeline: pitch (3 premises) -> STOP until the user chooses (cts_pitch_choose) -> bible -> character references -> rigs -> sets -> script -> child-safety review -> voice casting -> voices -> music -> Flow clips -> lip-sync/timelines/lint -> preview renders -> frame review -> final renders (hr and en MP4s). Call it again with the same series and episode to resume (it never skips the pause). The first call needs a brief {idea, title?, ageMin?, ageMax?, notes?, seconds?, lineRange?: [12,16], intro?: false, outro?: false}. retry: true puts failed steps back; from: "<step>" redoes that step and all after it. options: rigPaths {castId: ["claude-svg","raster"]} (extra rig variants), rigChoice {castId: "a"|"c"}, skipClips: true (drop the Flow clips), clipCredits {clipId: max_credits}. Model work is done through cts_get_task / cts_submit_task; the answer says what to do next (hint) and shows every step.',
       z.object({
         series,
         episode,
@@ -300,7 +300,7 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
     // ---------------------------------------------------------------- Flow clips
     def(
       'cts_clip_plan',
-      'The Flow clips of an episode: which clip beats have no file (the intro lives at series level, one hero clip per episode at most), their shots (written by the clip_shots step), the Flow credit cap and spend, and the exact video-plan.mjs commands for the hub session: plan (estimate), next (the max_credits of each call), record. Cartoon Studio copies no price table: the hub\'s scripts/video-plan.mjs owns it. Then cts_clip_generate {series, episode, clip, maxCredits}.',
+      'The Flow clips of an episode: which clip beats have no file (the intro and the outro live at series level; there is no other clip), their shots (written by the clip_shots step), the Flow credit cap and spend, and the exact video-plan.mjs commands for the hub session: plan (estimate), next (the max_credits of each call), record. Cartoon Studio copies no price table: the hub\'s scripts/video-plan.mjs owns it. Then cts_clip_generate {series, episode, clip, maxCredits}.',
       z.object({ series, episode }),
       async (a) => {
         const st = store()
@@ -329,13 +329,13 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
     ),
     def(
       'cts_clip_generate',
-      'Make one Flow clip: a free keyframe from the characters\' reference pictures and pose sheets (flow_generate image, max_credits 0), then the 8 s video scene (Omni 1.1 Flash 720p, first_frame = the keyframe) with max_credits = maxCredits, charged to the episode\'s Flow credit cap; the file goes to series/<slug>/clips/intro.mp4 (the intro) or episodes/<ep>/clips/<id>.mp4, then the frame-critic reviews six frames (revise = one retry, a second fail marks the clip fallback). REFUSES without a recorded flowCreditsCap (cts_budget_set, after the user\'s yes) and past it (FLOW_CREDITS_EXCEEDED, nothing spent); at most one hero clip per episode. Returns a job id at once.',
-      z.object({ series, episode: episode.optional().describe('The episode whose budget pays (default: the only episode)'), clip: z.string().describe('The clip id: intro, or the hero clip id'), maxCredits: z.number().positive().describe('The max_credits for this call, from video-plan.mjs next') }),
+      'Make one Flow clip (intro or outro only): a keyframe still drawn by our own player from the clip\'s staging (1280x720, clips/keyframes/<id>.png; no image goes to Flow), then the 8 s video scene (Omni 1.1 Flash 720p, first_frame = the keyframe) with max_credits = maxCredits, charged to the episode\'s Flow credit cap; the file goes to series/<slug>/clips/<id>.mp4, then the frame-critic reviews six frames (revise = one retry, a second fail marks the clip fallback). REFUSES without a recorded flowCreditsCap (cts_budget_set, after the user\'s yes) and past it (FLOW_CREDITS_EXCEEDED, nothing spent); any other clip id is refused. episode is only the budget that pays. Returns a job id at once.',
+      z.object({ series, episode: episode.optional().describe('The episode whose budget pays (default: the only episode)'), clip: z.enum(CLIP_IDS).describe('The clip id: intro or outro'), polish: z.boolean().optional().describe('Z-Image img2img clean-up of the still (not available yet: recorded and skipped)'), maxCredits: z.number().positive().describe('The max_credits for this call, from video-plan.mjs next') }),
       async (a) => {
         const ep = await episodeOf(a.series, a.episode)
         const b = await budgetState(store(), a.series, ep)
         if (b.flowCreditsCap <= 0) throw new Error(`cts_clip_generate refuses without a recorded flowCreditsCap for episode "${ep}": ask the user for a cap, then cts_budget_set {series, episode, capUsd: 0, flowCreditsCap, approvedBy, note}`)
-        const job = await enqueueJob(svc, { series: a.series, task: 'clip_generate', role: 'frame-critic', unit: `${ep}-${a.clip}`, label: `Flow clip ${a.clip}`, body: { episode: ep, clip: a.clip, maxCredits: a.maxCredits }, vision: true })
+        const job = await enqueueJob(svc, { series: a.series, task: 'clip_generate', role: 'frame-critic', unit: `${ep}-${a.clip}`, label: `Flow clip ${a.clip}`, body: { episode: ep, clip: a.clip, maxCredits: a.maxCredits, ...(a.polish ? { polish: true } : {}) }, vision: true })
         return { job, hint: 'cts_wait {series}; answer the review task (frame-critic) with cts_get_task / cts_submit_task; then cts_clip_plan or cts_episode_get to see the clip' }
       }
     ),

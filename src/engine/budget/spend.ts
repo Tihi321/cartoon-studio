@@ -399,7 +399,7 @@ export interface ChargeArgs {
   store: SeriesStore
   series: string
   /**
-   * The episode whose budget pays. A series-level spend (the series intro clip, a Recraft style) is charged to the episode that
+   * The episode whose budget pays. A series-level spend (the series intro or outro clip) is charged to the episode that
    * triggers it: the pilot charges the intro to the pilot episode. There is no series-level budget file.
    */
   episode: string

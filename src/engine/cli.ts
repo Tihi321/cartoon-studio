@@ -78,7 +78,7 @@ export async function keySet(argv: string[]): Promise<number> {
   const given = argv.find((a) => !a.startsWith('-'))
   const name = given && PAID_KEY_ACCOUNTS[given] ? PAID_KEY_ACCOUNTS[given] : given
   if (!name || !/^[A-Z][A-Z0-9_]*$/.test(name)) {
-    out('Usage: yarn key:set <ENV_NAME|fal|recraft>   for example: yarn key:set DEEPSEEK_API_KEY (the paid image providers: key-set fal, key-set recraft)')
+    out('Usage: yarn key:set <ENV_NAME|fal>   for example: yarn key:set DEEPSEEK_API_KEY (the paid image provider: key-set fal)')
     return 2
   }
   if (resolveKey(name) && process.env[name]) out(`Note: ${name} is also set in the environment, which takes priority.`)

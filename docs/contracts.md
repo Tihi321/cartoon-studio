@@ -20,7 +20,7 @@ Other code imports the schemas and types; it never redefines them.
 ```
 series/<slug>/
   bible.json
-  cast/<id>/            ref.png  parts/*.svg|*.png  rig.json  sheet.png   (variants/<a|b|c>/{parts/, rig.json, sheet.png})
+  cast/<id>/            ref.png  parts/*.svg|*.png  rig.json  sheet.png   (variants/<a|c>/{parts/, rig.json, sheet.png})
   sets/<id>/            layers/*.png  set.json
   music/                <cue>.ogg
   clips/                <id>.mp4  clips.json
@@ -30,8 +30,7 @@ series/<slug>/
 
 ## Series bible `bible.json`
 
-The series: title and logline in both languages, audience, tone, style (palette, outline width, the reference prompt; `recraftStyleId` is
-set once if the Recraft path is used), cast, sets, music, rules, episodes. `pitches` holds the showrunner's three premises; the pipeline
+The series: title and logline in both languages, audience, tone, style (palette, outline width, the reference prompt), cast, sets, music, rules, episodes. `pitches` holds the showrunner's three premises; the pipeline
 waits (state `waiting-on-user`) until `chosenPitch` is the id of one of them, set by the user (`cts_pitch_choose` or the studio). A cast
 member's `voice` has one entry per language: `provider` (`auto` follows the allocation rule), a Gemini voice name, a VibeTTS voice, and for
 the local OmniVoice engine `comfy`: `engine`, `instruct` (attribute tags such as "female, child, high pitch", not free style words),
@@ -277,7 +276,8 @@ key at B. `clips` are the `clip` beats: the cutout segments between them are ren
 
 ## Clips `clips/clips.json` (series) and `episodes/<ep>/clips/clips.json`
 
-The Flow video clips (the series intro, an episode's hero moment). `file` is relative to the series folder (series clips) or to the episode
+The Flow video clips: the series `intro` and `outro` (series level, `clips/<id>.mp4`; no other id can be made). An older series may still hold an
+episode-level `hero` entry; it keeps resolving. `file` is relative to the series folder (series clips) or to the episode
 folder (episode clips). `credits` is what the clip cost; `review` is the frame
 critic's verdict; `fallback: true` drops the clip (the beat renders the cutout fallback). A missing `.mp4` for a `clip` beat is
 `E_CLIP_MISSING` unless the clip is marked `fallback`.

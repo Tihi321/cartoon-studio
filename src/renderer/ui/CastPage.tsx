@@ -8,7 +8,7 @@ import { ctsStore } from '../store/store'
 import { Pill } from './common'
 import { LANG_NAME, NeedSeries, Picture, PlayButton, ToolGate, useSeries } from './studio'
 
-const PATH_NAME: Record<RigVariant, string> = { a: 'Claude draws SVG parts', b: 'Recraft SVG, split into parts', c: 'Raster cut-out from the reference' }
+const PATH_NAME: Record<RigVariant, string> = { a: 'Claude draws SVG parts', c: 'Raster cut-out from the reference' }
 
 /** Cast: the reference image, the pose sheet, the rig made by each path side by side, the rig check and the voice of each character. */
 export function CastPage() {

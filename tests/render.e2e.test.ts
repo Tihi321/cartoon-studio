@@ -21,7 +21,7 @@ beforeAll(async () => {
   await buildEpisodeTimelines(store, 'mini', 'ep00-mini')
   tl = await store.readTimeline('mini', 'ep00-mini', 'hr')
   await mkdir(path.join(series, 'clips'), { recursive: true })
-  const made = await runCapture('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=s=640x360:r=30:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', path.join(series, 'clips', 'hero.mp4')])
+  const made = await runCapture('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=s=640x360:r=30:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', path.join(series, 'clips', 'intro.mp4')])
   expect(made.code, made.stderr).toBe(0)
 })
 afterAll(async () => {
@@ -48,7 +48,7 @@ describe('render', () => {
     expect(await framesMd5(b.file)).toBe(hashA) // what came out of the encoder
 
     // splice: a 1 s clip at 1-2 s of a 3 s episode
-    const withClip: Timeline = { ...tl, duration: 3, clips: [{ id: 'hero', file: 'clips/hero.mp4', t0: 1, t1: 2, audio: 'mute', fallback: false }] }
+    const withClip: Timeline = { ...tl, duration: 3, clips: [{ id: 'intro', file: 'clips/intro.mp4', t0: 1, t1: 2, audio: 'mute', fallback: false }] }
     const fin = await renderEpisode({ ...base, dataDir: dir, quality: 'final', timeline: withClip, maxSeconds: 3 })
     const finProbe = await ffprobe(fin.file)
     expect(finProbe.streams.find((s) => s.codec_type === 'video')?.r_frame_rate).toBe('24/1')

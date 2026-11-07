@@ -7,21 +7,19 @@ import type { SeriesStore } from '../series/service'
 import type { CtsService } from '../service'
 
 /**
- * The image provider slot. One interface, four providers: `comfy` (local, $0, the default), `flow` (free Google Flow images, `max_credits: 0`),
- * `fal` and `recraft` (paid, every call behind `charge` in `budget/spend.ts`). Callers never build a provider's URL or key themselves.
+ * The image provider slot. One interface, three providers: `comfy` (local, $0, the default), `gemini` (Nano Banana, paid, a stub until CTS-11)
+ * and `fal` (paid, every call behind `charge` in `budget/spend.ts`). No image is made by Google Flow: Flow makes video only. Callers never build a provider's URL or key themselves.
  */
 
-export const IMAGE_PROVIDERS = ['comfy', 'flow', 'fal', 'recraft'] as const
+export const IMAGE_PROVIDERS = ['comfy', 'gemini', 'fal'] as const
 export type ImageProviderId = (typeof IMAGE_PROVIDERS)[number]
 
 export interface ImageRequest {
   prompt: string
   size: { width: number; height: number }
-  /** Reference images (absolute paths). Comfy edits from them (Qwen edit), Flow takes up to 3, Recraft makes a style from them when none exists. */
+  /** Reference images (absolute paths). Comfy edits from them (Qwen edit). */
   refs?: string[]
   format: 'png' | 'svg'
-  /** Recraft style id (the bible's `style.recraftStyleId` is used when absent). */
-  styleId?: string
   /** Absolute output path WITHOUT extension; the provider adds `.png` or `.svg`. */
   out: string
   /** Overrides the provider's default model (a fal endpoint id, a ComfyUI engine id). */
@@ -32,12 +30,10 @@ export interface ImageRequest {
 
 export interface ImageResult {
   file: string
-  /** USD charged (0 for comfy and flow). */
+  /** USD charged (0 for comfy). */
   costUsd: number
   provider: ImageProviderId
   model: string
-  /** Recraft: the style id that was used or created. */
-  styleId?: string
 }
 
 export interface ImageProvider {
@@ -65,21 +61,19 @@ export async function pick(provider: ImageProviderId | 'auto', ctx: ImageContext
   switch (id) {
     case 'comfy':
       return (await import('./comfy')).comfyProvider(ctx)
-    case 'flow':
-      return (await import('./flow')).flowProvider(ctx)
+    case 'gemini':
+      return (await import('./gemini')).geminiProvider(ctx)
     case 'fal':
       return (await import('./fal')).falProvider(ctx)
-    case 'recraft':
-      return (await import('./recraft')).recraftProvider(ctx)
     default:
-      throw new Error(`unknown image provider "${String(provider)}" (comfy, flow, fal, recraft, auto)`)
+      throw new Error(`unknown image provider "${String(provider)}" (comfy, gemini, fal, auto)`)
   }
 }
 
 // ---- keys: only this tool's own keyring entries (never the environment, never the sibling tools' stores) ----
 
 /** The keyring account of a paid provider. `key-set <provider>` stores the key under it. */
-export const PAID_KEY_ACCOUNTS: Record<string, string> = { fal: 'FAL_API_KEY', recraft: 'RECRAFT_API_KEY' }
+export const PAID_KEY_ACCOUNTS: Record<string, string> = { fal: 'FAL_API_KEY' }
 
 export class KeyMissingError extends Error {
   readonly code = 'KEY_MISSING'

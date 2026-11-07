@@ -1,5 +1,5 @@
 // Pose sheet: one rig in neutral, every emotion, every gesture at its peak, all 8 mouths and the 3 eye states, in a labelled grid.
-// Pure drawing of a loaded rig; deterministic. Opened with `?sheet=<castId>&series=<slug>[&variant=a|b|c]`.
+// Pure drawing of a loaded rig; deterministic. Opened with `?sheet=<castId>&series=<slug>[&variant=a|c]`.
 import { EYE_STATES, MOUTH_SHAPES } from '../shared/contracts'
 import type { RigAssets } from './assets'
 import { drawActor, emotionFace, partCenter, type Pose } from './puppet'

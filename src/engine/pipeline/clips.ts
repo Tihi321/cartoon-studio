@@ -2,9 +2,9 @@ import { execFile } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import sharp from 'sharp'
-import type { Bible, ClipEntry, Episode } from '../../shared/contracts'
+import type { Bible, ClipEntry, Episode, Rig, SetFile, Timeline } from '../../shared/contracts'
 import { budgetState, charge, localIso } from '../budget/spend'
-import { poseSheet } from '../render/sheet'
+import { stillFrame } from '../render/sheet'
 import { SeriesStore } from '../series/service'
 import type { CtsService } from '../service'
 import { ffprobe } from '../render/ffmpeg'
@@ -12,15 +12,19 @@ import type { z } from 'zod'
 import type { clipShotAnswer } from './tasks'
 
 /**
- * Flow hero clips (HUB-29 decision 12, step 9b): the series intro (once per series, `series/<slug>/clips/intro.mp4`, reused by every episode) and at
- * most one 8 s hero clip per episode (`episodes/<ep>/clips/<id>.mp4`). The showrunner writes the shots; this module writes them in the input shape of the
- * hub's `scripts/video-plan.mjs plan` (`episodes/<ep>/video/screenplay.json`), makes the keyframe (a free Flow image, `max_credits: 0`) and the clip (a Flow
- * video scene behind `charge(currency: "credits")`), and keeps `clips.json`. The hub session runs `video-plan.mjs plan | next | record` for the estimate and
- * each call's `max_credits`; this module copies none of its price table.
+ * Flow clips (HUB-29 decision 12, step 9b; pilot 2 decision 4): the series intro and outro, both at series level (`series/<slug>/clips/<id>.mp4`, reused by
+ * every episode). No other clip id can be made. The keyframe is a still drawn by our own player from the clip's `staging` (the set, the leads at their
+ * marks, emotion, gesture peak); no image goes to Flow. The showrunner writes the shots; this module writes them in the input shape of the hub's
+ * `scripts/video-plan.mjs plan` (`episodes/<ep>/video/screenplay.json`) and makes the clip (a Flow video scene behind `charge(currency: "credits")`), and keeps
+ * `clips.json`. The hub session runs `video-plan.mjs plan | next | record` for the estimate and each call's `max_credits`; this module copies none of its price table.
+ * A pilot 1 episode may still hold a `hero` clip entry: it keeps resolving at episode level, but no new one can be made.
  */
 
 export const INTRO_ID = 'intro'
-export const MAX_HERO_CLIPS = 1
+export const OUTRO_ID = 'outro'
+/** The only clip ids that can be made, both series level. */
+export const CLIP_IDS = [INTRO_ID, OUTRO_ID] as const
+export const isClipId = (id: string): boolean => (CLIP_IDS as readonly string[]).includes(id)
 /** The Flow video model and size of the pilot (the `omni-720p` row of video-plan.mjs: 8 s = 12 credits seen). */
 export const VIDEO_MODEL = 'Omni 1.1 Flash'
 export const VIDEO_RESOLUTION = '720p'
@@ -44,9 +48,9 @@ export function clipBeats(script: Episode): { clip: string; seconds: number; aud
   return out
 }
 
-/** The intro lives at series level, every other clip at episode level. */
+/** The intro and the outro live at series level; any other id (a pilot 1 `hero` clip) is looked up at episode level. */
 export function clipLocation(episode: string, clip: string): { level: 'series' | 'episode'; file: string } {
-  return clip === INTRO_ID ? { level: 'series', file: `clips/${clip}.mp4` } : { level: 'episode', file: `episodes/${episode}/clips/${clip}.mp4` }
+  return isClipId(clip) ? { level: 'series', file: `clips/${clip}.mp4` } : { level: 'episode', file: `episodes/${episode}/clips/${clip}.mp4` }
 }
 
 /** The clip beats of the script whose file is missing and that are not already dropped (`fallback`). */
@@ -70,9 +74,9 @@ export async function missingClips(store: SeriesStore, series: string, episode: 
   return out
 }
 
-/** At most the intro plus one hero clip per episode (a script with more is refused by the writer's check and by the clip step). */
-export function heroCount(script: Episode): number {
-  return clipBeats(script).filter((b) => b.clip !== INTRO_ID).length
+/** The clip ids of a NEW script that are not allowed (anything but `intro` and `outro`); the writer's check refuses them. */
+export function badClipIds(script: Episode): string[] {
+  return clipBeats(script).filter((b) => !isClipId(b.clip)).map((b) => b.clip)
 }
 
 /**
@@ -153,10 +157,66 @@ export async function readShots(store: SeriesStore, series: string): Promise<Sho
   }
 }
 
-export function keyframePrompt(bible: Bible, shot: ClipShots[number]): string {
-  const who = shot.who.map((id) => bible.cast.find((c) => c.id === id)).map((c, i) => (c ? `${c.name.en} (${c.look ?? c.personality})` : shot.who[i]))
-  const place = bible.sets[0]
-  return [CLIP_STYLE, `${shot.framing}: ${shot.keyframe}`, who.length ? `In frame: ${who.join('; ')}. Keep each character exactly as in the reference pictures.` : '', place ? `Place: ${place.name.en}. ${place.description}` : '', 'No text, no captions, no watermark.'].filter(Boolean).join(' ')
+const STILL_SIZE = { width: 1280, height: 720 }
+
+/** A one-scene timeline that holds the clip's staging at time 0: the leads at their marks, facing, emotion, and the gesture at its peak. */
+export async function buildStillTimeline(store: SeriesStore, series: string, shot: ClipShots[number]): Promise<Timeline> {
+  const st = shot.staging
+  const set: SetFile = await store.readSet(series, st.set).catch(() => {
+    throw new Error(`clip ${shot.id}: staging set "${st.set}" does not exist`)
+  })
+  const cam = set.shots[st.shot]
+  if (!cam) throw new Error(`clip ${shot.id}: set "${st.set}" has no shot "${st.shot}" (${Object.keys(set.shots).join(', ')})`)
+  const actors: Timeline['actors'] = {}
+  for (const a of st.actors) {
+    const mark = set.marks[a.mark]
+    if (!mark) throw new Error(`clip ${shot.id}: set "${st.set}" has no mark "${a.mark}" (${Object.keys(set.marks).join(', ')})`)
+    const rig: Rig = await store.readRig(series, a.who).catch(() => {
+      throw new Error(`clip ${shot.id}: ${a.who} has no rig yet (run the rig step first)`)
+    })
+    const emotion = rig.emotions[a.emotion] ? a.emotion : 'neutral'
+    const rot: Record<string, [number, number, 'step'][]> = {}
+    if (a.gesture) {
+      const g = rig.gestures[a.gesture]
+      if (!g) throw new Error(`clip ${shot.id}: ${a.who} has no gesture "${a.gesture}" (${Object.keys(rig.gestures).join(', ')})`)
+      const peak = g.keys.reduce((best, k) => (Math.abs(k[1]) > Math.abs(best[1]) ? k : best), g.keys[0]!)
+      rot[g.part] = [[0, peak[1], 'step']]
+    }
+    actors[a.who] = {
+      x: [[0, mark[0], 'step']],
+      y: [[0, mark[1], 'step']],
+      facing: [[0, a.facing]],
+      visible: [[0, true]],
+      emotion: [[0, emotion]],
+      eyes: [[0, rig.emotions[emotion]?.eyes ?? 'open']],
+      mouth: [[0, 'rest']],
+      rot,
+      bob: [[0, 0, 'step']]
+    }
+  }
+  return {
+    schema: 'cts.timeline/1',
+    series,
+    episode: `still-${shot.id}`,
+    lang: 'en',
+    scriptHash: 'still',
+    size: [STILL_SIZE.width, STILL_SIZE.height],
+    fps: { anim: 12, out: 24 },
+    duration: 1,
+    seed: 29,
+    scenes: [{ id: 'still', set: st.set, t0: 0, t1: 1 }],
+    camera: [{ t: 0, center: [cam.center[0], cam.center[1]], zoom: cam.zoom, ease: 'cut' }],
+    actors,
+    audio: [],
+    lines: [],
+    clips: []
+  }
+}
+
+/** Draws the keyframe still of a shot with the player: `clips/keyframes/<id>.png` at series level, 1280x720. */
+export async function renderKeyframe(svc: CtsService, store: SeriesStore, series: string, shot: ClipShots[number]): Promise<string> {
+  const timeline = await buildStillTimeline(store, series, shot)
+  return stillFrame({ dataDir: svc.dataDir, series, timeline, out: path.join(store.paths(series).root, 'clips', 'keyframes', `${shot.id}.png`), width: STILL_SIZE.width, height: STILL_SIZE.height })
 }
 
 export function videoPrompt(shot: ClipShots[number]): string {
@@ -174,6 +234,10 @@ export interface GenerateClipArgs {
   clip: string
   maxCredits: number
   seconds?: number
+  /** Z-Image img2img clean-up of the still at denoise 0.35 (CTS-11). Not available yet: when set, the still is used as it is and the result says so. */
+  polish?: boolean
+  /** Tests pass a fake renderer. Default: the player (`renderKeyframe`). */
+  renderStill?: (shot: ClipShots[number]) => Promise<string>
   log: (m: string) => void
   signal?: AbortSignal
 }
@@ -184,47 +248,29 @@ export interface GeneratedClip {
   file: string
   credits: number
   keyframe: string
-  referenceImages: string[]
+  /** Set when `polish` was asked for but is not wired yet. */
+  polish?: 'not available yet'
 }
 
-const exists = (f: string): Promise<boolean> => fs.stat(f).then((s) => s.isFile(), () => false)
 
-/** The reference pictures of a shot: each lead's `ref.png` first, then their pose sheets, at most 3 (Flow takes 3). */
-export async function clipReferences(svc: CtsService, store: SeriesStore, series: string, who: string[], log: (m: string) => void): Promise<string[]> {
-  const p = store.paths(series)
-  const refs: string[] = []
-  for (const id of who) {
-    const f = path.join(p.castDir(id), 'ref.png')
-    if (await exists(f)) refs.push(f)
-  }
-  for (const id of who) {
-    if (refs.length >= 3) break
-    const f = path.join(p.castDir(id), 'sheet.png')
-    if (await exists(f)) refs.push(f)
-    else {
-      try {
-        refs.push(await poseSheet({ dataDir: svc.dataDir, series, cast: id }))
-      } catch (e) {
-        log(`no pose sheet for ${id}: ${(e as Error).message.split('\n')[0]}`)
-      }
-    }
-  }
-  return refs.slice(0, 3)
+/** Throws for any clip id but `intro` and `outro`. */
+export function assertClipId(clip: string): void {
+  if (!isClipId(clip)) throw new Error(`clip "${clip}" is not allowed: the only clips are ${CLIP_IDS.join(' and ')} (series level); there is no hero clip`)
 }
 
 /**
- * Keyframe (free) then video (credits). Refuses without a recorded `flowCreditsCap`; the credit gate refuses past it; nothing is spent on a refusal.
+ * The keyframe (a player still, free) then the video (credits). Refuses any clip id but `intro` and `outro`, refuses without a recorded `flowCreditsCap`; the credit gate refuses past it; nothing is spent on a refusal.
  * The file lands at the clip's path and `clips.json` gets its entry (review null: `reviewClip` sets it).
  */
 export async function generateClip(a: GenerateClipArgs): Promise<GeneratedClip> {
   const { svc, store, series, episode, clip } = a
+  assertClipId(clip)
   const state = await budgetState(store, series, episode)
   if (state.flowCreditsCap <= 0) throw new Error(`cts_clip_generate refuses without a recorded flowCreditsCap for episode "${episode}": ask the user for a cap, then cts_budget_set {series, episode, capUsd: 0, flowCreditsCap, approvedBy, note}`)
   if (!(a.maxCredits > 0)) throw new Error('maxCredits must be the max_credits that video-plan.mjs next gave for this clip (a number above 0)')
   const shots = await readShots(store, series)
   const shot = shots?.clips.find((c) => c.id === clip)
   if (!shot) throw new Error(`no shot "${clip}" in tasks/clip-shots.json: the clip_shots step writes it (cts_run_pipeline), or write the shot yourself`)
-  const bible = await store.readBible(series)
   const { flow } = await svc.studios({ autoStart: true, log: a.log })
   if (!flow.generateVideo) throw new Error('this Flow client cannot make video')
   const st = await flow.status(a.signal)
@@ -233,16 +279,17 @@ export async function generateClip(a: GenerateClipArgs): Promise<GeneratedClip> 
   if (!st.uploadRights) throw new Error('flow-music-mcp has no upload rights (FLOW_MUSIC_MCP_UPLOAD_RIGHTS=agree in its .env): Flow asks to confirm rights before it takes our reference pictures. That is the user\'s to give; nothing was spent.')
 
   const dir = videoDir(store, series, episode)
-  const refs = await clipReferences(svc, store, series, shot.who, a.log)
-  if (refs.length === 0) throw new Error(`no reference pictures for ${shot.who.join(', ')} (cast/<id>/ref.png): run the cast_ref step first`)
   const project = `cartoon-studio-${series}`
-  a.log(`clip ${clip}: keyframe from ${refs.length} reference picture(s)`)
-  const kf = await flow.generateImage({ prompt: keyframePrompt(bible, shot), aspect: '16:9', references: refs, quality: 'original', project, out: path.join(dir, 'keyframes'), name: clip, timeoutMs: 600_000, signal: a.signal })
-  a.log(`clip ${clip}: keyframe ${kf.file}; video (max_credits ${a.maxCredits})`)
+  if (!shot.staging) throw new Error(`shot "${clip}" in tasks/clip-shots.json has no staging (set, shot, actors): the clip_shots step writes it`)
+  a.log(`clip ${clip}: keyframe from the player (set ${shot.staging.set}, ${shot.staging.actors.map((x) => x.who).join(', ')})`)
+  const keyframe = await (a.renderStill ?? ((sh) => renderKeyframe(svc, store, series, sh)))(shot)
+  const polish = a.polish ? ('not available yet' as const) : undefined
+  if (polish) a.log(`clip ${clip}: polish not available yet, the still is used as it is`)
+  a.log(`clip ${clip}: keyframe ${keyframe}; video (max_credits ${a.maxCredits})`)
   const prompt = videoPrompt(shot)
   const r = await charge(
     { store, series, episode, provider: 'flow', model: `${VIDEO_MODEL} ${VIDEO_RESOLUTION}`, what: `clip ${clip} (${VIDEO_SECONDS} s)`, currency: 'credits', estimate: a.maxCredits },
-    () => flow.generateVideo!({ prompt, aspect: '16:9', model: VIDEO_MODEL, duration: VIDEO_SECONDS, resolution: VIDEO_RESOLUTION, firstFrame: kf.file, maxCredits: a.maxCredits, project, out: path.join(dir, 'clips'), name: clip, timeoutMs: 1_800_000, signal: a.signal }),
+    () => flow.generateVideo!({ prompt, aspect: '16:9', model: VIDEO_MODEL, duration: VIDEO_SECONDS, resolution: VIDEO_RESOLUTION, firstFrame: keyframe, maxCredits: a.maxCredits, project, out: path.join(dir, 'clips'), name: clip, timeoutMs: 1_800_000, signal: a.signal }),
     { actual: (v) => v.creditsSpent ?? v.creditsQuote }
   )
   const loc = clipLocation(episode, clip)
@@ -253,7 +300,7 @@ export async function generateClip(a: GenerateClipArgs): Promise<GeneratedClip> 
   const entry: ClipEntry = { id: clip, file: loc.level === 'series' ? loc.file : `clips/${clip}.mp4`, seconds: Math.round(seconds * 100) / 100, credits: r.amount, flowMediaId: r.value.mediaId || null, prompt, review: null }
   await upsertClip(store, series, episode, loc.level, entry)
   a.log(`clip ${clip}: ${abs} (${entry.seconds} s, ${r.amount} credits)`)
-  return { entry, file: abs, credits: r.amount, keyframe: kf.file, referenceImages: refs }
+  return { entry, file: abs, credits: r.amount, keyframe, ...(polish ? { polish } : {}) }
 }
 
 export async function upsertClip(store: SeriesStore, series: string, episode: string, level: 'series' | 'episode', entry: ClipEntry): Promise<void> {

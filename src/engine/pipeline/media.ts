@@ -1,12 +1,10 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import sharp from 'sharp'
 import type { z } from 'zod'
 import type { Bible, ClipEntry, Lang, RigVariant } from '../../shared/contracts'
-import { budgetState, ChargeError, localIso } from '../budget/spend'
+import { budgetState, localIso } from '../budget/spend'
 import { makeSetArt, SET_SIZE } from '../images/background'
 import { REF_SIZE, generateReferences, refPrompt } from '../images/reference'
-import { KeyMissingError, pick } from '../images/provider'
 import { buildEpisodeTimelines } from '../anim/timeline'
 import { renderEpisode } from '../render/render'
 import { contactSheet, poseSheet } from '../render/sheet'
@@ -21,7 +19,6 @@ import {
   RIG_PATHS,
   VARIANT_OF,
   buildRasterRig,
-  buildRecraftRig,
   chooseVariant,
   compareVariants,
   readVariants,
@@ -29,7 +26,7 @@ import {
   writeRigSet
 } from './rig'
 import type { RigPath } from './rig'
-import { generateClip, clipSheet, clipLocation, missingClips, readShots, upsertClip, videoDir } from './clips'
+import { assertClipId, generateClip, clipSheet, clipLocation, missingClips, readShots, upsertClip, videoDir } from './clips'
 import type { rigRasterAnswer, rigClaudeAnswer, refPickAnswer, refPromptAnswer, setPlanAnswer, setPlaceAnswer, reviewAnswer } from './tasks'
 
 type Raster = z.infer<typeof rigRasterAnswer>
@@ -139,7 +136,6 @@ async function rasterTask(e: Env, bible: Bible, castId: string, variant: RigVari
 
 async function buildVariant(e: Env, bible: Bible, castId: string, rp: RigPath, style: string): Promise<{ status: 'built' | 'not-run'; note: string }> {
   const variant = VARIANT_OF[rp]
-  const p = e.store.paths(e.series)
   const log = (m: string) => e.log(m)
   if (rp === 'claude-svg') return { status: 'built', note: await buildClaude(e, bible, castId, variant, style) }
   if (rp === 'raster') {
@@ -148,21 +144,7 @@ async function buildVariant(e: Env, bible: Bible, castId: string, rp: RigPath, s
     if (!res.check.ok) throw new Error(`raster rig of ${castId} fails cts_rig_check: ${res.check.issues.filter((i) => i.severity === 'error').slice(0, 5).map((i) => i.message).join('; ')}`)
     return { status: 'built', note: answer.notes || 'cut from the keyed reference' }
   }
-  // recraft-svg: paid, refused at a $0 cap (the pilot): recorded as NOT RUN
-  try {
-    const prov = await pick('recraft', imageCtx(e, `character ${castId} vector figure`))
-    const ref = await e.store.readBible(e.series)
-    const r = await prov.generate({ prompt: refPrompt(String(ref.cast.find((x) => x.id === castId)?.look ?? castId), ref.style), size: REF_SIZE, format: 'svg', refs: [path.join(p.castDir(castId), 'ref.png')], out: path.join(p.rigDir(castId, variant), 'figure') })
-    const figure = await fs.readFile(r.file, 'utf8')
-    const png = path.join(p.rigDir(castId, variant), 'figure.png')
-    await sharp(Buffer.from(figure)).flatten({ background: '#ffffff' }).png().toFile(png)
-    const answer = await rasterTask(e, bible, castId, variant, style, [relTo(e, png)], 'rig-recraft', `Cut the vector figure (second picture) into parts for path recraft-svg (variant b): polygons in the VIEWBOX coordinates of the figure SVG, pivots and z. Use the same part ids as variant a; the face comes from variant a.`)
-    const res = await buildRecraftRig({ store: e.store, series: e.series, cast: castId, figureSvg: figure, answer })
-    return { status: res.check.ok ? 'built' : 'not-run', note: res.check.ok ? 'cut from the Recraft figure' : `check failed: ${res.check.issues[0]?.message ?? ''}` }
-  } catch (err) {
-    if (err instanceof ChargeError || err instanceof KeyMissingError) return { status: 'not-run', note: err.message.slice(0, 300) }
-    throw err
-  }
+  throw new Error(`unknown rig path "${String(rp)}"`)
 }
 
 /** Builds one path of one character as a variant, times it and records it in `variants.json`. */
@@ -208,7 +190,7 @@ export async function rigStep(e: Env): Promise<string> {
       notes.push(`${c.id}/${r.variant} ${rp}: ${r.status}, ${r.wallSeconds} s`)
     }
     const rec = await readVariants(e.store, e.series, c.id)
-    const built = (['a', 'b', 'c'] as const).filter((v) => rec.variants[v]?.status === 'built')
+    const built = (['a', 'c'] as const).filter((v) => rec.variants[v]?.status === 'built')
     if (built.length > 1) await compareVariants({ dataDir: e.svc.dataDir, store: e.store, series: e.series, cast: c.id }).catch((err) => e.log(`rig comparison of ${c.id}: ${(err as Error).message.split('\n')[0]}`))
     const want = choice[c.id] as RigVariant | undefined
     const pickV = want && built.includes(want) ? want : built.includes('a') ? 'a' : built[0]
@@ -315,22 +297,18 @@ export async function reviewClip(e: Env, clip: string, file: string, who: string
 }
 
 /** Makes one clip and has it reviewed: `revise` gets at most one retry, a second fail sets `fallback: true` (the spend stays recorded). */
-export async function makeClip(e: Env, clip: string, maxCredits: number): Promise<string> {
+export async function makeClip(e: Env, clip: string, maxCredits: number, polish = false): Promise<string> {
   const shots = await readShots(e.store, e.series)
   const who = shots?.clips.find((c) => c.id === clip)?.who ?? []
   const loc = clipLocation(e.episode, clip)
-  if (clip !== 'intro') {
-    const cur = await e.store.readClips(e.series, e.episode)
-    const others = cur.clips.filter((c) => c.id !== clip && !c.fallback && c.id !== 'intro')
-    if (others.length >= 1) throw new Error(`at most one hero clip per episode: "${others[0]!.id}" already exists`)
-  }
+  assertClipId(clip)
   let last: ClipEntry | null = null
   let credits = 0
   for (let attempt = 1; attempt <= 2; attempt++) {
     e.progress((attempt - 1) / 2, `clip ${clip}, attempt ${attempt}`)
     let gen
     try {
-      gen = await generateClip({ svc: e.svc, store: e.store, series: e.series, episode: e.episode, clip, maxCredits, log: (m) => e.log(m), signal: e.ctx.signal })
+      gen = await generateClip({ svc: e.svc, store: e.store, series: e.series, episode: e.episode, clip, maxCredits, ...(polish ? { polish } : {}), log: (m) => e.log(m), signal: e.ctx.signal })
     } catch (err) {
       if (attempt === 2 && last) {
         last = { ...last, fallback: true, review: 'revise' }

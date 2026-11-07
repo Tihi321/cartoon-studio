@@ -15,7 +15,7 @@ Beats run one after another; `"with":"prev"` starts a beat together with the one
 - `move`: `who`, `to` (a mark), `seconds`. `turn`: `who`, `facing` ("left"|"right"). `emote`: `who`, `emotion`. `gesture`: `who`, `gesture`. `look`: `who`, `target` (cast id).
 - `camera`: `shot` (a shot of the set), `transition` ("cut"|"pan"), `seconds` for a pan.
 - `pause`: `seconds`. `sfx`: `cue`. `music`: `cue`, `action` ("start"|"stop"), optional `gain` (0 to 1), `fade`. `title`: `key` (a string in the text), `seconds`.
-- `clip`: `clip` (id), `seconds` (8), `audio` ("keep"|"mute"). The series intro is the clip "intro"; at most one other (a hero) clip. No beat runs `with:"prev"` over a clip or directly after one.
+- `clip`: `clip` (id), `seconds` (8), `audio` ("keep"|"mute"). The only clip ids are "intro" (the first beat) and "outro" (the last beat); there is no other clip. No beat runs `with:"prev"` over a clip or directly after one.
 
 Only use emotions and gestures that exist for that character (the input lists them). A line beat needs a speaker who is in the scene.
 

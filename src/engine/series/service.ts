@@ -203,10 +203,10 @@ export class SeriesStore {
   async listCast(slug: string): Promise<string[]> {
     return this.subdirs(path.join(this.paths(slug).root, 'cast'))
   }
-  /** The variants (`a`, `b`, `c`) that have a `rig.json` under `cast/<id>/variants/`. */
+  /** The variants (`a`, `c`) that have a `rig.json` under `cast/<id>/variants/`. */
   async listRigVariants(slug: string, cast: string): Promise<RigVariant[]> {
     const dirs = await this.subdirs(path.join(this.paths(slug).castDir(cast), 'variants'))
-    return dirs.filter((d): d is RigVariant => d === 'a' || d === 'b' || d === 'c')
+    return dirs.filter((d): d is RigVariant => d === 'a' || d === 'c')
   }
   readSet(slug: string, set: string): Promise<SetFile> {
     return this.readJson(this.paths(slug).setFile(set), setSchema)

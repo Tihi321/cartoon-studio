@@ -28,7 +28,7 @@ export function comfyProvider(ctx: ImageContext): ImageProvider {
   return {
     id: 'comfy',
     async generate(req: ImageRequest): Promise<ImageResult> {
-      if (req.format === 'svg') throw new Error('comfy makes PNG pictures only; use the recraft provider (or write the SVG yourself) for format "svg"')
+      if (req.format === 'svg') throw new Error('comfy makes PNG pictures only; write the SVG yourself for format "svg"')
       const edit = (req.refs?.length ?? 0) > 0
       const engine = req.model ?? (edit ? EDIT_MODEL : await configuredImageModel(ctx.svc.dataDir))
       await comfyKindSwitch('image', { dataDir: ctx.svc.dataDir })

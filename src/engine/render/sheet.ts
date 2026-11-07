@@ -128,3 +128,35 @@ export async function poseSheet(req: PoseSheetRequest): Promise<string> {
   await fs.writeFile(file, Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64'))
   return file
 }
+
+export interface StillFrameRequest {
+  dataDir: string
+  series: string
+  /** A one-scene timeline (see `buildStillTimeline`); frame 0 is drawn. */
+  timeline: Timeline
+  /** Absolute output path (a PNG). */
+  out: string
+  width?: number
+  height?: number
+  playerDir?: string
+}
+
+/** One frame of a timeline drawn by the player (no label), saved as a PNG: the clip keyframe. Default 1280x720. Returns `out`. */
+export async function stillFrame(req: StillFrameRequest): Promise<string> {
+  const width = req.width ?? 1280
+  const height = req.height ?? 720
+  const dataUrl = await withPlayer({ dataDir: req.dataDir, ...(req.playerDir ? { playerDir: req.playerDir } : {}) }, async ({ page, origin }) => {
+    await page.evaluate(
+      async ([timeline, base, w, h]) => {
+        const win = window as unknown as SheetWindow
+        await win.cts.load(timeline, base as string, { width: w as number, height: h as number })
+        await win.cts.renderFrame(0)
+      },
+      [req.timeline, `${origin}/files/${req.series}/`, width, height] as const
+    )
+    return page.evaluate(() => (window as unknown as SheetWindow).cts.canvas.toDataURL('image/png'))
+  })
+  await fs.mkdir(path.dirname(req.out), { recursive: true })
+  await fs.writeFile(req.out, Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64'))
+  return req.out
+}

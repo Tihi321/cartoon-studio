@@ -26,7 +26,7 @@ export const STEPS: readonly StepDef[] = [
   { id: 'pitch_choice', no: '1', label: 'The user picks a premise', role: 'showrunner', kind: 'gate' },
   { id: 'bible', no: '1b', label: 'Series bible from the chosen premise (showrunner)', role: 'showrunner', kind: 'role' },
   { id: 'cast_ref', no: '2', label: 'Character references (character-designer, ComfyUI)', role: 'character-designer', kind: 'role', vision: true },
-  { id: 'rig', no: '3', label: 'Rigs (character-designer): claude-svg, recraft-svg, raster', role: 'character-designer', kind: 'role', vision: true },
+  { id: 'rig', no: '3', label: 'Rigs (character-designer): claude-svg, raster', role: 'character-designer', kind: 'role', vision: true },
   { id: 'set', no: '4', label: 'Sets (background-artist, ComfyUI)', role: 'background-artist', kind: 'role', vision: true },
   { id: 'script', no: '5', label: 'Script and texts (writer)', role: 'writer', kind: 'role' },
   { id: 'safety', no: '6', label: 'Child safety review, must pass (child-safety-reviewer)', role: 'child-safety-reviewer', kind: 'role' },

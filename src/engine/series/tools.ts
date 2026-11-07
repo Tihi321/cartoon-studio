@@ -18,7 +18,7 @@ export function seriesCheckTools(svc: CtsService, def: ToolDef): Tool[] {
     ),
     def(
       'cts_rig_check',
-      'Check one rig against the part rules: every part and face file exists, SVG parts are flat (no text, filter, script, external href; size limits), PNG parts have alpha, all 8 mouth shapes, 3 eye states and 4 brow states exist. variant a|b|c checks cast/<id>/variants/<v>/rig.json.',
+      'Check one rig against the part rules: every part and face file exists, SVG parts are flat (no text, filter, script, external href; size limits), PNG parts have alpha, all 8 mouth shapes, 3 eye states and 4 brow states exist. variant a|c checks cast/<id>/variants/<v>/rig.json.',
       z.object({ series, cast: z.string().describe('The cast id'), variant: rigVariantSchema.optional() }),
       async (a) => checkRig(store(), a.series, a.cast, a.variant)
     )

@@ -38,10 +38,9 @@ A role or agent set to the model `client/claude-code` (in `config/roles.md`) par
 |---|---|
 | `cts_budget_set {series, episode, capUsd, flowCreditsCap?, approvedBy, note?}` | Writes `episodes/<ep>/budget.json` (with `approvedAt`). Call it only after the user approved the amount. Without it both caps are 0 and every paid call is refused. |
 | `cts_budget_get {series, episode}` | Caps, spent per currency (usd, credits), what is left, and the ledger `spend.json`. |
-| `cts_image_generate {series, episode, provider?, prompt, width?, height?, format?, out?, refs?, styleId?, model?, seed?}` | `comfy` (default, also `auto`): local, free; `refs` makes it an edit (Qwen). `flow`: free Google Flow image (`max_credits: 0`, never video). `fal`, `recraft`: paid, charged to the episode budget; `recraft` with `format: "svg"` returns a vector. |
-| `cts_svg_split {series, svg, outDir, mode: parts or grid, parts?, cols?, rows?, ids?}` | Splits an SVG into one file per part (polygons in viewBox coordinates, same viewBox) or cuts a sheet into grid cells. |
+| `cts_image_generate {series, episode, provider?, prompt, width?, height?, format?, out?, refs?, model?, seed?}` | `comfy` (default, also `auto`): local, free; `refs` makes it an edit (Qwen). `gemini` (Nano Banana): a stub until CTS-11, refuses. `fal`: paid, charged to the episode budget. No image goes through Flow. |
 
-Every paid call goes through `charge` (`src/engine/budget/spend.ts`): the price estimate (from `config/prices.md`, unverified, check before use) is checked against the cap BEFORE the call (`BUDGET_EXCEEDED` for dollars, `FLOW_CREDITS_EXCEEDED` for Flow credits) and the real cost is appended to `spend.json` afterwards. A series-level spend (the series intro clip, a Recraft style) is charged to the episode that triggers it. Keys for `fal` and `recraft` are read only from this tool's credential store: a missing one is `KEY_MISSING <provider>`; store it with `node out/engine/index.js key-set fal` (or `recraft`).
+Every paid call goes through `charge` (`src/engine/budget/spend.ts`): the price estimate (from `config/prices.md`, unverified, check before use) is checked against the cap BEFORE the call (`BUDGET_EXCEEDED` for dollars, `FLOW_CREDITS_EXCEEDED` for Flow credits) and the real cost is appended to `spend.json` afterwards. A series-level spend (the series intro or outro clip) is charged to the episode that triggers it. The key for `fal` is read only from this tool's credential store: a missing one is `KEY_MISSING <provider>`; store it with `node out/engine/index.js key-set fal`.
 
 ## Voices and music (CTS-06)
 
@@ -72,7 +71,7 @@ The model work of the pipeline is done through the client task tools above; `doc
 
 | Tool | What it does |
 |---|---|
-| `cts_run_pipeline {series, episode, brief?, options?, retry?, from?}` | Starts or resumes the episode pipeline (creates the series from the brief when it does not exist). The first call needs `brief {idea, title?, ageMin?, ageMax?, notes?, seconds?, lineRange?, intro?, heroClip?}`. Answers with the state, the current step, every step, a `hint` on what to do next, the pitches while they wait and the `summary` when done. Re-calling with the same ids resumes; it never skips the pitch pause. `retry: true` puts failed steps back; `from: "<step>"` redoes a step and everything after it; `options {rigPaths, rigChoice, skipClips, clipCredits}`. |
+| `cts_run_pipeline {series, episode, brief?, options?, retry?, from?}` | Starts or resumes the episode pipeline (creates the series from the brief when it does not exist). The first call needs `brief {idea, title?, ageMin?, ageMax?, notes?, seconds?, lineRange?, intro?, outro?}`. Answers with the state, the current step, every step, a `hint` on what to do next, the pitches while they wait and the `summary` when done. Re-calling with the same ids resumes; it never skips the pitch pause. `retry: true` puts failed steps back; `from: "<step>"` redoes a step and everything after it; `options {rigPaths, rigChoice, skipClips, clipCredits}`. |
 | `cts_pitch_choose {series, pitch}` | The user's pick of premise p1/p2/p3: writes `bible.chosenPitch` and `chosenAt`, and lets every pipeline that waits go on. Call it only with the pitch the user chose. |
 | `cts_series_create {slug, title?, logline?, ageMin?, ageMax?, languages?}` | A stub bible. Usually not needed. |
 | `cts_series_get {series}` | The bible, pitches and the chosen one, the rig variants per character, the episodes and the pipelines. |
@@ -80,7 +79,7 @@ The model work of the pipeline is done through the client task tools above; `doc
 | `cts_cast_get {series, cast?}` | The cast entry, the rig (parts, gestures, emotions), the variants (path, wall time, spend), `cts_rig_check` of the chosen rig and of each built variant, the reference and sheet paths. |
 | `cts_rig_set {series, cast, variant?, rig, parts}` | Writes `rig.json` and the part SVGs under `cast/<id>/` (or `variants/<v>/`) and returns the `cts_rig_check` result. `parts` maps a rig file (`parts/body.svg`, `body.svg` or `body`) to SVG text; a file not given must already exist. Nothing is written when the rig does not parse or a file is missing. |
 | `cts_rig_check {series, cast, variant?}` | (CTS-02) The part rules, all 8 mouths, 3 eye states and 4 brows. |
-| `cts_rig_build {series, episode, cast, path?}` | Job: builds one rig path (`claude-svg` = a, `recraft-svg` = b, `raster` = c) as a variant, with the pose sheet and the time and spend in `variants.json`. `recraft-svg` is refused at a $0 cap (recorded `not-run`). |
+| `cts_rig_build {series, episode, cast, path?}` | Job: builds one rig path (`claude-svg` = a, `raster` = c) as a variant, with the pose sheet and the time and spend in `variants.json`. |
 | `cts_rig_compare {series, cast}` | One sheet with the pose sheets of the built variants side by side, each under its path, time and spend: `cast/<id>/variants/compare.png`. Returns the picture. |
 | `cts_rig_choose {series, cast, variant}` | Copies the variant's rig, parts and sheet up to `cast/<id>/` and runs `cts_rig_check`. |
 | `cts_set_get {series, set?}` / `cts_set_update {series, set, groundY?, actorScale?, layers?, marks?, shots?}` | Read a set (or list them); change it (marks and shots merge by name, `null` removes one). Validated. |
@@ -89,12 +88,12 @@ The model work of the pipeline is done through the client task tools above; `doc
 | `cts_script_set {series, episode, script}` / `cts_text_set {series, episode, lang, text? or strings?/lines?}` | Write the script / one language's text (validated; `strings` and `lines` merge into the catalog). |
 | `cts_timeline_build {series, episode}` | Lip-sync and the timelines of all languages (needs the voices). Then `cts_lint {requireAudio: true}`. |
 | `cts_clip_plan {series, episode}` | The missing Flow clips, their shots, the credit cap and spend, and the `video-plan.mjs` commands (`plan`, `next`, `record`) for the hub session. |
-| `cts_clip_generate {series, episode?, clip, maxCredits}` | Job: keyframe (free), the 8 s video scene (`max_credits` = `maxCredits`, charged to the Flow credit cap), review (one retry, then `fallback`). Refuses without a recorded `flowCreditsCap` and past it; at most one hero clip per episode. |
+| `cts_clip_generate {series, episode?, clip: "intro"\|"outro", maxCredits}` | Job: keyframe (a still drawn by our own player from the clip's `staging`, 1280x720, `clips/keyframes/<id>.png`; no image goes to Flow), the 8 s video scene (`max_credits` = `maxCredits`, charged to the Flow credit cap), review (one retry, then `fallback`). Refuses without a recorded `flowCreditsCap` and past it; any other clip id is refused (no hero clip). `episode` only names the budget that pays. |
 | `cts_clip_review {series, episode?, clip}` | Job: the frame-critic reviews six frames of the clip next to the pose sheets. |
 
 `cts_status {series}` also lists the pipelines of the series: `state` (`running`, `waiting-on-user` after the pitches until `cts_pitch_choose`, or while Flow clips wait for a credit cap; `waiting-on-client`; `failed`; `done`), the current step and a hint.
 
-UNTESTED against the real services (checked with fakes): ComfyUI image jobs (`cast_ref`, `set`), Flow keyframe and video (`flow.generateVideo` is new in `studios/flow.ts` and follows `flow_generate` in `flow-music-mcp/src/flow/tools.ts`), Recraft (refused at $0 by design), the Chiptune and VibeTTS calls of the pipeline, and the pose sheets and renders (Chromium).
+UNTESTED against the real services (checked with fakes): ComfyUI image jobs (`cast_ref`, `set`), Flow video (`flow.generateVideo` is new in `studios/flow.ts` and follows `flow_generate` in `flow-music-mcp/src/flow/tools.ts`), the player still of a clip (Chromium), the Chiptune and VibeTTS calls of the pipeline, and the pose sheets and renders (Chromium).
 
 ## All tools
 
@@ -105,5 +104,5 @@ UNTESTED against the real services (checked with fakes): ComfyUI image jobs (`ca
 | Rigs | `cts_rig_set`, `cts_rig_check`, `cts_rig_build`, `cts_rig_compare`, `cts_rig_choose`, `cts_pose_sheet` |
 | Pipeline and clips | `cts_run_pipeline`, `cts_timeline_build`, `cts_lint`, `cts_clip_plan`, `cts_clip_generate`, `cts_clip_review` |
 | Voices and music | `cts_voice_plan`, `cts_voice_generate`, `cts_voice_status`, `cts_voice_quota`, `cts_music_generate` |
-| Budget and images | `cts_budget_set`, `cts_budget_get`, `cts_image_generate`, `cts_svg_split` |
+| Budget and images | `cts_budget_set`, `cts_budget_get`, `cts_image_generate` |
 | Render | `cts_render`, `cts_render_status`, `cts_frames` |

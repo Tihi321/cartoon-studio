@@ -2,9 +2,8 @@ import { McpHttpError, createMcpClient } from './mcp-http'
 import type { McpHttpClient } from './mcp-http'
 
 /**
- * A client of flow-music-mcp (Google Flow images, narration voices, Flow Music songs), over its MCP server. Images and the free narration
- * engines (`gemini`, `windows`) cost nothing; a Flow Music song spends credits. Cartoon Studio never sends the paid engine `flow`, video or edits.
- * Tests pass a fake `FlowClient`.
+ * A client of flow-music-mcp (Google Flow video for the intro and outro clips, narration voices, Flow Music songs), over its MCP server. No image is made
+ * through Flow. The free narration engines (`gemini`, `windows`) cost nothing; a video scene and a Flow Music song spend credits. Tests pass a fake `FlowClient`.
  */
 
 /** Why a Flow call failed: `unreachable` (not running), `signedOut`, `busy`, `rateLimit` (Gemini 429), `credits` (a cap refused it), `lost` (the server restarted), `aborted`, `timeout`, `tool`. */
@@ -47,30 +46,6 @@ export interface FlowVoices {
   geminiModel: string
   geminiReady: boolean
   windows: WindowsVoiceInfo[]
-}
-
-export interface FlowImageArgs {
-  prompt: string
-  aspect: '16:9' | '9:16' | '1:1'
-  /** A model as Flow's menu shows it (`Nano Banana Pro`). Missing: Flow's newest Nano Banana. */
-  model?: string
-  /** `asset:<media id>` or an absolute file path, at most 3. */
-  references?: string[]
-  quality: 'original' | 'upscaled'
-  /** The Flow project (created when missing). */
-  project: string
-  /** Absolute output folder and file stem. */
-  out: string
-  name: string
-  timeoutMs: number
-  signal?: AbortSignal
-}
-
-export interface FlowImage {
-  /** The downloaded file. */
-  file: string
-  mediaId: string
-  project?: string
 }
 
 /** A video scene (HUB-29 decision 12): Omni model, an 8 s clip from a keyframe, behind the Flow credit gate (`charge`) and a per-call `max_credits`. */
@@ -142,7 +117,6 @@ export interface FlowLoop {
 export interface FlowClient {
   readonly url: string
   status(signal?: AbortSignal): Promise<FlowStatus>
-  generateImage(args: FlowImageArgs): Promise<FlowImage>
   /** Optional so older fakes still type-check: a video scene (`flow_generate` `type: "video"`). The callers check it exists. */
   generateVideo?(args: FlowVideoArgs): Promise<FlowVideo>
   voices(signal?: AbortSignal): Promise<FlowVoices>
@@ -264,41 +238,6 @@ export function createFlowClient(opts: FlowClientOptions): FlowClient {
       const signedIn = r.chrome_running === false ? null : flow ? flow.signed_in === true : null
       const hint = signedIn === false ? (flow?.hint ?? `Google Flow is not signed in: run yarn login in ${opts.repo ?? 'flow-music-mcp'}`) : undefined
       return { up: true, signedIn, uploadRights: typeof r.upload_rights === 'string' && r.upload_rights.startsWith('agree'), ...(hint ? { hint } : {}) }
-    },
-
-    async generateImage(a) {
-      const started = await call(
-        'flow_generate',
-        {
-          scenes: [
-            {
-              prompt: a.prompt,
-              type: 'image',
-              aspect_ratio: a.aspect,
-              ...(a.model ? { model: a.model } : {}),
-              ...(a.references?.length ? { reference_images: a.references.slice(0, 3) } : {}),
-              download_quality: a.quality,
-              max_credits: 0,
-              retries: 1
-            }
-          ],
-          project: a.project,
-          create_project: true,
-          out: a.out,
-          name: a.name,
-          start_number: 1,
-          wait: 0
-        },
-        timeoutMs,
-        a.signal
-      )
-      const first = ((started.jobs as JobView[] | undefined) ?? [])[0]
-      if (!first?.job_id) throw new FlowError('flow_generate returned no job', 'tool')
-      const job = first.status === 'done' ? first : await waitJob('flow', first.job_id, { timeoutMs: a.timeoutMs, signal: a.signal })
-      const image = job.images?.[0]
-      const file = image?.file ?? job.files?.[0]
-      if (!file) throw new FlowError(`Flow made no image${job.failed_scenes?.length ? ' (the scene failed)' : ''}${job.note ? `: ${job.note}` : ''}`, 'tool')
-      return { file, mediaId: image?.media_id ?? '', project: job.project?.name ?? a.project }
     },
 
     async generateVideo(a) {

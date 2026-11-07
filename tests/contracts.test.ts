@@ -2,7 +2,9 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { RIG_PATHS } from '../src/engine/pipeline/rig'
 import { lintSeries } from '../src/engine/series/lint'
+import { rigVariantSchema } from '../src/shared/contracts'
 import { SeriesStore } from '../src/engine/series/service'
 import { installMini } from './fixtures/mini'
 
@@ -35,5 +37,11 @@ describe('contracts and lint', () => {
     expect(broken.ok).toBe(false)
     expect(broken.errors.map((e) => e.code)).toEqual(expect.arrayContaining(['E_RIG_PART', 'E_CAST_UNKNOWN']))
     expect(broken.errors.find((e) => e.code === 'E_RIG_PART')?.message).toMatch(/"O"/)
+  })
+
+  it('rig variant b and the recraft-svg path are gone; only a (claude-svg) and c (raster) remain', () => {
+    expect(rigVariantSchema.safeParse('b').success).toBe(false)
+    expect(rigVariantSchema.safeParse('a').success && rigVariantSchema.safeParse('c').success).toBe(true)
+    expect([...RIG_PATHS]).toEqual(['claude-svg', 'raster'])
   })
 })

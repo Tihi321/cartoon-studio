@@ -35,7 +35,7 @@ Step 1 (`pitch`) writes three pitches into `bible.json` (`pitches`, `chosenPitch
 | 7 | `voice_cast` | voice-director | voices per language into the bible (hr OmniVoice attribute tags, seed and Supertonic fallback; en Kokoro, distinct per character; Gemini names); one audition line per character and language | bible voices, `cast/<id>/voice/<lang>.wav` |
 | 8 | `voice` | (code) | `runVoice` (allocation, OmniVoice, Kokoro, Gemini within the quota); emits `voice.clip` | `voice/<lang>/*.wav`, `manifest.json` |
 | 9 | `music` | composer | picks mood/chip/seed and the effects; Chiptune Studio makes theme and up to 2 SFX; the script's cues are pointed at the files that exist (a missing studio = no music, a warning) | `music/*.ogg` |
-| 9b | `clip_shots` | showrunner | for each `clip` beat without a file (the intro once per series, at most one hero clip per episode) writes the shot and the input of `video-plan.mjs plan` | `tasks/clip-shots.json`, `episodes/<ep>/video/screenplay.json`, `clips-map.json` |
+| 9b | `clip_shots` | showrunner | for each `clip` beat without a file (the intro and the outro, once per series; no other id) writes the shot, its `staging` (set, camera shot, the leads' marks, emotion, gesture) and the input of `video-plan.mjs plan` | `tasks/clip-shots.json`, `episodes/<ep>/video/screenplay.json`, `clips-map.json` |
 | 9b | `clips` | frame-critic | waits for a Flow credit cap and each clip's `max_credits`; keyframe (free), video (credits, behind `charge`), review, one retry | `series/<slug>/clips/intro.mp4` or `episodes/<ep>/clips/<id>.mp4`, `clips.json` |
 | 10 | `timeline` | (code) | lip-sync and `timeline.<lang>.json` for every language (T4), then `cts_lint` with `requireAudio` must have 0 errors | `lipsync/`, `timeline.*.json` |
 | 11 | `preview_render` | (code) | 960x540 preview per language, 12-frame contact sheet, pose sheets | `out/<lang>.preview.mp4`, `render/<lang>/sheet-12.png` |
@@ -44,19 +44,18 @@ Step 1 (`pitch`) writes three pitches into `bible.json` (`pitches`, `chosenPitch
 
 ### Rig paths (step 3)
 
-Three paths make one rig format; each is a variant under `cast/<id>/variants/<v>/`, with its wall time and spend in `cast/<id>/variants/variants.json`.
+Two paths make one rig format; each is a variant under `cast/<id>/variants/<v>/`, with its wall time and spend in `cast/<id>/variants/variants.json`.
 
 | path | variant | how | cost |
 |---|---|---|---|
 | `claude-svg` | a (default) | the character-designer draws the part SVGs from `ref.png` and `seed/style/cutout-kids.md` (VectorCraft in the hub session when available, hand-written SVG otherwise). The answer carries `rig` and `parts`, or the session calls `cts_rig_set` and answers `{viaTool: true}`. `cts_rig_check` must pass: its errors go back to the designer (2 retries). | $0 |
-| `recraft-svg` | b | Recraft draws the figure as an SVG (`images/recraft.ts`, behind `charge`); the designer gives cut polygons and pivots; code splits the SVG by centroid-in-polygon (`svg-split.ts`) and puts the face of variant a on it. At a $0 cap the call is refused (`BUDGET_EXCEEDED` or `KEY_MISSING`) and the variant is recorded `not-run`. | paid |
 | `raster` | c | the reference is keyed (`images/key.ts` removes the Z-Image halo), the designer gives polygons, pivots and the face position, code crops PNG parts with an overlap at the joints and adds the face of variant a | $0 |
 
 `options.rigPaths { "<castId>": ["claude-svg", "raster"] }` builds more than the default; `cts_rig_build` does one path as a job. After all variants of a character are built the pipeline renders their pose sheets, one comparison sheet (`cast/<id>/variants/compare.png`, also `cts_rig_compare`) and copies the chosen variant up to `cast/<id>/` (`options.rigChoice { "<castId>": "a" }`, default a; `cts_rig_choose` does it later). A variant over the 45 minute time box is noted in `variants.json`; the pilot comparison is a hub-session task.
 
 ### Flow clips (step 9b)
 
-Decision 12 of the plan. The intro (`clip` beat id `intro`) is made once per series (`series/<slug>/clips/intro.mp4`, `clips.json` there); at most one other clip (the hero moment) per episode (`episodes/<ep>/clips/<id>.mp4`, the entry's `file` is relative to the episode folder). The spend is charged to the episode that triggers it.
+Decision 12 of the plan. The intro and the outro (`clip` beat ids `intro` and `outro`; no other id is allowed) are made once per series (`series/<slug>/clips/<id>.mp4`, `clips.json` there). The keyframe is a still drawn by our own player from the clip's `staging` (the set, the leads at their marks, emotion, gesture peak) at 1280x720, saved as `clips/keyframes/<id>.png`; Flow makes video only, with that still as `first_frame`. `polish: true` (Z-Image img2img, CTS-11) is accepted and recorded as not available yet. A pilot 1 episode may still hold a `hero` clip entry at episode level: it keeps resolving. The spend is charged to the episode that triggers it.
 
 1. `clip_shots`: the showrunner writes who, what happens in 8 s, framing, move and the keyframe for each missing clip; code writes `episodes/<ep>/video/screenplay.json` in the shape `scripts/video-plan.mjs plan` reads (one chapter, one scene, a shot per clip) and `clips-map.json` (clip id to shot id). **The hub session** runs `video-plan.mjs plan <dir>` / `next <dir>` / `record <dir> <shot> @result.json` for the estimate and each call's `max_credits` (`cts_clip_plan` prints the commands). Cartoon Studio copies no price table.
 2. `clips` waits (`waiting-on-user`) until `cts_budget_set` recorded a `flowCreditsCap` for the episode and each missing clip has its `max_credits` (`options.clipCredits { "intro": 15 }`), or the clips are made by hand with `cts_clip_generate`, or `options.skipClips: true` drops them (recorded NOT RUN: `clips.json` gets `fallback: true` entries and the beats fall back to a title card).
@@ -82,7 +81,7 @@ The answer is checked BEFORE anything is written. `cts_submit_task` already refu
 
 ## Options
 
-`options` of `cts_run_pipeline`: `rigPaths`, `rigChoice`, `skipClips`, `clipCredits` (above). `brief` keys read by the steps: `idea`, `title`, `ageMin`, `ageMax`, `notes`, `seconds` (target length), `lineRange` (default `[12, 16]`), `intro` (false = no intro clip), `heroClip` (false = no hero clip).
+`options` of `cts_run_pipeline`: `rigPaths`, `rigChoice`, `skipClips`, `clipCredits` (above). `brief` keys read by the steps: `idea`, `title`, `ageMin`, `ageMax`, `notes`, `seconds` (target length), `lineRange` (default `[12, 16]`), `intro` (false = no intro clip), `outro` (false = no outro clip).
 
 ## Not covered
 

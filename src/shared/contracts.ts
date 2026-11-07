@@ -108,9 +108,7 @@ export const bibleSchema = z.strictObject({
     look: z.string(),
     palette: z.array(z.string().regex(/^#[0-9a-fA-F]{6}$/)),
     outlinePx: z.number().positive(),
-    refPrompt: z.string(),
-    /** Recraft style id, created once and reused (path (b)); optional. */
-    recraftStyleId: z.string().optional()
+    refPrompt: z.string()
   }),
   languages: z.array(langSchema).min(1),
   cast: z.array(castMemberSchema),
@@ -172,7 +170,7 @@ export const rigSchema = z.strictObject({
 })
 export type Rig = z.infer<typeof rigSchema>
 
-export const RIG_VARIANTS = ['a', 'b', 'c'] as const
+export const RIG_VARIANTS = ['a', 'c'] as const
 export const rigVariantSchema = z.enum(RIG_VARIANTS)
 export type RigVariant = z.infer<typeof rigVariantSchema>
 
@@ -235,7 +233,7 @@ export const beatSchema = z.discriminatedUnion('type', [
   }),
   /** A static title card: `key` is a string in `text/<lang>.json` `strings`. */
   z.strictObject({ ...beatBase, type: z.literal('title'), key: z.string().min(1), seconds: z.number().positive() }),
-  /** A video clip (Flow hero shot or intro); looked up in the episode's `clips/` first, then the series'. No beat runs `with: "prev"` over a clip. */
+  /** A video clip (the Flow intro or outro; older series may still hold a hero clip); looked up in the episode's `clips/` first, then the series'. No beat runs `with: "prev"` over a clip. */
   z.strictObject({ ...beatBase, type: z.literal('clip'), clip: idSchema, seconds: z.number().positive(), audio: z.enum(['keep', 'mute']) })
 ])
 export type Beat = z.infer<typeof beatSchema>

@@ -7,6 +7,7 @@ import {
   SCHEMAS_BY_TAG,
   bibleSchema,
   episodeSchema,
+  facingSchema,
   idSchema,
   localizedSchema,
   nameSchema,
@@ -159,6 +160,15 @@ export const clipShotAnswer = z.strictObject({
         framing: z.string().default('medium shot'),
         move: z.string().default('static'),
         keyframe: z.string().min(10),
+        /** What the keyframe still shows: our own player draws it (set, the leads at their marks, emotion, gesture peak). */
+        staging: z.strictObject({
+          set: idSchema,
+          shot: nameSchema,
+          actors: z
+            .array(z.strictObject({ who: idSchema, mark: nameSchema, facing: facingSchema.default('right'), emotion: nameSchema.default('neutral'), gesture: nameSchema.optional() }))
+            .min(1)
+            .max(3)
+        }),
         seconds: z.number().min(4).max(10).default(8)
       })
     )

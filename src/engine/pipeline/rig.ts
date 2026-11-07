@@ -6,7 +6,6 @@ import { z } from 'zod'
 import { rigSchema, rigVariantSchema } from '../../shared/contracts'
 import type { Rig, RigVariant } from '../../shared/contracts'
 import { keyOut } from '../images/key'
-import { splitSvg } from '../images/svg-split'
 import { checkRig } from '../series/lint'
 import type { RigCheck } from '../series/lint'
 import { SeriesStore, zodIssues } from '../series/service'
@@ -15,15 +14,14 @@ import type { z as zt } from 'zod'
 import type { rigRasterAnswer } from './tasks'
 
 /**
- * Rig building (CTS-07, step 3). Three paths make one rig format: `claude-svg` (variant `a`, the default: the character-designer draws the part SVGs),
- * `recraft-svg` (variant `b`, paid: refused at a $0 cap) and `raster` (variant `c`: the reference is keyed and cut into PNG parts by the designer's polygons).
+ * Rig building (CTS-07, step 3). Two paths make one rig format: `claude-svg` (variant `a`: the character-designer draws the part SVGs; optional) and `raster` (variant `c`: the reference is keyed and cut into PNG parts by the designer's polygons).
  * Each variant lives under `cast/<id>/variants/<v>/`; `chooseVariant` copies the chosen one up to `cast/<id>/`. `variants.json` keeps each path's
  * wall time and spend for the studio and the run log.
  */
 
-export const RIG_PATHS = ['claude-svg', 'recraft-svg', 'raster'] as const
+export const RIG_PATHS = ['claude-svg', 'raster'] as const
 export type RigPath = (typeof RIG_PATHS)[number]
-export const VARIANT_OF: Record<RigPath, RigVariant> = { 'claude-svg': 'a', 'recraft-svg': 'b', raster: 'c' }
+export const VARIANT_OF: Record<RigPath, RigVariant> = { 'claude-svg': 'a', raster: 'c' }
 /** The pilot's time box per path (HUB-29 decision 1). */
 export const TIME_BOX_MIN = 45
 
@@ -102,7 +100,7 @@ export async function writeRigSet(store: SeriesStore, series: string, cast: stri
   return { written, check: await checkRig(store, series, cast, variant) }
 }
 
-// ---- motion defaults (a raster or recraft rig without a variant `a` to copy from) ----
+// ---- motion defaults (a raster rig without a variant `a` to copy from) ----
 
 export function defaultMotion(partIds: string[]): Pick<Rig, 'emotions' | 'gestures' | 'move'> {
   const arm = (side: string): string | undefined => partIds.find((i) => i === `arm_${side}`)
@@ -121,7 +119,7 @@ export function defaultMotion(partIds: string[]): Pick<Rig, 'emotions' | 'gestur
   }
 }
 
-// ---- raster and recraft assembly ----
+// ---- raster assembly ----
 
 export type RasterAnswer = zt.infer<typeof rigRasterAnswer>
 
@@ -260,24 +258,6 @@ export async function buildRasterRig(o: { store: SeriesStore; series: string; ca
   return { written: answer.parts.map((q) => `parts/${q.id}.png`), check: await checkRig(store, series, cast, 'c') }
 }
 
-/** Path `recraft-svg` (variant `b`): the figure SVG from Recraft is cut by the designer's polygons (viewBox coordinates) into part SVGs; the face comes from variant `a`. */
-export async function buildRecraftRig(o: { store: SeriesStore; series: string; cast: string; figureSvg: string; answer: RasterAnswer }): Promise<RigSetResult> {
-  const { store, series, cast, answer } = o
-  const p = store.paths(series)
-  const dir = p.rigDir(cast, 'b')
-  const face = await faceSource(store, series, cast)
-  if (!face) throw new Error(`no face to put on the recraft rig: build variant a (claude-svg) of ${cast} first`)
-  const split = await splitSvg(o.figureSvg, answer.parts.map((q) => ({ id: q.id, polygon: q.polygon as [number, number][] })), path.join(dir, 'parts'))
-  const vb = /viewBox\s*=\s*["']\s*([-\d.eE]+)[\s,]+([-\d.eE]+)[\s,]+([-\d.eE]+)[\s,]+([-\d.eE]+)/i.exec(o.figureSvg)
-  const origin: [number, number] = vb ? [Number(vb[1]), Number(vb[2])] : [0, 0]
-  const size: [number, number] = vb ? [Number(vb[3]), Number(vb[4])] : [1024, 1024]
-  const geo = new Map<string, PartGeometry>(answer.parts.map((q) => [q.id, { id: q.id, origin, size }]))
-  const rig = assembleRig(cast, answer, geo, 'vector', 'svg', face.rig, face.rig)
-  await copyFace(store, series, face, dir, answer.face.scale)
-  await store.writeRig(series, cast, rig, 'b')
-  return { written: Object.values(split.files).map((f) => path.relative(dir, f).split(path.sep).join('/')), check: await checkRig(store, series, cast, 'b') }
-}
-
 // ---- choose and compare ----
 
 /** Copies the chosen variant up to `cast/<id>/`: rig.json, parts/ and sheet.png. The top-level rig must pass `cts_rig_check`. */
@@ -306,7 +286,7 @@ export async function compareVariants(o: { dataDir: string; store: SeriesStore; 
   const rec = await readVariants(store, series, cast)
   const cols: { label: string; sub: string; img: Buffer }[] = []
   const missing: string[] = []
-  for (const v of ['a', 'b', 'c'] as const) {
+  for (const v of ['a', 'c'] as const) {
     const r = rec.variants[v]
     if (!r || r.status !== 'built') {
       missing.push(`${v}: ${r ? `${r.status}${r.note ? ` (${r.note})` : ''}` : 'not built'}`)

@@ -53,7 +53,7 @@ time, and plays one `<audio>` per timeline audio entry (best effort sync; the MP
 
 ## Pose sheet mode
 
-`/preview/?series=<slug>&sheet=<castId>[&variant=a|b|c][&files=<url>]`
+`/preview/?series=<slug>&sheet=<castId>[&variant=a|c][&files=<url>]`
 
 Draws `cast/<castId>/rig.json` (or `cast/<castId>/variants/<variant>/rig.json`) in a labelled grid, 6 columns of 260 x 340 px: neutral,
 every emotion, every gesture at its peak, all 8 mouths and the 3 eye states (the face cells are head close-ups). The canvas is resized to the
