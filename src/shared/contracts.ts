@@ -390,7 +390,9 @@ export const timelineSchema = z.strictObject({
   lines: z.array(z.strictObject({ id: idSchema, speaker: idSchema, t0: z.number(), t1: z.number() })),
   clips: z.array(timelineClipSchema).default([]),
   /** The beats in the order they ran with their start and end. Optional in the example; the builder writes it so the languages' order can be compared (E_LANG_ORDER). */
-  beats: z.array(z.strictObject({ id: idSchema, t0: z.number(), t1: z.number() })).optional()
+  beats: z.array(z.strictObject({ id: idSchema, t0: z.number(), t1: z.number() })).optional(),
+  /** The `title` beats: a static card with the (already translated) text, shown from t0 to t1. Added by T4; absent in timelines without a title beat. */
+  titles: z.array(z.strictObject({ id: idSchema, text: z.string(), t0: z.number(), t1: z.number() })).optional()
 })
 export type Timeline = z.infer<typeof timelineSchema>
 

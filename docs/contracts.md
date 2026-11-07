@@ -238,7 +238,8 @@ One mouth shape per animation frame from the clip start. Phase 1 uses `rest`, `E
 Built by code, never hand-written. `scriptHash` is the sha1 of the bytes of `script.json` (`hashScript`, `SeriesStore.scriptHash`): a
 different hash means the timeline is stale (`E_TIMELINE_STALE`). Paths are relative to the series folder (a voice line is
 `episodes/<ep>/voice/<lang>/<line>.wav`; the example shortens it). `beats` lists the beats in the order they ran with their start and end;
-the lint compares it between languages (`E_LANG_ORDER`).
+the lint compares it between languages (`E_LANG_ORDER`). `titles` (optional) lists the `title` beats as `{ id, text, t0, t1 }` with the text already in the timeline's language: a static card
+the player draws from t0 to t1.
 
 Numeric tracks are `[t, value, ease?]` and are sampled by `sampleNumber` in `src/shared/sample.ts`: before the first key the first value
 holds, after the last the last; between two keys the ease of the first decides: `step` holds until the next key's time and then jumps,
