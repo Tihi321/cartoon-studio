@@ -320,7 +320,7 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
             ? [
                 `${HUB_COMMAND} plan "${dir}" --budget ${budget.flowCreditsCap || '<cap>'} --model omni-720p   (estimate; writes plan.json)`,
                 `${HUB_COMMAND} next "${dir}" --cap ${budget.flowCreditsCap || '<cap>'}   (the next shot and its max_credits)`,
-                `${HUB_COMMAND} record "${dir}" <shot id> @result.json   (after cts_clip_generate: {clips: [{credits, file}]})`
+                `${HUB_COMMAND} record "${dir}" <shot id> @result.json   (after cts_clip_generate: {"clip": {"file": "<clip mp4>", "credits": <spent>}})`
               ]
             : ['run the pipeline to the clip_shots step first (cts_run_pipeline), it writes screenplay.json'],
           next: need.length ? 'ask the user for a Flow credit cap (cts_budget_set {flowCreditsCap}), run plan/next, then cts_clip_generate per clip, or cts_run_pipeline {options: {clipCredits: {...}}}' : 'no clips missing'

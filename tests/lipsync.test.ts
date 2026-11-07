@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { amplitudeVisemes } from '../src/engine/anim/lipsync'
+import { amplitudeVisemes, shapesFromRms } from '../src/engine/anim/lipsync'
 
 let dir: string | undefined
 afterEach(async () => {
@@ -38,12 +38,20 @@ function wav(parts: [number, number][]): Buffer {
 }
 
 describe('amplitude lip-sync', () => {
-  it('0.5 s silence, 0.5 s soft tone, 0.5 s loud tone, 0.5 s silence give rest, E, A, rest at 12 fps', async () => {
+  it('0.5 s silence, 0.5 s soft tone, 0.5 s loud tone, 0.5 s silence give rest, E, A, rest at 12 fps, with a 2-frame lead and release', async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'cts-lipsync-'))
     const file = path.join(dir, 'line.wav')
     await writeFile(file, wav([[0.5, 0], [0.5, 0.1], [0.5, 0.4], [0.5, 0]]))
     const track = await amplitudeVisemes(file)
     expect(track).toMatchObject({ schema: 'cts.lipsync/1', method: 'amplitude', fps: 12 })
-    expect(track.shapes).toEqual([...Array(6).fill('rest'), ...Array(6).fill('E'), ...Array(6).fill('A'), ...Array(6).fill('rest')])
+    expect(track.shapes).toEqual([...Array(4).fill('rest'), ...Array(8).fill('E'), ...Array(6).fill('A'), 'E', 'E', ...Array(4).fill('rest')])
+  })
+
+  it('a one-word line padded with silence (relative RMS per frame of the pilot line "Vau?") has the mouth open in at least 60 % of its frames', () => {
+    const rms = [0.008, 0.02, 0.027, 0.034, 0.378, 0.949, 1, 0.801, 0.568, 0.091, 0.019, 0.016, 0.011]
+    const shapes = shapesFromRms(rms)
+    expect(shapes.filter((m) => m !== 'rest').length / shapes.length).toBeGreaterThanOrEqual(0.6)
+    expect(shapes.slice(0, 2)).toEqual(['rest', 'rest'])
+    expect(shapes.at(-1)).toBe('rest')
   })
 })

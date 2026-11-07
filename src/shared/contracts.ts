@@ -6,7 +6,8 @@ import { z } from 'zod'
  *
  * Conventions: ids are `[a-z0-9-]+` (`Id`); a few names that are code words, not ids, may use more characters: rig part ids (`arm_l`),
  * mark, shot, gesture, cue and emotion names (`offL`, `cuLeft`). Times are seconds (float), coordinates are pixels with y down, paths in
- * a file are relative to the folder that file lives in (a timeline's and a voice manifest's paths are relative to the series folder).
+ * a file are relative to the folder that file lives in, with two exceptions: a timeline's paths are relative to the series folder and a voice
+ * manifest's `file` is relative to the episode folder (`voice/<lang>/<line>.wav`).
  * Objects are strict: an unknown key is an error, so a typo is found by the schema, not by a missing picture.
  */
 

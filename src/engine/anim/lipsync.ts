@@ -4,20 +4,24 @@ import type { SeriesStore } from '../series/service'
 
 /**
  * Amplitude lip-sync: one mouth shape per animation frame from the loudness of the line itself. Decode to 16 kHz mono floats with ffmpeg, take the
- * RMS of every 1/fps window, call a window voiced when it is above a small floor, and take the line's own 20th and 70th percentile of the voiced
- * windows: the mouth opens (E) around the 20th, opens wide (A) around the 70th. Hysteresis stops flicker, a shape holds at least 2 frames, and the
- * leading and trailing silent windows are `rest`.
+ * RMS of every 1/fps window and call a window voiced when it is above a small floor. Every voiced window opens the mouth (E); it opens wide (A)
+ * around the line's own 70th percentile of the voiced windows, with hysteresis against flicker. A shape holds at least 2 frames. The mouth
+ * anticipates the first sound by LEAD frames and releases TAIL frames after the last (half open, E), as cutout animators do; the rest of the
+ * leading and trailing silence is `rest`. Short lines padded with silence by the TTS still show the mouth moving for most of their frames (A9).
  */
 
 export const LIPSYNC_FPS = 12
 const SAMPLE_RATE = 16000
 const MIN_HOLD = 2
-/** Opening needs the level to reach OPEN x threshold, closing needs it to fall under CLOSE x threshold. */
+/** Opening wide needs the level to reach OPEN x threshold, closing back to E needs it to fall under CLOSE x threshold. */
 const OPEN = 0.9
 const CLOSE = 0.7
 /** A window is voiced above this share of the loudest window, and never below an absolute floor (about -50 dBFS). */
 const VOICED_SHARE = 0.05
 const VOICED_FLOOR = 0.003
+/** Frames the mouth opens before the first voiced window and stays open after the last one. */
+const LEAD = 2
+const TAIL = 2
 
 /** The ffmpeg to run: `CTS_FFMPEG`, else `ffmpeg` from PATH. */
 const ffmpegBin = () => process.env.CTS_FFMPEG || 'ffmpeg'
@@ -74,49 +78,48 @@ export function shapesFromRms(rms: readonly number[]): MouthShape[] {
   const voiced = rms.map((v) => v > floor)
   const sorted = rms.filter((_, i) => voiced[i]).sort((a, b) => a - b)
   if (sorted.length === 0) return rms.map((): MouthShape => 'rest')
-  const lo = percentile(sorted, 0.2)
-  const hi = Math.max(percentile(sorted, 0.7), lo)
+  const hi = percentile(sorted, 0.7)
 
-  let open = false
+  // the mouth anticipates the first sound and releases after the last (E); the rest of the leading and trailing silence stays rest
+  let first = 0
+  while (first < voiced.length && !voiced[first]) first++
+  let last = voiced.length - 1
+  while (last >= 0 && !voiced[last]) last--
+
   let wide = false
   const shapes: MouthShape[] = rms.map((v, i): MouthShape => {
     if (!voiced[i]) {
-      open = false
       wide = false
-      return 'rest'
+      return i >= first - LEAD && i <= last + TAIL && (i < first || i > last) ? 'E' : 'rest'
     }
-    open = open ? v >= lo * CLOSE : v >= lo * OPEN
-    wide = open && (wide ? v >= hi * CLOSE : v >= hi * OPEN)
-    return !open ? 'rest' : wide ? 'A' : 'E'
+    wide = wide ? v >= hi * CLOSE : v >= hi * OPEN
+    return wide ? 'A' : 'E'
   })
 
-  // a shape holds at least MIN_HOLD frames: a shorter run joins the run before it (the first run joins the one after)
+  // a shape holds at least MIN_HOLD frames: a shorter run joins an open neighbour (the one before first), else the run before it
+  // (the first run joins the one after), so a short sound never vanishes into rest
   let runs: { shape: MouthShape; n: number }[] = []
   const collect = (list: MouthShape[]) => {
     runs = []
     for (const s of list) {
-      const last = runs[runs.length - 1]
-      if (last && last.shape === s) last.n++
+      const prev = runs[runs.length - 1]
+      if (prev && prev.shape === s) prev.n++
       else runs.push({ shape: s, n: 1 })
     }
   }
   collect(shapes)
   for (let guard = 0; guard < shapes.length; guard++) {
-    const i = runs.findIndex((r) => r.n < MIN_HOLD)
+    // the silence at either end stays rest however short
+    const i = runs.findIndex((r, k) => r.n < MIN_HOLD && !(r.shape === 'rest' && (k === 0 || k === runs.length - 1)))
     if (i < 0 || runs.length === 1) break
-    const into = i > 0 ? runs[i - 1]! : runs[i + 1]!
+    const before = runs[i - 1]
+    const after = runs[i + 1]
+    const into = before && before.shape !== 'rest' ? before : after && after.shape !== 'rest' ? after : (before ?? after)!
     into.n += runs[i]!.n
     runs.splice(i, 1)
     collect(runs.flatMap((r) => Array<MouthShape>(r.n).fill(r.shape)))
   }
-  const held = runs.flatMap((r) => Array<MouthShape>(r.n).fill(r.shape))
-
-  // leading and trailing silent windows stay rest
-  let first = 0
-  while (first < voiced.length && !voiced[first]) first++
-  let last = voiced.length - 1
-  while (last >= 0 && !voiced[last]) last--
-  return held.map((s, i): MouthShape => (i < first || i > last ? 'rest' : s))
+  return runs.flatMap((r) => Array<MouthShape>(r.n).fill(r.shape))
 }
 
 /** The lip-sync track of a WAV (or any audio file ffmpeg reads). */
