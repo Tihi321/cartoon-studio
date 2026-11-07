@@ -41,6 +41,6 @@ describe('the seed', () => {
     expect(await cfg('voice.md')).toMatchObject({ localOrder: { hr: ['comfy', 'vibetts'], en: ['vibetts', 'comfy'] }, geminiDailyLimit: 10 })
     expect(await cfg('providers.md')).toMatchObject({ comfy: { imageModel: 'z-image-turbo', alternatives: ['krea2-turbo'] } })
     expect(await cfg('render.md')).toMatchObject({ fps: { anim: 12, out: 24 }, final: { width: 1920, height: 1080 }, frameFormat: 'jpeg', loudness: { lufs: -16, truePeak: -1.5 } })
-    expect((await readdir(path.join(seedDir, 'config'))).sort()).toEqual(['autostart.md', 'budget.md', 'providers.md', 'render.md', 'roles.md', 'settings.md', 'studios.md', 'voice.md'])
+    expect((await readdir(path.join(seedDir, 'config'))).sort()).toEqual(['autostart.md', 'budget.md', 'prices.md', 'providers.md', 'render.md', 'roles.md', 'settings.md', 'studios.md', 'voice.md'])
   })
 })

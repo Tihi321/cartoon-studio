@@ -19,7 +19,7 @@ Phase 1 is the scaffold and a **60-second pilot** the user watches (two characte
 | **CTS-05** | Render and mix: Playwright plus ffmpeg, encoder probe, audio mix with ducking and loudness, contact sheets and pose sheets, the Flow clip splice. | Planned |
 | **CTS-06** | Voices and music: the Gemini quota and the local chain (OmniVoice for Croatian, Kokoro for English), the voice manifest, Chiptune Studio music. | Planned |
 | **CTS-07** | Pipeline, roles and the `cts_*` tools: the eight roles as client tasks, image generation, `docs/mcp-guide.md`, `docs/pipeline.md`. | Planned |
-| **CTS-08** | Image providers and the budget gate: the image provider slot (ComfyUI, Flow, fal, Recraft), the keyring, the per-production cap and spend ledger, Flow credits, `svg-split`. The pilot cap is $0. | Planned |
+| **CTS-08** | Image providers and the budget gate: the image provider slot (ComfyUI, Flow, fal, Recraft), the keyring, the per-production cap and spend ledger, Flow credits, `svg-split`. The pilot cap is $0. | Done in code |
 | **CTS-09** | Studio UI and the Windows installer: the eight views, the embedded player, `yarn dist:installer` and `yarn dist:portable`. | Planned |
 
 ## Not in phase 1

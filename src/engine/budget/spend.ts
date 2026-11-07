@@ -4,6 +4,8 @@ import { parseMdWith } from '../../shared/md'
 import { budgetSchema } from '../../shared/schemas'
 import type { BudgetConfig } from '../../shared/schemas'
 import { atomicWrite } from '../store/atomic'
+import type { SeriesStore } from '../series/service'
+import type { SpendEntry as LedgerEntry } from '../../shared/contracts'
 import { estimateMessagesTokens } from '../models/types'
 import type { ChatMessage } from '../models/types'
 import type { ModelInfo } from '../models/registry'
@@ -368,4 +370,123 @@ export class Budget {
     await this.writeChain
     await this.writeSummary()
   }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// The production budget gate (CTS-08). Everything above is the LLM spend log inherited from Edu Studio; everything below guards the
+// paid image/voice/video calls of one episode. `episodes/<ep>/budget.json` holds the caps, `episodes/<ep>/spend.json` the ledger.
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+export type ChargeCurrency = 'usd' | 'credits'
+export type ChargeCode = 'BUDGET_EXCEEDED' | 'FLOW_CREDITS_EXCEEDED'
+
+/** A refused paid call. `message` starts with the code; nothing was spent. */
+export class ChargeError extends Error {
+  readonly code: ChargeCode
+  constructor(
+    code: ChargeCode,
+    message: string,
+    readonly detail: { series: string; episode: string; currency: ChargeCurrency; cap: number; spent: number; reserved: number; estimate: number; provider: string; model: string; what: string }
+  ) {
+    super(`${code}: ${message}`)
+    this.name = 'ChargeError'
+    this.code = code
+  }
+}
+
+export interface ChargeArgs {
+  /** The series store (budget.json and spend.json are read and written through it). */
+  store: SeriesStore
+  series: string
+  /**
+   * The episode whose budget pays. A series-level spend (the series intro clip, a Recraft style) is charged to the episode that
+   * triggers it: the pilot charges the intro to the pilot episode. There is no series-level budget file.
+   */
+  episode: string
+  provider: string
+  model: string
+  what: string
+  currency: ChargeCurrency
+  /** What the call is expected to cost, in `currency`. Checked before the call; the real cost replaces it afterwards when `actual` gives one. */
+  estimate: number
+}
+
+export interface ChargeOptions<T> {
+  /** The real cost read from the answer; undefined = the estimate is recorded. */
+  actual?: (value: T) => number | undefined
+}
+
+export interface ChargeResult<T> {
+  value: T
+  /** What was written to spend.json. */
+  amount: number
+  currency: ChargeCurrency
+  entry: LedgerEntry
+}
+
+const EPS = 1e-9
+const tails = new Map<string, Promise<unknown>>()
+const reservations = new Map<string, { usd: number; credits: number }>()
+
+/** One promise chain per key: the callers run one after another, a failure does not block the next. */
+function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const next = (tails.get(key) ?? Promise.resolve()).then(fn, fn)
+  tails.set(key, next.catch(() => undefined))
+  return next
+}
+
+const round = (n: number) => Math.round(n * 1e9) / 1e9
+
+/** The caps, the spent amount and the open reservations of an episode. */
+export async function budgetState(store: SeriesStore, series: string, episode: string): Promise<{ capUsd: number; flowCreditsCap: number; spentUsd: number; spentCredits: number; entries: LedgerEntry[]; approved: boolean }> {
+  const budget = await store.readBudget(series, episode)
+  const spend = await store.readSpend(series, episode)
+  const sum = (c: ChargeCurrency) => round(spend.entries.filter((e) => e.currency === c).reduce((a, e) => a + e.amount, 0))
+  return { capUsd: budget?.capUsd ?? 0, flowCreditsCap: budget?.flowCreditsCap ?? 0, spentUsd: sum('usd'), spentCredits: sum('credits'), entries: spend.entries, approved: budget !== null }
+}
+
+/**
+ * Runs `run` only when `spent + reserved + estimate <= cap` for the currency (no budget.json = cap 0). The estimate is reserved under the
+ * episode's lock, so two parallel calls cannot both pass. After `run` the real cost (or the estimate) is appended to spend.json; when `run`
+ * throws, the reservation is dropped and nothing is recorded. Refusal throws `ChargeError` (`BUDGET_EXCEEDED` for usd, `FLOW_CREDITS_EXCEEDED` for credits).
+ */
+export async function charge<T>(args: ChargeArgs, run: () => Promise<T>, opts: ChargeOptions<T> = {}): Promise<ChargeResult<T>> {
+  const { store, series, episode, currency } = args
+  if (!(args.estimate >= 0)) throw new Error(`charge: estimate must be a number >= 0 (got ${args.estimate})`)
+  const key = `${store.dataDir}|${series}|${episode}`
+  const field = currency === 'usd' ? 'usd' : 'credits'
+  await withLock(key, async () => {
+    const st = await budgetState(store, series, episode)
+    const cap = currency === 'usd' ? st.capUsd : st.flowCreditsCap
+    const spent = currency === 'usd' ? st.spentUsd : st.spentCredits
+    const open = reservations.get(key)?.[field] ?? 0
+    if (spent + open + args.estimate > cap + EPS) {
+      const unit = currency === 'usd' ? 'USD' : 'Flow credits'
+      const what = `${args.provider}/${args.model} (${args.what}) needs ${args.estimate} ${unit}; ${spent} spent${open ? ` and ${open} reserved` : ''} of a ${cap} cap${st.approved ? '' : ' (no budget.json: the cap is 0 until the user approves one with cts_budget_set)'}`
+      throw new ChargeError(currency === 'usd' ? 'BUDGET_EXCEEDED' : 'FLOW_CREDITS_EXCEEDED', what, { series, episode, currency, cap, spent, reserved: open, estimate: args.estimate, provider: args.provider, model: args.model, what: args.what })
+    }
+    const r = reservations.get(key) ?? { usd: 0, credits: 0 }
+    r[field] += args.estimate
+    reservations.set(key, r)
+  })
+  const release = () => {
+    const r = reservations.get(key)
+    if (r) r[field] = Math.max(0, round(r[field] - args.estimate))
+  }
+  let value: T
+  try {
+    value = await run()
+  } catch (e) {
+    await withLock(key, async () => release())
+    throw e
+  }
+  const real = opts.actual?.(value)
+  const amount = round(real !== undefined && Number.isFinite(real) && real >= 0 ? real : args.estimate)
+  const entry: LedgerEntry = { t: localIso(new Date()), provider: args.provider, model: args.model, what: args.what, currency, amount }
+  await withLock(key, async () => {
+    release()
+    const spend = await store.readSpend(series, episode)
+    await store.writeSpend(series, episode, { schema: 'cts.spend/1', entries: [...spend.entries, entry] })
+  })
+  return { value, amount, currency, entry }
 }

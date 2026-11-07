@@ -31,3 +31,14 @@ A job id is `<series>--<task>--<unit>--r<run>`, so `cts_status {series}` finds t
 ## Do the model work yourself
 
 A role or agent set to the model `client/claude-code` (in `config/roles.md`) parks its model calls in the engine's client task queue. `cts_wait` returns with `clientTasks`; then loop: `cts_get_task` (takes the oldest waiting call, leased for 30 minutes) -> write the answer -> `cts_submit_task {taskId, text}`. When the task has a schema the answer is checked: a failed check returns `{accepted: false, problems}` and the task stays yours, so fix the text and submit again. `cts_client_tasks` lists the waiting and leased tasks; `cts_release_task` gives one back. A task is for one client model: without `client` you get the `claude-code` ones. The queue is lost when the engine restarts: the running job is asked again.
+
+## Budget and images (CTS-08)
+
+| Tool | What it does |
+|---|---|
+| `cts_budget_set {series, episode, capUsd, flowCreditsCap?, approvedBy, note?}` | Writes `episodes/<ep>/budget.json` (with `approvedAt`). Call it only after the user approved the amount. Without it both caps are 0 and every paid call is refused. |
+| `cts_budget_get {series, episode}` | Caps, spent per currency (usd, credits), what is left, and the ledger `spend.json`. |
+| `cts_image_generate {series, episode, provider?, prompt, width?, height?, format?, out?, refs?, styleId?, model?, seed?}` | `comfy` (default, also `auto`): local, free; `refs` makes it an edit (Qwen). `flow`: free Google Flow image (`max_credits: 0`, never video). `fal`, `recraft`: paid, charged to the episode budget; `recraft` with `format: "svg"` returns a vector. |
+| `cts_svg_split {series, svg, outDir, mode: parts or grid, parts?, cols?, rows?, ids?}` | Splits an SVG into one file per part (polygons in viewBox coordinates, same viewBox) or cuts a sheet into grid cells. |
+
+Every paid call goes through `charge` (`src/engine/budget/spend.ts`): the price estimate (from `config/prices.md`, unverified, check before use) is checked against the cap BEFORE the call (`BUDGET_EXCEEDED` for dollars, `FLOW_CREDITS_EXCEEDED` for Flow credits) and the real cost is appended to `spend.json` afterwards. A series-level spend (the series intro clip, a Recraft style) is charged to the episode that triggers it. Keys for `fal` and `recraft` are read only from this tool's credential store: a missing one is `KEY_MISSING <provider>`; store it with `node out/engine/index.js key-set fal` (or `recraft`).

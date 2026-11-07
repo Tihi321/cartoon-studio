@@ -2,6 +2,7 @@ import { Budget } from './budget/spend'
 import { ModelRouter } from './models/router'
 import { ModelRegistry, computeCost, isPaidModel } from './models/registry'
 import { resolveKey, setStoredKey } from './models/keys'
+import { PAID_KEY_ACCOUNTS } from './images/provider'
 import { initDataFolder, argValue, resolveDataDir } from './store/dataFolder'
 import { emptyUsage } from './models/types'
 import type { Usage } from './models/types'
@@ -74,9 +75,10 @@ export async function probe(argv: string[]): Promise<number> {
 
 /** `engine key-set <ENV_NAME>`: asks for the key without echo and stores it in the Windows credential store. */
 export async function keySet(argv: string[]): Promise<number> {
-  const name = argv.find((a) => !a.startsWith('-'))
+  const given = argv.find((a) => !a.startsWith('-'))
+  const name = given && PAID_KEY_ACCOUNTS[given] ? PAID_KEY_ACCOUNTS[given] : given
   if (!name || !/^[A-Z][A-Z0-9_]*$/.test(name)) {
-    out('Usage: yarn key:set <ENV_NAME>   for example: yarn key:set DEEPSEEK_API_KEY')
+    out('Usage: yarn key:set <ENV_NAME|fal|recraft>   for example: yarn key:set DEEPSEEK_API_KEY (the paid image providers: key-set fal, key-set recraft)')
     return 2
   }
   if (resolveKey(name) && process.env[name]) out(`Note: ${name} is also set in the environment, which takes priority.`)
