@@ -1,3 +1,5 @@
+import type { Lang } from './contracts'
+
 /**
  * Engine <-> UI protocol. The engine sends events and accepts commands.
  * A Transport carries them. Today that is the Electron utilityProcess port. Later it could be a WebSocket.
@@ -235,6 +237,67 @@ export type EngineEvent =
   | { type: 'studios.status'; studios: StudioStatusView[] }
   /** The MCP HTTP server (config/mcp.md): listening or not. Sent when it changes and as the answer to `mcpStatus` and `saveMcpConfig`. `error` is empty when there is none; `token` is never sent, only whether one is set. */
   | { type: 'mcp.status'; enabled: boolean; listening: boolean; url: string | null; error: string; port: number; tokenSet: boolean }
+  // ---- studio UI (CTS-09) ----
+  | ToolResultEvent
+  | VoiceClipEvent
+  | JobProgressEvent
+  /** The pipeline of a series changed state (for example `waiting-on-user` after the pitches, `running` once the user chose one). */
+  | { type: 'series.state'; series: string; episode?: string; state: SeriesRunState; step?: string }
+  /** A pitch was chosen (`cts_pitch_choose` or the Series view): the pipeline leaves `waiting-on-user`. */
+  | { type: 'pitch.chosen'; series: string; pitch: string }
+
+/** How a voice line stands, as the studio shows it. `ok`/`placeholder`/`failed` are the manifest's statuses (VOICE_STATUSES); `pending` (not asked yet) and `running` (being made) only live in the UI. */
+export type VoiceLineStatus = 'pending' | 'running' | 'ok' | 'placeholder' | 'failed'
+
+/** The run state of a series' pipeline (PIPELINE_RUN_STATES in contracts.ts). */
+export type SeriesRunState = 'idle' | 'running' | 'waiting-on-user' | 'waiting-on-client' | 'failed' | 'done'
+
+/**
+ * Events the UI reduces beyond the core ones. The engine modules that own them emit them (voice step: `voice.clip`; queue and render: `job.progress`;
+ * pipeline: `series.state`, `pitch.chosen`). Defined here by CTS-09 so the UI and its tests agree on the shapes.
+ */
+export interface VoiceClipEvent {
+  type: 'voice.clip'
+  series: string
+  episode: string
+  lang: Lang
+  /** The script line id (`l01`). */
+  line: string
+  status: VoiceLineStatus
+  /** `comfy`, `vibetts`, `gemini`, `placeholder` ... */
+  provider?: string
+  seconds?: number
+  /** Relative to the episode folder, like the manifest's `file`. */
+  file?: string
+  error?: string
+}
+
+export interface JobProgressEvent {
+  type: 'job.progress'
+  jobId: string
+  series: string
+  /** `voice`, `render`, `image` ... */
+  task: string
+  unit?: string
+  /** 0..1, or null when the job cannot tell. */
+  fraction: number | null
+  message?: string
+  episode?: string
+  /** Set by the voice step for the clip it is making now: the line shows as `running` until its `voice.clip` comes. */
+  lang?: Lang
+  line?: string
+}
+
+/** The answer to a `call` command: the result of the MCP tool. */
+export interface ToolResultEvent {
+  type: 'tool.result'
+  id: string
+  tool: string
+  ok: boolean
+  /** The tool's structured result (an object; a non-object result is wrapped as `{result}`). */
+  result?: Record<string, unknown>
+  error?: string
+}
 
 /** One service (ComfyUI, Chiptune Studio, flow-music-mcp, VibeTTS) as `studiosStatus` saw it. For VibeTTS `tools` is the number of voices it lists. */
 export interface StudioStatusView {
@@ -309,6 +372,10 @@ export type Command =
   | { type: 'mcpStatus' }
   /** Writes config/mcp.md and restarts the server when enabled, port or token changed. `token` left out keeps the old one, `''` clears it. Answers with `mcp.status`. */
   | { type: 'saveMcpConfig'; enabled: boolean; port: number; token?: string }
+  /** Runs any MCP tool (`cts_*`) like the MCP server does and answers with `tool.result` carrying the same `id`. The studio's one generic route to the engine. */
+  | { type: 'call'; id: string; tool: string; args?: Record<string, unknown> }
+  /** Removes a stored provider key from the Windows credential store (never reads it back). */
+  | { type: 'clearSecret'; name: string }
 /** The commands about series and generators (handled by `CtsService`). */
 export type ServiceCommand = Extract<Command, { type: 'listSeries' | 'studiosStatus' }>
 
@@ -330,6 +397,8 @@ const COMMAND_TYPE_SET: Record<CommandType, true> = {
   studiosStatus: true,
   mcpStatus: true,
   saveMcpConfig: true,
+  call: true,
+  clearSecret: true,
   saveSettings: true,
   setSecret: true,
   detectModels: true,
@@ -366,4 +435,13 @@ export type EngineTransport = Transport<EngineEvent, Command>
 export interface CartoonStudioApi {
   on(handler: (event: EngineEvent) => void): () => void
   send(command: Command): void
+  /** Runs an MCP tool in the engine (the same `callTool` the MCP server uses). Resolves with the tool's result, or `ok: false` with the reason. */
+  call(tool: string, args?: Record<string, unknown>): Promise<ToolCallResult>
+}
+
+/** What `window.cartoonstudio.call` resolves with. */
+export interface ToolCallResult {
+  ok: boolean
+  result?: Record<string, unknown>
+  error?: string
 }

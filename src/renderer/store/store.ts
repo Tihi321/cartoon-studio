@@ -1,17 +1,34 @@
 import { createStore } from 'zustand/vanilla'
+import { initialEpisode, reduceEpisode, seedVoice, type EpisodeData, type LineVoice } from './episode'
 import { initialMcp, reduceMcp, type McpData } from './mcp'
 import { initialSeries, reduceSeries, type SeriesData } from './series'
 import { applyScheme, readScheme, type Scheme } from '../lib/scheme'
-import type { AgentProblem, AgentState, AgentSummary, CatalogModel, EngineEvent, ModelSummary, ProviderSummary, ServerStatus, SettingsSummary } from '../../shared/protocol'
+import type { Lang } from '../../shared/contracts'
+import type { AgentProblem, AgentState, AgentSummary, CatalogModel, EngineEvent, ModelSummary, ProviderSummary, ServerStatus, SettingsSummary, StudioStatusView } from '../../shared/protocol'
 
-export type Page = 'series' | 'models' | 'agents' | 'settings'
+export type Page = 'series' | 'cast' | 'sets' | 'episode' | 'preview' | 'render' | 'tasks' | 'settings' | 'models' | 'agents'
 
-export const PAGES: { id: Page; label: string }[] = [
-  { id: 'series', label: 'Series' },
-  { id: 'models', label: 'Models' },
-  { id: 'agents', label: 'Agents' },
-  { id: 'settings', label: 'Settings' }
+/** The eight views of the studio, in the order of the work, then the engine pages inherited from the scaffold. */
+export const PAGES: { id: Page; label: string; group: 'studio' | 'engine' }[] = [
+  { id: 'series', label: 'Series and bible', group: 'studio' },
+  { id: 'cast', label: 'Cast', group: 'studio' },
+  { id: 'sets', label: 'Sets', group: 'studio' },
+  { id: 'episode', label: 'Episode', group: 'studio' },
+  { id: 'preview', label: 'Timeline preview', group: 'studio' },
+  { id: 'render', label: 'Render and jobs', group: 'studio' },
+  { id: 'tasks', label: 'Client tasks', group: 'studio' },
+  { id: 'settings', label: 'Settings', group: 'studio' },
+  { id: 'models', label: 'Models', group: 'engine' },
+  { id: 'agents', label: 'Agents', group: 'engine' }
 ]
+
+/** Which series and episode the views show (the pickers in the rail). */
+export interface Selection {
+  series: string | null
+  episode: string | null
+  cast: string | null
+  set: string | null
+}
 
 export interface AgentView {
   id: string
@@ -30,7 +47,8 @@ export interface AgentView {
   problem?: AgentProblem
 }
 
-export interface CtsState extends SeriesData, McpData {
+export interface CtsState extends SeriesData, McpData, EpisodeData {
+  selection: Selection
   connected: boolean
   dataDir: string
   paused: boolean
@@ -46,6 +64,8 @@ export interface CtsState extends SeriesData, McpData {
   roleDefaults: Record<string, string>
   /** The local model servers (Strata, LM Studio): running or not. */
   servers: ServerStatus[]
+  /** ComfyUI, Chiptune Studio, flow-music-mcp and VibeTTS: reachable or not (the last `studios.status`). */
+  studios: StudioStatusView[]
   settings: SettingsSummary | null
   secretsSet: string[]
   /** Every key variable the Settings key select offers (from the providers). */
@@ -61,6 +81,10 @@ export interface CtsState extends SeriesData, McpData {
 export interface CtsActions {
   applyEvents(events: EngineEvent[]): void
   setPage(page: Page): void
+  /** Chooses the series, episode, cast member or set the views show; choosing another series clears the rest. */
+  select(patch: Partial<Selection>): void
+  /** Puts the voice status of an episode's lines (read from its manifests) into the state. */
+  seedVoice(series: string, episode: string, lang: Lang, lines: Record<string, LineVoice>): void
   setScheme(scheme: Scheme): void
   /** The Models page asked a provider for its models: show it as loading until `models.catalog` comes. */
   markCatalogLoading(provider: string): void
@@ -84,6 +108,7 @@ function initial(): CtsState {
     catalogs: {},
     roleDefaults: {},
     servers: [],
+    studios: [],
     settings: null,
     secretsSet: [],
     keyNames: [],
@@ -91,6 +116,8 @@ function initial(): CtsState {
     providerSaved: null,
     page: 'series',
     scheme: readScheme(),
+    selection: { series: null, episode: null, cast: null, set: null },
+    ...initialEpisode(),
     ...initialSeries(),
     ...initialMcp()
   }
@@ -169,14 +196,16 @@ export function reduceEvent(s: CtsState, e: EngineEvent): Partial<CtsState> {
       return { providerSaved: { ok: e.ok, id: e.id, removed: e.removed, error: e.error, at: Date.now() } }
     case 'models.catalog':
       return { catalogs: { ...s.catalogs, [e.provider]: { models: e.models, error: e.error, at: e.at } } }
+    case 'studios.status':
+      return { studios: e.studios }
     case 'mcp.status':
       return reduceMcp(s, e)
     default:
-      return reduceSeries(s, e)
+      return { ...reduceSeries(s, e), ...reduceEpisode(s, e) }
   }
 }
 
-const ACTION_KEYS = ['applyEvents', 'setPage', 'setScheme', 'markCatalogLoading', 'markProviderTesting'] as const
+const ACTION_KEYS = ['applyEvents', 'setPage', 'select', 'seedVoice', 'setScheme', 'markCatalogLoading', 'markProviderTesting'] as const
 
 export const ctsStore = createStore<CtsStore>()((set, get) => ({
   ...initial(),
@@ -190,6 +219,19 @@ export const ctsStore = createStore<CtsStore>()((set, get) => ({
   },
   setPage(page) {
     set({ page })
+  },
+  select(patch) {
+    const cur = get().selection
+    const next = { ...cur, ...patch }
+    if (patch.series !== undefined && patch.series !== cur.series) {
+      if (patch.episode === undefined) next.episode = null
+      if (patch.cast === undefined) next.cast = null
+      if (patch.set === undefined) next.set = null
+    }
+    set({ selection: next })
+  },
+  seedVoice(series, episode, lang, lines) {
+    set(seedVoice(get(), series, episode, lang, lines))
   },
   setScheme(scheme) {
     applyScheme(scheme)

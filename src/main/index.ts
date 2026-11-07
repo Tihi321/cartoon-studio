@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { isCommand } from '../shared/protocol'
-import type { EngineEvent } from '../shared/protocol'
+import type { EngineEvent, ToolCallResult } from '../shared/protocol'
 import { FILE_SCHEME } from '../renderer/hostApi'
 import { argValue, resolveDataDir } from '../engine/store/dataFolder'
 import { readEngineLock } from '../engine/store/lock'
@@ -23,6 +23,10 @@ let loginItemInMemory = false
 let engineBlocked: EngineEvent | null = null
 const runningJobs = new Set<string>()
 let blockerId: number | null = null
+// tool calls from the renderer (window.cartoonstudio.call) waiting for their `tool.result`
+const pendingCalls = new Map<string, (r: ToolCallResult) => void>()
+let callSeq = 0
+const CALL_TIMEOUT_MS = 15 * 60_000
 
 // --mcp-only: headless MCP, no window and no tray (the engine runs with --mcp-only and serves MCP over HTTP).
 const mcpOnly = process.argv.includes('--mcp-only')
@@ -207,6 +211,10 @@ if (!app.requestSingleInstanceLock()) {
     })
 
     engine.onMessage((event: EngineEvent) => {
+      if (event.type === 'tool.result') {
+        pendingCalls.get(event.id)?.({ ok: event.ok, result: event.result, error: event.error })
+        return
+      }
       if (event.type === 'engine.heartbeat') console.log(`[main] heartbeat #${event.n} relayed (${event.at})`)
       else console.log(`[main] engine event: ${event.type}`)
       if (win && !win.isDestroyed()) win.webContents.send(EVENT_CHANNEL, event)
@@ -239,6 +247,33 @@ if (!app.requestSingleInstanceLock()) {
 
     ipcMain.on(COMMAND_CHANNEL, (_e, command: unknown) => {
       if (isCommand(command)) engine.send(command)
+    })
+    ipcMain.handle('engine:call', (_e, tool: unknown, args: unknown) => {
+      if (typeof tool !== 'string' || !/^cts_[a-z0-9_]+$/.test(tool)) return Promise.resolve<ToolCallResult>({ ok: false, error: 'not a cts_ tool name' })
+      const id = `ui-${++callSeq}`
+      return new Promise<ToolCallResult>((resolve) => {
+        const timer = setTimeout(() => {
+          pendingCalls.delete(id)
+          resolve({ ok: false, error: `${tool} did not answer in time` })
+        }, CALL_TIMEOUT_MS)
+        pendingCalls.set(id, (r) => {
+          clearTimeout(timer)
+          pendingCalls.delete(id)
+          resolve(r)
+        })
+        engine.send({ type: 'call', id, tool, args: typeof args === 'object' && args !== null && !Array.isArray(args) ? (args as Record<string, unknown>) : {} })
+      })
+    })
+    ipcMain.handle('host:openFile', async (_e, rel: unknown) => {
+      const full = dataDir ? resolveInside(dataDir, rel) : null
+      if (!full) return false
+      return (await shell.openPath(full)) === ''
+    })
+    ipcMain.handle('host:showInFolder', (_e, rel: unknown) => {
+      const full = dataDir ? resolveInside(dataDir, rel) : null
+      if (!full) return false
+      shell.showItemInFolder(full)
+      return true
     })
     ipcMain.handle('host:readFile', (_e, rel: unknown) => (dataDir ? readFileInside(dataDir, rel) : null))
     ipcMain.handle('host:tailFile', (_e, rel: unknown, from: unknown) => (dataDir ? tailFileInside(dataDir, rel, from) : null))

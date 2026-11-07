@@ -30,6 +30,8 @@ import { readSeedNotes } from './store/seedRefresh'
 import type { WatchEvent } from './store/watcher'
 import type { EngineLock } from './store/lock'
 import { McpController } from './mcp/controller'
+import { buildTools, callTool } from './mcp/tools'
+import type { Tool } from './mcp/tools'
 import { ENGINE_MODULES } from './modules'
 
 export interface EngineOptions {
@@ -240,6 +242,13 @@ export class Engine {
       if (changed.served.length && this.started) this.emit(await this.snapshot()) // the models list carries `served`
       this.scheduler.kick()
     }
+  }
+
+  private uiToolList: Tool[] | null = null
+  /** The MCP tools bound to this engine, for the studio's `call` command (built once; the MCP server builds its own copy). */
+  private uiTools(): Tool[] {
+    this.uiToolList ??= buildTools(this.cts, { control: this.mcpControl(), clientQueue: this.clientQueue })
+    return this.uiToolList
   }
 
   /** The queue switches the MCP tools `cts_pause_all`, `cts_resume_all` and `cts_stop_now` use. */
@@ -858,6 +867,24 @@ export class Engine {
         void this.discoverModels() // and with it the models that provider lists
         return
       }
+      case 'call': {
+        // the studio's generic route: any MCP tool, through the same callTool the MCP server uses
+        const r = await callTool(this.uiTools(), cmd.tool, cmd.args)
+        const text = r.content[0].text
+        this.emit(r.isError ? { type: 'tool.result', id: cmd.id, tool: cmd.tool, ok: false, error: text } : { type: 'tool.result', id: cmd.id, tool: cmd.tool, ok: true, result: r.structuredContent ?? {} })
+        return
+      }
+      case 'clearSecret':
+        if (!this.allowedSecrets().includes(cmd.name)) return this.log(`clearSecret: "${cmd.name}" is not a name the app may store`)
+        try {
+          deleteStoredKey(cmd.name)
+          this.log(`cleared secret ${cmd.name}`)
+        } catch (err) {
+          this.log(`could not clear ${cmd.name}: ${(err as Error).message}`)
+        }
+        await this.registry.load()
+        this.emit({ type: 'secrets.updated', secretsSet: this.secretsSet(), keyNames: this.allowedSecrets() })
+        return
       case 'mcpStatus':
         this.emit(this.mcp?.status() ?? { type: 'mcp.status', enabled: false, listening: false, url: null, error: '', port: 0, tokenSet: false })
         return

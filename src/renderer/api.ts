@@ -58,6 +58,16 @@ export async function openFolder(rel: string): Promise<boolean> {
   return (await window.cartoonstudio.openFolder?.(rel)) ?? false
 }
 
+/** Opens a file of the data folder (an MP4) with its default program. */
+export async function openFile(rel: string): Promise<boolean> {
+  return (await window.cartoonstudio.openFile?.(rel)) ?? false
+}
+
+/** Shows a file of the data folder selected in Explorer. */
+export async function showInFolder(rel: string): Promise<boolean> {
+  return (await window.cartoonstudio.showInFolder?.(rel)) ?? false
+}
+
 /** Folder picker (desktop app only; null when cancelled or in a plain browser). */
 export async function pickFolder(title?: string): Promise<string | null> {
   return (await window.cartoonstudio.pickFolder?.(title)) ?? null

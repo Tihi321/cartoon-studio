@@ -27,7 +27,13 @@ if (failures.length) { console.error("\nverify-package FAILED: build the unpacke
 // What the app and the engine read from disk.
 check(fs.existsSync(path.join(resources, "icon.png")), "resources/icon.png (window and tray icon)");
 check(fs.existsSync(path.join(resources, "seed", "config", "settings.md")), "resources/seed/config/settings.md (main passes --seed)");
-for (const dir of ["agents"]) check(fs.existsSync(path.join(resources, "seed", dir)), `resources/seed/${dir}`);
+// every folder of the seed (agents, prompts, style ...) is packaged, and so is every file in it
+const listFiles = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).length : 0);
+for (const dir of fs.readdirSync(path.join(root, "seed"), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)) {
+  const want = listFiles(path.join(root, "seed", dir));
+  const got = listFiles(path.join(resources, "seed", dir));
+  check(want > 0 && want === got, `resources/seed/${dir} is packaged (${got} of ${want} files)`);
+}
 const sourceConfigs = fs.readdirSync(path.join(root, "seed", "config")).filter((f) => f.endsWith(".md"));
 const packagedConfigs = fs.existsSync(path.join(resources, "seed", "config")) ? fs.readdirSync(path.join(resources, "seed", "config")).filter((f) => f.endsWith(".md")) : [];
 check(sourceConfigs.length > 0 && sourceConfigs.length === packagedConfigs.length, `every seed/config file is packaged (${packagedConfigs.length} of ${sourceConfigs.length})`);
@@ -39,6 +45,7 @@ const app = ${JSON.stringify(asar)}, un = ${JSON.stringify(unpacked)};
 const out = {};
 for (const f of ${JSON.stringify(FILES)}) out[f] = fs.existsSync(path.join(app, f));
 const nm = (name) => path.join(un, "node_modules", ...name.split("/"));
+try { out.playerAssets = fs.readdirSync(path.join(app, "out", "player", "assets")).length; } catch { out.playerAssets = 0; }
 out.unpackedSharp = fs.existsSync(nm("sharp/package.json"));
 out.unpackedKeyring = fs.existsSync(nm("@napi-rs/keyring/package.json"));
 try { const sharp = require(path.join(app, "node_modules", "sharp")); out.sharp = Object.keys(sharp.versions || {}).length ? "ok " + sharp.versions.sharp : "loaded"; } catch (e) { out.sharp = "ERR " + String(e.message).slice(0, 160); }
@@ -58,6 +65,7 @@ try {
 fs.rmSync(path.dirname(probeFile), { recursive: true, force: true });
 if (result) {
   for (const f of FILES) check(result[f] === true, `app.asar contains ${f}`);
+  check(result.playerAssets > 0, `app.asar has the player's scripts (out/player/assets: ${result.playerAssets} files)`);
   check(result.unpackedSharp && result.unpackedKeyring, "sharp and keyring are in app.asar.unpacked");
   check(String(result.sharp).startsWith("ok"), `sharp loads: ${result.sharp}`);
   check(String(result.keyring).startsWith("ok"), `keyring loads: ${result.keyring}`);

@@ -11,6 +11,10 @@ export interface HostApi {
   tailFile(rel: string, fromByte: number): Promise<{ text: string; size: number } | null>
   /** Opens a folder inside the data folder in Explorer. */
   openFolder(rel: string): Promise<boolean>
+  /** Opens a file inside the data folder with the program Windows has for it (an MP4 plays in the default player). */
+  openFile(rel: string): Promise<boolean>
+  /** Opens Explorer with a file inside the data folder selected. */
+  showInFolder(rel: string): Promise<boolean>
   /** A folder picker. Resolves with the absolute path, or null when cancelled. */
   pickFolder(title?: string): Promise<string | null>
   /** A file picker. `kind` limits the file types. Resolves with the absolute path, or null when cancelled. */
