@@ -1,8 +1,8 @@
 import { defineConfig } from 'vitest/config'
 
 /**
- * `yarn test:e2e`: the tests that start Chromium (the render). Slow, so they are not part of `yarn test`. Without Chromium they FAIL, they
- * never skip. The render test itself comes with CTS-05.
+ * `yarn test:e2e`: the tests that start Chromium (the render). Slow, so they are not part of `yarn test`. Without Chromium (or ffmpeg) they
+ * FAIL, they never skip; an empty run fails too (no `passWithNoTests`).
  */
 export default defineConfig({
   test: {
@@ -11,9 +11,8 @@ export default defineConfig({
     maxWorkers: 2,
     fileParallelism: true,
     retry: 1,
-    testTimeout: 120000,
+    testTimeout: 180000,
     hookTimeout: 120000,
-    passWithNoTests: true,
     env: { CTS_AUTOSTART: '0' }
   }
 })
