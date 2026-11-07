@@ -4,6 +4,7 @@ import path from 'node:path'
 import sharp from 'sharp'
 import type { Bible, ClipEntry, Episode, Rig, SetFile, Timeline } from '../../shared/contracts'
 import { budgetState, charge, localIso } from '../budget/spend'
+import { comfyProvider } from '../images/comfy'
 import { stillFrame } from '../render/sheet'
 import { SeriesStore } from '../series/service'
 import type { CtsService } from '../service'
@@ -29,6 +30,8 @@ export const isClipId = (id: string): boolean => (CLIP_IDS as readonly string[])
 export const VIDEO_MODEL = 'Omni 1.1 Flash'
 export const VIDEO_RESOLUTION = '720p'
 export const VIDEO_SECONDS = 8
+/** How far the Z-Image img2img polish of a keyframe may drift from the player still. */
+export const POLISH_DENOISE = 0.35
 export const CLIP_STYLE = 'Flat 2D paper cutout cartoon for small children: solid flat colours, thick dark outlines, simple shapes, characters made of cut-out parts that slide and rotate, a plain flat painted background. No 3D, no shading, no gradients, no realistic lighting, no camera shake, no text, no speech.'
 
 export type ClipShots = z.infer<typeof clipShotAnswer>['clips']
@@ -234,7 +237,7 @@ export interface GenerateClipArgs {
   clip: string
   maxCredits: number
   seconds?: number
-  /** Z-Image img2img clean-up of the still at denoise 0.35 (CTS-11). Not available yet: when set, the still is used as it is and the result says so. */
+  /** Z-Image img2img clean-up of the still at denoise `POLISH_DENOISE` (local ComfyUI, $0). It becomes the clip's `first_frame`; when ComfyUI cannot do it the plain still is used and the result says so. */
   polish?: boolean
   /** Tests pass a fake renderer. Default: the player (`renderKeyframe`). */
   renderStill?: (shot: ClipShots[number]) => Promise<string>
@@ -248,8 +251,8 @@ export interface GeneratedClip {
   file: string
   credits: number
   keyframe: string
-  /** Set when `polish` was asked for but is not wired yet. */
-  polish?: 'not available yet'
+  /** Set when `polish` was asked for: the polished still, or why the plain still was used. */
+  polish?: { file: string; denoise: number } | { skipped: string }
 }
 
 
@@ -282,9 +285,27 @@ export async function generateClip(a: GenerateClipArgs): Promise<GeneratedClip> 
   const project = `cartoon-studio-${series}`
   if (!shot.staging) throw new Error(`shot "${clip}" in tasks/clip-shots.json has no staging (set, shot, actors): the clip_shots step writes it`)
   a.log(`clip ${clip}: keyframe from the player (set ${shot.staging.set}, ${shot.staging.actors.map((x) => x.who).join(', ')})`)
-  const keyframe = await (a.renderStill ?? ((sh) => renderKeyframe(svc, store, series, sh)))(shot)
-  const polish = a.polish ? ('not available yet' as const) : undefined
-  if (polish) a.log(`clip ${clip}: polish not available yet, the still is used as it is`)
+  let keyframe = await (a.renderStill ?? ((sh) => renderKeyframe(svc, store, series, sh)))(shot)
+  let polish: GeneratedClip['polish']
+  if (a.polish) {
+    try {
+      const img = await comfyProvider({ svc, store, series, episode, what: `clip ${clip} keyframe polish` }).generate({
+        prompt: `${shot.action.replace(/s+/g, ' ').trim()} ${CLIP_STYLE}`,
+        size: STILL_SIZE,
+        format: 'png',
+        out: keyframe.replace(/.png$/i, '') + '-polished',
+        init: { image: keyframe, denoise: POLISH_DENOISE },
+        signal: a.signal
+      })
+      polish = { file: img.file, denoise: POLISH_DENOISE }
+      keyframe = img.file
+      a.log(`clip ${clip}: keyframe polished by ${img.model} img2img at denoise ${POLISH_DENOISE}`)
+    } catch (err) {
+      if (a.signal?.aborted) throw err
+      polish = { skipped: (err as Error).message.slice(0, 160) }
+      a.log(`clip ${clip}: polish skipped (${polish.skipped}), the player still is used as it is`)
+    }
+  }
   a.log(`clip ${clip}: keyframe ${keyframe}; video (max_credits ${a.maxCredits})`)
   const prompt = videoPrompt(shot)
   const r = await charge(

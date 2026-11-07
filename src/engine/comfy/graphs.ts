@@ -116,6 +116,9 @@ export interface BuildOpts {
   negativePrompt?: string
   /** ComfyUI input filenames for image edit, in order. */
   references?: string[]
+  /** img2img / inpaint: the ComfyUI input filename of the start image (and, for inpaint, of the mask: white = redraw). `denoise` says how far from it. */
+  initImage?: string
+  maskImage?: string
   autoLatent?: boolean
   resolution?: number
   refinePrompt?: boolean
@@ -238,6 +241,42 @@ export function buildZImage(o: BuildOpts): Graph {
     9: { class_type: 'VAEDecode', inputs: { samples: ref(8), vae: ref(4) } },
     10: { class_type: 'SaveImage', inputs: { images: ref(9), filename_prefix: o.filenamePrefix } }
   }
+}
+
+/**
+ * Z-Image img2img: the text-to-image graph with node 7 (empty latent) replaced by `LoadImage(init) -> VAEEncode`, so the sampler starts from the
+ * init picture and `denoise` (0 to 1) says how far it may drift (0.75-0.85 turns a rough sketch into a drawn character, 0.35-0.6 cleans up a render).
+ * The output has the init picture's size.
+ */
+export function buildZImageImg2Img(o: BuildOpts): Graph {
+  if (!o.initImage) throw new Error('img2img needs an init image')
+  const g = buildZImage(o)
+  delete g[7]
+  g[11] = { class_type: 'LoadImage', inputs: { image: o.initImage } }
+  g[12] = { class_type: 'VAEEncode', inputs: { pixels: ref(11), vae: ref(4) } }
+  g[8]!.inputs.latent_image = ref(12)
+  return g
+}
+
+/**
+ * Z-Image masked inpaint: img2img plus `LoadImageMask` (red channel, white = redraw) -> `SetLatentNoiseMask` before the sampler, and the result is
+ * composited back over the init picture through the same mask (`ImageCompositeMasked`), so pixels outside the mask stay exactly what they were
+ * and a soft mask edge blends. The mask must have the init picture's size.
+ */
+export function buildZImageInpaint(o: BuildOpts): Graph {
+  if (!o.maskImage) throw new Error('inpaint needs a mask image')
+  const g = buildZImageImg2Img(o)
+  g[13] = { class_type: 'LoadImageMask', inputs: { image: o.maskImage, channel: 'red' } }
+  g[14] = { class_type: 'SetLatentNoiseMask', inputs: { samples: ref(12), mask: ref(13) } }
+  g[8]!.inputs.latent_image = ref(14)
+  g[15] = { class_type: 'ImageCompositeMasked', inputs: { destination: ref(11), source: ref(9), x: 0, y: 0, resize_source: false, mask: ref(13) } }
+  g[10]!.inputs.images = ref(15)
+  return g
+}
+
+/** Engines that have an image-to-image graph, with their img2img and inpaint builders. */
+export const INIT_BUILDERS: Record<string, { img2img: (o: BuildOpts) => Graph; inpaint: (o: BuildOpts) => Graph }> = {
+  'z-image-turbo': { img2img: buildZImageImg2Img, inpaint: buildZImageInpaint }
 }
 
 /** Krea 2 Turbo. */

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -74,5 +74,21 @@ describe('charge', () => {
     await spendRows(0, 24)
     await expect(charge(args({ provider: 'flow', currency: 'credits', estimate: 12 }), async () => 1)).rejects.toMatchObject({ code: 'FLOW_CREDITS_EXCEEDED' })
     await expect(charge(args({ provider: 'flow', currency: 'credits', estimate: 6 }), async () => 1)).resolves.toMatchObject({ amount: 6, currency: 'credits' })
+  })
+})
+
+describe('the gemini image provider', () => {
+  it('is refused with BUDGET_EXCEEDED at cap $0 and the fake fetch is never called', async () => {
+    const { geminiProvider } = await import('../src/engine/images/gemini')
+    let calls = 0
+    const fetchFn = (async () => ((calls += 1), new Response('{}'))) as unknown as typeof fetch
+    const svc = { dataDir: dir } as unknown as import('../src/engine/service').CtsService
+    await mkdir(path.join(dir, 'config'), { recursive: true })
+    await writeFile(path.join(dir, 'config', 'prices.md'), '---\nkind: prices\nimages:\n  - { provider: gemini, model: gemini-2.5-flash-image, format: png, usd: 0.039 }\n---\n')
+    const p = geminiProvider({ svc, store, series: 'mini', episode: 'ep00', what: 'test', fetchFn, getKey: () => 'k' })
+    const err = await p.generate({ prompt: 'a squirrel', size: { width: 1024, height: 1024 }, format: 'png', out: path.join(dir, 'x') }).catch((e) => e)
+    expect(err).toBeInstanceOf(ChargeError)
+    expect(err.code).toBe('BUDGET_EXCEEDED')
+    expect(calls).toBe(0)
   })
 })

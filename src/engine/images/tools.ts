@@ -46,7 +46,7 @@ export function imageTools(svc: CtsService, def: ToolDef): Tool[] {
     ),
     def(
       'cts_image_generate',
-      'Make one picture with an image provider and save it in the series folder. comfy (default/auto): local ComfyUI, free, model from config/providers.md; with refs it edits them (Qwen edit). gemini (Nano Banana, not written yet) and fal: paid, behind the episode budget (BUDGET_EXCEEDED with no approved cap; KEY_MISSING <provider> when the key is not stored: run node out/engine/index.js key-set <provider>). No image goes through Google Flow. Returns { file, costUsd, provider, model }.',
+      'Make one picture with an image provider and save it in the series folder. comfy (default/auto): local ComfyUI, free, model from config/providers.md; with refs it edits them (Qwen edit); with init (+ denoise, optional mask) it runs Z-Image image-to-image, or a masked inpaint that redraws only the white part of mask. gemini (Nano Banana) and fal: paid, behind the episode budget (BUDGET_EXCEEDED with no approved cap; KEY_MISSING <provider> when the key is not stored: run node out/engine/index.js key-set <provider>). No image goes through Google Flow. Returns { file, costUsd, provider, model }.',
       z.object({
         series,
         episode,
@@ -57,6 +57,9 @@ export function imageTools(svc: CtsService, def: ToolDef): Tool[] {
         format: z.enum(['png', 'svg']).default('png'),
         out: z.string().optional().describe('Output path without extension, relative to the series folder (default images/<provider>-<time>)'),
         refs: z.array(z.string()).max(5).optional().describe('Reference images: absolute, or relative to the series folder'),
+        init: z.string().optional().describe('Image to image (comfy, Z-Image): the start picture, absolute or relative to the series folder. Size = the size of the start picture'),
+        denoise: z.number().gt(0).max(1).optional().describe('With init: how far from the start picture, 0.75-0.85 for a rough sketch, 0.35-0.6 to clean up a render (default 0.8)'),
+        mask: z.string().optional().describe('With init: a PNG of the size of the start picture, white = redraw (inpaint)'),
         model: z.string().optional(),
         seed: z.number().int().optional(),
         what: z.string().optional().describe('Text for the ledger')
@@ -64,9 +67,10 @@ export function imageTools(svc: CtsService, def: ToolDef): Tool[] {
       async (a) => {
         const st = store()
         assertId(a.episode, 'episode id')
+        if ((a.denoise !== undefined || a.mask) && !a.init) throw new Error('denoise and mask need init (the start picture)')
         const provider = await pick(a.provider, { svc, store: st, series: a.series, episode: a.episode, what: a.what ?? a.prompt.slice(0, 60) })
         const out = place(a.series, a.out ?? `images/${provider.id}-${Date.now().toString(36)}`)
-        return provider.generate({ prompt: a.prompt, size: { width: a.width, height: a.height }, format: a.format, out, ...(a.refs ? { refs: a.refs.map((r) => place(a.series, r)) } : {}), ...(a.model ? { model: a.model } : {}), ...(a.seed !== undefined ? { seed: a.seed } : {}) })
+        return provider.generate({ prompt: a.prompt, size: { width: a.width, height: a.height }, format: a.format, out, ...(a.init ? { init: { image: place(a.series, a.init), denoise: a.denoise ?? 0.8, ...(a.mask ? { mask: place(a.series, a.mask) } : {}) } } : {}), ...(a.refs ? { refs: a.refs.map((r) => place(a.series, r)) } : {}), ...(a.model ? { model: a.model } : {}), ...(a.seed !== undefined ? { seed: a.seed } : {}) })
       }
     )
   ]

@@ -7,7 +7,7 @@ import { saveBytes } from './provider'
 
 /**
  * Local ComfyUI: $0. The model comes from `config/providers.md` `comfy.imageModel` (z-image-turbo by default); a reference image switches to the
- * Qwen-Image 2.1 edit graph. `removeBackground` is BiRefNet (alpha PNG). Both go through the Edu `ComfyClient` (`comfy/client.ts`, `comfy/graphs.ts`).
+ * Qwen-Image 2.1 edit graph, and `init` (a start picture, optional `mask`) runs Z-Image image-to-image / masked inpaint. `removeBackground` is BiRefNet (alpha PNG). Both go through the Edu `ComfyClient` (`comfy/client.ts`, `comfy/graphs.ts`).
  * UNTESTED against a live ComfyUI in CTS-08: the pilot exercises it.
  */
 
@@ -29,6 +29,7 @@ export function comfyProvider(ctx: ImageContext): ImageProvider {
     id: 'comfy',
     async generate(req: ImageRequest): Promise<ImageResult> {
       if (req.format === 'svg') throw new Error('comfy makes PNG pictures only; write the SVG yourself for format "svg"')
+      if (req.init && (req.refs?.length ?? 0) > 0) throw new Error('give init (Z-Image image-to-image) or refs (Qwen edit), not both')
       const edit = (req.refs?.length ?? 0) > 0
       const engine = req.model ?? (edit ? EDIT_MODEL : await configuredImageModel(ctx.svc.dataDir))
       await comfyKindSwitch('image', { dataDir: ctx.svc.dataDir })
@@ -40,6 +41,7 @@ export function comfyProvider(ctx: ImageContext): ImageProvider {
         height: req.size.height,
         ...(req.seed !== undefined ? { seed: req.seed } : {}),
         ...(edit ? { references: req.refs } : {}),
+        ...(req.init ? { init: req.init } : {}),
         signal: req.signal
       })
       return { file: await saveBytes(req.out, r.ext || 'png', r.bytes), costUsd: 0, provider: 'comfy', model: engine }

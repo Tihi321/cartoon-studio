@@ -6,6 +6,7 @@ import { fillWorkflow, loadCustomWorkflow, workflowDirs, workflowKind } from './
 import {
   buildRemoveBackground,
   ENGINES,
+  INIT_BUILDERS,
   mergeFiles,
   randomSeed,
   sizeOf,
@@ -386,6 +387,11 @@ export interface ComfyRequest {
   cfg?: number
   /** Edit engines and custom workflows with a `reference` mapping: file paths or image bytes (uploaded first). */
   references?: Array<string | Buffer>
+  /**
+   * Image-to-image on a Z-Image engine: the start picture (file path or bytes, uploaded first) and how far the sampler may drift from it (denoise above 0, at most 1).
+   * With `mask` (white = redraw, the init picture's size) only the masked region is redrawn (inpaint).
+   */
+  init?: { image: string | Buffer; denoise: number; mask?: string | Buffer }
   /** Music engines. */
   seconds?: number
   format?: 'flac' | 'mp3' | 'opus' | 'wav'
@@ -604,15 +610,30 @@ export function createComfyClient(opts: ComfyClientOptions): ComfyClient {
       req.onProgress?.({ stage: 'upload', message: `reference ${i + 1}` })
       references.push((await uploadImage(lane, src)).filename)
     }
+    let initFile: string | undefined
+    let maskFile: string | undefined
+    if (req.init) {
+      if (!INIT_BUILDERS[req.engine]) throw new Error(`engine ${req.engine} has no image-to-image graph (z-image-turbo has)`)
+      if (!(req.init.denoise > 0 && req.init.denoise <= 1)) throw new Error(`init.denoise must be above 0 and at most 1, not ${req.init.denoise}`)
+      req.onProgress?.({ stage: 'upload', message: 'init image' })
+      initFile = (await uploadImage(lane, req.init.image)).filename
+      if (req.init.mask !== undefined) {
+        req.onProgress?.({ stage: 'upload', message: 'mask' })
+        maskFile = (await uploadImage(lane, req.init.mask, { name: `cts_mask_${Date.now().toString(36)}.png` })).filename
+      }
+    }
     if (engine.acceptsReferences && references.length === 0) throw new Error(`engine ${req.engine} needs at least one reference image`)
 
     const seed = req.seed ?? randomSeed()
     const overrides = config.engineSettings[req.engine] ?? {}
     const explicitSize = req.width !== undefined && req.height !== undefined
     const prompt = req.prompt ?? ''
-    const graph = engine.build({
+    const build = req.init ? INIT_BUILDERS[req.engine]![maskFile ? 'inpaint' : 'img2img'] : engine.build
+    const graph = build({
       ...engine.defaults,
       ...overrides,
+      ...(initFile ? { initImage: initFile, denoise: req.init!.denoise } : {}),
+      ...(maskFile ? { maskImage: maskFile } : {}),
       ...(req.steps !== undefined ? { steps: req.steps } : {}),
       ...(req.cfg !== undefined ? { cfg: req.cfg } : {}),
       files: (engine.fileGroup ? files[engine.fileGroup] : {}) ?? {},

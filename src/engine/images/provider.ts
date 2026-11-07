@@ -7,7 +7,7 @@ import type { SeriesStore } from '../series/service'
 import type { CtsService } from '../service'
 
 /**
- * The image provider slot. One interface, three providers: `comfy` (local, $0, the default), `gemini` (Nano Banana, paid, a stub until CTS-11)
+ * The image provider slot. One interface, three providers: `comfy` (local, $0, the default), `gemini` (Nano Banana, paid, behind `charge`)
  * and `fal` (paid, every call behind `charge` in `budget/spend.ts`). No image is made by Google Flow: Flow makes video only. Callers never build a provider's URL or key themselves.
  */
 
@@ -25,6 +25,11 @@ export interface ImageRequest {
   /** Overrides the provider's default model (a fal endpoint id, a ComfyUI engine id). */
   model?: string
   seed?: number
+  /**
+   * Image to image (comfy, Z-Image): the start picture (absolute path) and how far the sampler may drift from it (denoise above 0, at most 1).
+   * With `mask` (a PNG of the start picture's size, white = redraw) only that region is redrawn (inpaint).
+   */
+  init?: { image: string; denoise: number; mask?: string }
   signal?: AbortSignal
 }
 
@@ -73,7 +78,7 @@ export async function pick(provider: ImageProviderId | 'auto', ctx: ImageContext
 // ---- keys: only this tool's own keyring entries (never the environment, never the sibling tools' stores) ----
 
 /** The keyring account of a paid provider. `key-set <provider>` stores the key under it. */
-export const PAID_KEY_ACCOUNTS: Record<string, string> = { fal: 'FAL_API_KEY' }
+export const PAID_KEY_ACCOUNTS: Record<string, string> = { fal: 'FAL_API_KEY', gemini: 'GEMINI_API_KEY' }
 
 export class KeyMissingError extends Error {
   readonly code = 'KEY_MISSING'
