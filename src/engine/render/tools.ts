@@ -112,7 +112,7 @@ export function renderTools(svc: CtsService, def: ToolDef): Tool[] {
     ),
     def(
       'cts_pose_sheet',
-      'Pose sheet of a cast member: neutral, every emotion, every gesture at its peak, the 8 mouths and the 3 eye states, labelled, drawn from the rig. Written to cast/<id>/sheet.png (or cast/<id>/variants/<a|c>/sheet.png). Returns the path and the picture.',
+      'Pose sheet of a cast member: neutral, every emotion, every gesture at its peak, the 8 mouths and the 3 eye states, labelled, drawn from the rig. Written to cast/<id>/rig-sheet.png (or cast/<id>/variants/<a|c>/rig-sheet.png); cast/<id>/sheet.png is the character sheet of the cast_sheet step and is not touched. Returns the path and the picture.',
       z.object({ series, cast: z.string(), variant: z.enum(RIG_VARIANTS).optional() }),
       async (a) => {
         const file = await poseSheet({ dataDir: svc.dataDir, series: a.series, cast: a.cast, ...(a.variant ? { variant: a.variant } : {}) })

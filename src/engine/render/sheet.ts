@@ -8,7 +8,7 @@ import { withPlayer } from './browser'
 /**
  * Sheets drawn by the player in the headless browser (so the labels use the browser's fonts):
  *   `contactSheet`  N frames of an episode, evenly spread or at given times, each with its time -> `episodes/<ep>/render/<lang>/sheet-<n>.png`
- *   `poseSheet`     the labelled pose grid of a rig -> `cast/<id>/sheet.png` (or `cast/<id>/variants/<v>/sheet.png`)
+ *   `poseSheet`     the labelled pose grid of a rig -> `cast/<id>/rig-sheet.png` (or `cast/<id>/variants/<v>/rig-sheet.png`; `cast/<id>/sheet.png` is the character sheet the user approves)
  */
 
 interface SheetWindow {
@@ -107,6 +107,20 @@ export async function contactSheet(req: ContactSheetRequest): Promise<string> {
   return file
 }
 
+/** The rig's pose sheet. (`sheet.png` beside it is the character sheet of the cast_sheet step.) */
+export const RIG_SHEET = 'rig-sheet.png'
+
+/**
+ * The rig pose sheet in a rig folder, as a name: `rig-sheet.png`, else (series made before pilot 2, which have no `sheet/meta.json`, so their
+ * `sheet.png` is a pose sheet) `sheet.png`, else null.
+ */
+export async function rigSheetName(rigDir: string, castDir: string): Promise<string | null> {
+  const has = (f: string) => fs.stat(f).then((s) => s.isFile(), () => false)
+  if (await has(path.join(rigDir, RIG_SHEET))) return RIG_SHEET
+  if ((await has(path.join(rigDir, 'sheet.png'))) && !(await has(path.join(castDir, 'sheet', 'meta.json')))) return 'sheet.png'
+  return null
+}
+
 export interface PoseSheetRequest {
   dataDir: string
   series: string
@@ -124,7 +138,7 @@ export async function poseSheet(req: PoseSheetRequest): Promise<string> {
     if (err) throw new Error(`pose sheet of ${req.cast}: ${err}`)
     return page.evaluate(() => (window as unknown as SheetWindow).cts.canvas.toDataURL('image/png'))
   })
-  const file = path.join(paths.rigDir(req.cast, req.variant), 'sheet.png')
+  const file = path.join(paths.rigDir(req.cast, req.variant), RIG_SHEET)
   await fs.writeFile(file, Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64'))
   return file
 }

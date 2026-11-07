@@ -1,3 +1,4 @@
+import { rigSheetName } from '../render/sheet'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
@@ -140,7 +141,7 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
           const checks: Record<string, unknown> = {}
           if (rig) checks.chosen = await checkRig(st, a.series, id)
           for (const v of RIG_VARIANTS) if (variants.variants[v]?.status === 'built') checks[v] = await checkRig(st, a.series, id, v)
-          out.push({ member, rig: rig ? { height: rig.height, kind: rig.kind, parts: rig.parts.map((x) => x.id), gestures: Object.keys(rig.gestures), emotions: Object.keys(rig.emotions) } : null, variants, checks, files: { sketch: (await st.exists(path.join(p.castDir(id), 'sketch.png'))) ? `cast/${id}/sketch.png` : null, ref: (await st.exists(path.join(p.castDir(id), 'ref.png'))) ? `cast/${id}/ref.png` : null, sheet: (await st.exists(path.join(p.castDir(id), 'sheet.png'))) ? `cast/${id}/sheet.png` : null } })
+          out.push({ member, rig: rig ? { height: rig.height, kind: rig.kind, parts: rig.parts.map((x) => x.id), gestures: Object.keys(rig.gestures), emotions: Object.keys(rig.emotions) } : null, variants, checks, files: { sketch: (await st.exists(path.join(p.castDir(id), 'sketch.png'))) ? `cast/${id}/sketch.png` : null, ref: (await st.exists(path.join(p.castDir(id), 'ref.png'))) ? `cast/${id}/ref.png` : null, sheet: (await st.exists(path.join(p.castDir(id), 'sheet.png'))) ? `cast/${id}/sheet.png` : null, rigSheet: await rigSheetName(p.castDir(id), p.castDir(id)).then((n) => (n ? `cast/${id}/${n}` : null)) } })
         }
         return a.cast ? out[0] : { cast: out }
       }
@@ -181,7 +182,7 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
     ),
     def(
       'cts_rig_choose',
-      'Choose the variant (a or c) that becomes the character\'s rig: copies variants/<v>/rig.json, parts/ and sheet.png up to cast/<id>/ and runs cts_rig_check on it. Returns the check.',
+      'Choose the variant (a or c) that becomes the character\'s rig: copies variants/<v>/rig.json, parts/ and rig-sheet.png up to cast/<id>/ and runs cts_rig_check on it. Returns the check.',
       z.object({ series, cast, variant }),
       async (a) => ({ chosen: a.variant, check: await chooseVariant(store(), a.series, a.cast, a.variant) })
     ),

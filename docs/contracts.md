@@ -20,7 +20,7 @@ Other code imports the schemas and types; it never redefines them.
 ```
 series/<slug>/
   bible.json
-  cast/<id>/            ref.png  parts/*.svg|*.png  rig.json  sheet.png   (variants/<a|c>/{parts/, rig.json, sheet.png})
+  cast/<id>/            ref.png (master)  sheet.png (character sheet)  parts/*.svg|*.png  rig.json  rig-sheet.png (rig pose sheet)   (variants/<a|c>/{parts/, rig.json, rig-sheet.png})
   sets/<id>/            layers/*.png  set.json
   music/                <cue>.ogg
   clips/                <id>.mp4  clips.json
@@ -86,7 +86,7 @@ the character sheet `cast/<id>/sheet.png`: `approvedAt` (local ISO time) and the
 A puppet. Each part is its own file (SVG with a px `viewBox`, or PNG). `pivot` is in the part's own pixel coordinates; `at` is where that
 pivot sits in the parent part's pixel coordinates; the root part (`parent: null`, exactly one) has `at: [0, 0]` and its pivot is the feet
 point: the actor's stage position. `rot` is the rotation limit in degrees. `z` orders parts (higher is in front). The face is a plate on
-`face.parent` (the head): `eyes` (3 states), `brows` (4), `mouth` (8 shapes), each file placed at `at` in the head's coordinates.
+`face.parent` (the head): `eyes` (3 states), `brows` (4), `mouth` (8 shapes), each file placed at `at` in the head's coordinates. A face state file may be an SVG or a PNG with alpha (at most 512 KB), drawn centred on `at`; several keys may name the same file (the raster rig points `U` at `O`, `FV` and `L` at `E`).
 `emotions` pick a brows state and an eyes state. A gesture rotates one part: `keys` are `[fraction of seconds from 0 to 1, degrees]`.
 `move.bobPx` is the bounce while walking. Facing the other way is a horizontal flip of the whole actor. `kind: "vector"` rigs have SVG parts.
 

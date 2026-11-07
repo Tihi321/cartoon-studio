@@ -5,16 +5,18 @@ import type { OverlayOptions } from 'sharp'
 import { z } from 'zod'
 import { rigSchema, rigVariantSchema } from '../../shared/contracts'
 import type { Rig, RigVariant } from '../../shared/contracts'
+import { BROWS_MADE, EYES_MADE, MOUTH_ALIAS, MOUTH_MADE, boxCentre, makeFacePatches } from '../images/face'
+import type { Box, FacePatchOptions, InpaintFn, PatchReport } from '../images/face'
 import { keyOut } from '../images/key'
 import { checkRig } from '../series/lint'
 import type { RigCheck } from '../series/lint'
 import { SeriesStore, zodIssues } from '../series/service'
-import { poseSheet } from '../render/sheet'
+import { poseSheet, rigSheetName, RIG_SHEET } from '../render/sheet'
 import type { z as zt } from 'zod'
 import type { rigRasterAnswer } from './tasks'
 
 /**
- * Rig building (CTS-07, step 3). Two paths make one rig format: `claude-svg` (variant `a`: the character-designer draws the part SVGs; optional) and `raster` (variant `c`: the reference is keyed and cut into PNG parts by the designer's polygons).
+ * Rig building (CTS-07, step 3). Two paths make one rig format: `claude-svg` (variant `a`: the character-designer draws the part SVGs; optional) and `raster` (variant `c`: the master is keyed and cut into PNG parts by the designer's polygons, the face is PNG patches made by inpaint; needs no other variant).
  * Each variant lives under `cast/<id>/variants/<v>/`; `chooseVariant` copies the chosen one up to `cast/<id>/`. `variants.json` keeps each path's
  * wall time and spend for the studio and the run log.
  */
@@ -123,24 +125,6 @@ export function defaultMotion(partIds: string[]): Pick<Rig, 'emotions' | 'gestur
 
 export type RasterAnswer = zt.infer<typeof rigRasterAnswer>
 
-/** An SVG scaled by `s` (the viewBox grows with it, so the player draws it `s` times as big). */
-export function scaleSvg(svg: string, s: number): string {
-  if (Math.abs(s - 1) < 1e-6) return svg
-  const open = /<svg\b([^>]*)>/i.exec(svg)
-  if (!open) return svg
-  const attrs = open[1]!
-  const vb = /viewBox\s*=\s*["']\s*([-\d.eE]+)[\s,]+([-\d.eE]+)[\s,]+([-\d.eE]+)[\s,]+([-\d.eE]+)\s*["']/i.exec(attrs)
-  const vx = vb ? Number(vb[1]) : 0
-  const vy = vb ? Number(vb[2]) : 0
-  const vw = vb ? Number(vb[3]) : 100
-  const vh = vb ? Number(vb[4]) : 100
-  const w = Math.round(vw * s * 100) / 100
-  const h = Math.round(vh * s * 100) / 100
-  const rest = attrs.replace(/\s(viewBox|width|height)\s*=\s*["'][^"']*["']/gi, '')
-  const inner = svg.slice(open.index + open[0].length, svg.lastIndexOf('</svg>'))
-  return `<svg${rest} viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><g transform="scale(${s}) translate(${-vx} ${-vy})">${inner}</g></svg>\n`
-}
-
 interface PartGeometry {
   id: string
   /** Where the part image's top-left sits in the source picture. */
@@ -149,11 +133,15 @@ interface PartGeometry {
   size: [number, number]
 }
 
-/** Builds rig.json for polygon-cut parts. Pivots and `at` come from the source picture's coordinates and each part's origin. */
-function assembleRig(cast: string, answer: RasterAnswer, geo: Map<string, PartGeometry>, kind: 'vector' | 'raster', ext: 'png' | 'svg', motionFrom: Rig | null, faceFrom: Rig): Rig {
+const mouthFile = (s: string): string => `parts/face-mouth-${s}.png`
+const eyesFile = (s: string): string => `parts/face-eyes-${s}.png`
+const browsFile = (s: string): string => `parts/face-brows-${s}.png`
+
+/** Builds rig.json for polygon-cut parts. Pivots and `at` come from the source picture's coordinates and each part's origin; the face plates are PNG patches. */
+function assembleRig(cast: string, answer: RasterAnswer, geo: Map<string, PartGeometry>, motionFrom: Rig | null): Rig {
   const byId = new Map(answer.parts.map((p) => [p.id, p]))
-  const head = answer.parts.find((p) => p.id === faceFrom.face.parent) ?? answer.parts.find((p) => p.id === 'head')
-  if (!head) throw new Error(`the answer has no "${faceFrom.face.parent}" part for the face`)
+  const head = answer.parts.find((p) => p.id === (motionFrom?.face.parent ?? 'head')) ?? answer.parts.find((p) => p.id === 'head')
+  if (!head) throw new Error('the answer has no "head" part for the face')
   const parts = answer.parts.map((p) => {
     const g = geo.get(p.id)!
     const parent = p.parent ? byId.get(p.parent) : null
@@ -161,7 +149,7 @@ function assembleRig(cast: string, answer: RasterAnswer, geo: Map<string, PartGe
     const pg = parent ? geo.get(parent.id)! : null
     return {
       id: p.id,
-      src: `parts/${p.id}.${ext}`,
+      src: `parts/${p.id}.png`,
       parent: p.parent,
       pivot: [Math.round(p.pivot[0] - g.origin[0]), Math.round(p.pivot[1] - g.origin[1])] as [number, number],
       at: pg ? ([Math.round(p.pivot[0] - pg.origin[0]), Math.round(p.pivot[1] - pg.origin[1])] as [number, number]) : ([0, 0] as [number, number]),
@@ -170,24 +158,29 @@ function assembleRig(cast: string, answer: RasterAnswer, geo: Map<string, PartGe
     }
   })
   const hg = geo.get(head.id)!
-  const at = (xy: [number, number]): [number, number] => [Math.round(xy[0] - hg.origin[0]), Math.round(xy[1] - hg.origin[1])]
-  const names = (rec: Record<string, string | undefined>): Record<string, string> => Object.fromEntries(Object.entries(rec).filter(([, v]) => v).map(([k, v]) => [k, `parts/face-${path.posix.basename(v as string)}`]))
+  /** The centre of a box in head-part pixels. */
+  const at = (box: Box): [number, number] => {
+    const c = boxCentre(box)
+    return [c[0] - hg.origin[0], c[1] - hg.origin[1]]
+  }
   const fz = head.z
   const motion = motionFrom ?? ({ ...defaultMotion(parts.map((p) => p.id)), drawnFacing: answer.facing } as Pick<Rig, 'emotions' | 'gestures' | 'move'>)
   const ids = new Set(parts.map((p) => p.id))
   const gestures = Object.fromEntries(Object.entries(motion.gestures).filter(([, g]) => ids.has(g.part)))
+  const mouthShapes: Record<string, string> = Object.fromEntries(MOUTH_MADE.map((s) => [s, mouthFile(s)]))
+  for (const [alias, target] of Object.entries(MOUTH_ALIAS)) mouthShapes[alias] = mouthFile(target)
   return {
     schema: 'cts.rig/1',
     id: cast,
-    kind,
+    kind: 'raster',
     drawnFacing: answer.facing,
     height: answer.height,
     parts,
     face: {
       parent: head.id,
-      eyes: { at: at(answer.face.eyes), z: fz + 10, states: names(faceFrom.face.eyes.states) },
-      brows: { at: at(answer.face.brows), z: fz + 11, states: names(faceFrom.face.brows.states) },
-      mouth: { at: at(answer.face.mouth), z: fz + 12, shapes: names(faceFrom.face.mouth.shapes) }
+      eyes: { at: at(answer.face.eyes), z: fz + 10, states: Object.fromEntries(EYES_MADE.map((s) => [s, eyesFile(s)])) },
+      brows: { at: at(answer.face.brows), z: fz + 11, states: Object.fromEntries(BROWS_MADE.map((s) => [s, browsFile(s)])) },
+      mouth: { at: at(answer.face.mouth), z: fz + 12, shapes: mouthShapes }
     },
     emotions: motion.emotions,
     gestures,
@@ -195,25 +188,11 @@ function assembleRig(cast: string, answer: RasterAnswer, geo: Map<string, PartGe
   } as Rig
 }
 
-/** Copies the face SVGs of another rig (variant `a`) into this variant's `parts/`, scaled, under the names `assembleRig` gave them. */
-async function copyFace(store: SeriesStore, series: string, from: { rig: Rig; dir: string }, toDir: string, scale: number): Promise<void> {
-  const p = store.paths(series)
-  const plates: Record<string, string | undefined>[] = [from.rig.face.eyes.states, from.rig.face.brows.states, from.rig.face.mouth.shapes]
-  for (const plate of plates) {
-    for (const rel of Object.values(plate)) {
-      if (!rel) continue
-      const svg = await fs.readFile(p.resolve(rel, from.dir), 'utf8')
-      await store.writeFile(series, `parts/face-${path.posix.basename(rel)}`, scaleSvg(svg, scale), toDir)
-    }
-  }
-}
-
-/** The rig to copy the face and the motion from: variant `a`, else the chosen top-level rig. */
-export async function faceSource(store: SeriesStore, series: string, cast: string): Promise<{ rig: Rig; dir: string } | null> {
-  const p = store.paths(series)
+/** A rig whose motion (emotions, gestures, move) a raster rig may reuse: variant `a`, else the chosen top-level rig; null when there is none (defaults then). */
+export async function motionSource(store: SeriesStore, series: string, cast: string): Promise<Rig | null> {
   for (const v of ['a', undefined] as const) {
     try {
-      return { rig: await store.readRig(series, cast, v), dir: p.rigDir(cast, v) }
+      return await store.readRig(series, cast, v)
     } catch {
       /* try the next */
     }
@@ -221,14 +200,35 @@ export async function faceSource(store: SeriesStore, series: string, cast: strin
   return null
 }
 
-/** Path `raster` (variant `c`): key the reference (the Z-Image halo goes with the grey), cut the parts with the designer's polygons plus an overlap at the joints, add the face. */
-export async function buildRasterRig(o: { store: SeriesStore; series: string; cast: string; answer: RasterAnswer; log?: (m: string) => void }): Promise<RigSetResult> {
+export interface RasterRigOptions {
+  store: SeriesStore
+  series: string
+  cast: string
+  answer: RasterAnswer
+  /** The character prompt the master was made with (the face inpaints repeat it). */
+  prompt: string
+  seed: number
+  /** The masked inpaint (Z-Image through ComfyUI in the pipeline, a fake in tests). */
+  inpaint: InpaintFn
+  /** Keep the inpaint results under `variants/c/face-src/` (default: delete them, the report stays). */
+  keepWork?: boolean
+  attempts?: FacePatchOptions['attempts']
+  log?: (m: string) => void
+  signal?: AbortSignal
+}
+
+/**
+ * Path `raster` (variant `c`): key the master `cast/<id>/ref.png` (the Z-Image halo goes with the grey), cut the parts with the designer's polygons plus an
+ * overlap at the joints, and build the face from PNG patches (`images/face.ts`). No other variant is needed; the motion of variant `a` or of an existing
+ * rig is reused when there is one, else the defaults.
+ */
+export async function buildRasterRig(o: RasterRigOptions): Promise<RigSetResult & { face: PatchReport[] }> {
   const { store, series, cast, answer } = o
   const p = store.paths(series)
   const dir = p.rigDir(cast, 'c')
-  const face = await faceSource(store, series, cast)
-  if (!face) throw new Error(`no face to put on the raster rig: build variant a (claude-svg) of ${cast} first`)
-  const ref = await fs.readFile(path.join(p.castDir(cast), 'ref.png'))
+  const motion = await motionSource(store, series, cast)
+  const master = path.join(p.castDir(cast), 'ref.png')
+  const ref = await fs.readFile(master)
   const keyed = await keyOut(ref)
   await store.writeFile(series, 'keyed.png', keyed, dir)
   const meta = await sharp(keyed).metadata()
@@ -252,15 +252,22 @@ export async function buildRasterRig(o: { store: SeriesStore; series: string; ca
     await store.writeFile(series, `parts/${part.id}.png`, png, dir)
     geo.set(part.id, { id: part.id, origin: [x0, y0], size: [w, h] })
   }
-  const rig = assembleRig(cast, answer, geo, 'raster', 'png', face.rig, face.rig)
-  await copyFace(store, series, face, dir, answer.face.scale)
+  const rig = assembleRig(cast, answer, geo, motion)
+  // the face: patches of the master's own face, redrawn by masked inpaint per state
+  const workDir = path.join(dir, 'face-src')
+  const patches = await makeFacePatches({ master, boxes: answer.face, prompt: o.prompt, seed: o.seed, inpaint: o.inpaint, workDir, ...(o.log ? { log: o.log } : {}), ...(o.signal ? { signal: o.signal } : {}), ...(o.attempts ? { attempts: o.attempts } : {}) })
+  for (const [s, png] of Object.entries(patches.mouth)) await store.writeFile(series, mouthFile(s), png, dir)
+  for (const [s, png] of Object.entries(patches.eyes)) await store.writeFile(series, eyesFile(s), png, dir)
+  for (const [s, png] of Object.entries(patches.brows)) await store.writeFile(series, browsFile(s), png, dir)
+  await store.writeFile(series, 'face-report.json', `${JSON.stringify({ prompt: o.prompt, seed: o.seed, boxes: answer.face, patches: patches.report }, null, 2)}\n`, dir)
+  if (!o.keepWork) await fs.rm(workDir, { recursive: true, force: true })
   await store.writeRig(series, cast, rig, 'c')
-  return { written: answer.parts.map((q) => `parts/${q.id}.png`), check: await checkRig(store, series, cast, 'c') }
+  return { written: answer.parts.map((q) => `parts/${q.id}.png`), check: await checkRig(store, series, cast, 'c'), face: patches.report }
 }
 
 // ---- choose and compare ----
 
-/** Copies the chosen variant up to `cast/<id>/`: rig.json, parts/ and sheet.png. The top-level rig must pass `cts_rig_check`. */
+/** Copies the chosen variant up to `cast/<id>/`: rig.json, parts/ and rig-sheet.png. The top-level rig must pass `cts_rig_check`. */
 export async function chooseVariant(store: SeriesStore, series: string, cast: string, variant: RigVariant): Promise<RigCheck> {
   const p = store.paths(series)
   const from = p.rigDir(cast, variant)
@@ -269,7 +276,9 @@ export async function chooseVariant(store: SeriesStore, series: string, cast: st
   await fs.rm(path.join(to, 'parts'), { recursive: true, force: true })
   await fs.cp(path.join(from, 'parts'), path.join(to, 'parts'), { recursive: true })
   await fs.copyFile(path.join(from, 'rig.json'), path.join(to, 'rig.json'))
-  if (await store.exists(path.join(from, 'sheet.png'))) await fs.copyFile(path.join(from, 'sheet.png'), path.join(to, 'sheet.png'))
+  // never `sheet.png`: that is the character sheet the user approved. Variants made before pilot 2 kept their pose sheet under that name.
+  const rs = await rigSheetName(from, to)
+  if (rs) await fs.copyFile(path.join(from, rs), path.join(to, RIG_SHEET))
   const cur = await readVariants(store, series, cast)
   await store.writeJson(variantsFile(store, series, cast), variantsFileSchema, { ...cur, chosen: variant })
   return checkRig(store, series, cast)

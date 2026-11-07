@@ -109,7 +109,7 @@ for (const lang of ['hr', 'en']) await buildTimeline(store, 'mini', 'ep00-mini',
       for (const v of ['a', 'c']) {
         const dir = path.join(MINI, 'cast', id, 'variants', v)
         fs.mkdirSync(dir, { recursive: true })
-        await sharp(path.join(MINI, 'cast', id, 'parts', v === 'a' ? 'body.svg' : 'feet.svg')).resize(400, 300, { fit: 'contain', background: '#ffffff' }).png().toFile(path.join(dir, 'sheet.png'))
+        await sharp(path.join(MINI, 'cast', id, 'parts', v === 'a' ? 'body.svg' : 'feet.svg')).resize(400, 300, { fit: 'contain', background: '#ffffff' }).png().toFile(path.join(dir, 'rig-sheet.png'))
       }
   }
 }
@@ -236,7 +236,7 @@ function bridge({ fix, origin, engine, engineOrigin }) {
       checks: { chosen: rigCheck(a.cast), a: rigCheck(a.cast, 'a'), c: rigCheck(a.cast, 'c') },
       files: { ref: `cast/${a.cast}/parts/head.svg`, sheet: null }
     }),
-    cts_pose_sheet: (a) => ({ file: `cast/${a.cast}/sheet.png` }),
+    cts_pose_sheet: (a) => ({ file: `cast/${a.cast}/rig-sheet.png` }),
     cts_set_get: (a) => ({ set: fix.set, layerFiles: fix.set.layers.map((l) => `sets/${a.set}/${l.src}`) }),
     cts_episode_get: () => ({
       script: fix.script,

@@ -118,7 +118,7 @@ export interface VariantInfo {
 export interface CastInfo {
   id: string
   rig: { height: number; kind: string; parts: string[]; gestures: string[]; emotions: string[] } | null
-  /** The reference image and the pose sheet, relative to the series folder; null when the file does not exist. */
+  /** The reference image and the rig pose sheet (`rig-sheet.png`; the character sheet is `sheet.png`), relative to the series folder; null when the file does not exist. */
   ref: string | null
   sheet: string | null
   variants: VariantInfo[]
@@ -130,7 +130,7 @@ export function normalizeCast(r: Record<string, unknown>): CastInfo {
   const member = (r.member ?? {}) as { id?: string }
   const file = (r.variants ?? {}) as { chosen?: RigVariant | null; variants?: Partial<Record<RigVariant, { status: string; wallSeconds: number; spendUsd: number; spendCredits?: number; note: string }>> }
   const checks = (r.checks ?? {}) as Record<string, RigCheckView | undefined>
-  const files = (r.files ?? {}) as { ref?: string | null; sheet?: string | null }
+  const files = (r.files ?? {}) as { ref?: string | null; sheet?: string | null; rigSheet?: string | null }
   const id = member.id ?? ''
   const variants: VariantInfo[] = (['a', 'c'] as const).map((v) => {
     const rec = file.variants?.[v]
@@ -142,12 +142,12 @@ export function normalizeCast(r: Record<string, unknown>): CastInfo {
       costUsd: rec.spendUsd,
       credits: rec.spendCredits ?? 0,
       note: rec.note,
-      preview: rec.status === 'built' ? `cast/${id}/variants/${v}/sheet.png` : null,
+      preview: rec.status === 'built' ? `cast/${id}/variants/${v}/rig-sheet.png` : null,
       chosen: file.chosen === v,
       check: checks[v]
     }
   })
-  return { id, rig: (r.rig as CastInfo['rig']) ?? null, ref: files.ref ?? null, sheet: files.sheet ?? null, variants, check: checks.chosen ?? null }
+  return { id, rig: (r.rig as CastInfo['rig']) ?? null, ref: files.ref ?? null, sheet: files.rigSheet ?? null, variants, check: checks.chosen ?? null }
 }
 
 /** `cts_set_get { series, set }` -> `{ set, layerFiles }`. */

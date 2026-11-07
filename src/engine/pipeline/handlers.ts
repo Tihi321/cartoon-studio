@@ -1,3 +1,4 @@
+import { rigSheetName } from '../render/sheet'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -477,7 +478,7 @@ async function frameReviewStep(e: Env): Promise<string> {
         role: 'frame-critic',
         kind: 'frames',
         prompt: `Review the contact sheet of the ${lang} preview (round ${round} of at most 2): the first picture is 12 frames of the episode in time order, the others are the pose sheets of the characters. Look for: a character off model, parts detached or overlapping wrongly, the mouth open in silence or closed while speaking, the wrong facing, an actor off frame, a missing or wrong background. For each problem say where (time and character), what, and the data fix (a mark, an SVG, a beat) and who owns it.`,
-        inputs: { paths: [relTo(e, sheet), ...bible.cast.map((c) => `cast/${c.id}/sheet.png`)], json: { lang, round, lintWarnings: lint.warnings.slice(0, 12).map((w) => `${w.code} ${w.message}`), mouthOpenShare: lint.stats.lines.filter((l) => l.lang === lang).map((l) => ({ line: l.line, share: Math.round(l.share * 100) / 100 })) } },
+        inputs: { paths: [relTo(e, sheet), ...(await Promise.all(bible.cast.map(async (c) => rigSheetName(e.store.paths(e.series).castDir(c.id), e.store.paths(e.series).castDir(c.id)).then((n) => (n ? `cast/${c.id}/${n}` : null))))).filter((x): x is string => !!x)], json: { lang, round, lintWarnings: lint.warnings.slice(0, 12).map((w) => `${w.code} ${w.message}`), mouthOpenShare: lint.stats.lines.filter((l) => l.lang === lang).map((l) => ({ line: l.line, share: Math.round(l.share * 100) / 100 })) } },
         output: { schema: 'review', path: `episodes/${e.episode}/reviews/frames-${lang}-${round}.json` }
       },
       { check: (v) => ((v as z.infer<typeof reviewAnswer>).verdict === 'revise' && (v as z.infer<typeof reviewAnswer>).problems.length === 0 ? ['a "revise" verdict needs at least one problem'] : []) }

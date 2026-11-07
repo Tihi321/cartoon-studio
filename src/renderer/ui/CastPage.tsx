@@ -99,7 +99,7 @@ function CastMemberView({ slug, member }: { slug: string; member: CastMember }) 
 }
 
 /**
- * The pose sheet: the sheet.png when it exists, else the player drawing it live from the rig (its ?sheet=<cast> mode). "Save as sheet.png" makes the file
+ * The pose sheet: the rig-sheet.png when it exists, else the player drawing it live from the rig (its ?sheet=<cast> mode). "Save as rig-sheet.png" makes the file
  * with cts_pose_sheet, which the frame critic and the comparison sheet read.
  */
 function PoseSheet({ slug, cast, sheet, hasRig, onSaved }: { slug: string; cast: string; sheet: string | null; hasRig: boolean; onSaved(): void }) {
@@ -130,7 +130,7 @@ function PoseSheet({ slug, cast, sheet, hasRig, onSaved }: { slug: string; cast:
       {hasRig && (
         <div className="row">
           <button onClick={() => void save()} disabled={busy} data-testid="cast-sheet-save">
-            {busy ? 'Saving...' : 'Save as sheet.png'}
+            {busy ? 'Saving...' : 'Save as rig-sheet.png'}
           </button>
           {error && (
             <span className="bad-text" role="alert" data-testid="cast-sheet-error">

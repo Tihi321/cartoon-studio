@@ -171,6 +171,9 @@ export async function checkRig(store: SeriesStore, series: string, cast: string,
 
 const relTo = (p: SeriesPaths, abs: string) => abs.slice(p.root.length + 1).replace(/\\/g, '/')
 
+/** A PNG face plate (CTS-13 face patches) may be at most this big. */
+export const PNG_PLATE_MAX_BYTES = 512 * 1024
+
 async function checkRigContent(issues: Issues, p: SeriesPaths, rig: Rig, cast: string, variant?: RigVariant): Promise<void> {
   const dir = p.rigDir(cast, variant)
   const file = relTo(p, p.rigFile(cast, variant))
@@ -230,6 +233,7 @@ async function checkRigContent(issues: Issues, p: SeriesPaths, rig: Rig, cast: s
         const meta = await sharp(abs).metadata()
         if (meta.format !== 'png') bad(f.where, `${f.src}: not a PNG`)
         else if (!meta.hasAlpha) bad(f.where, `${f.src}: PNG part has no alpha channel`)
+        else if (f.face && st.size > PNG_PLATE_MAX_BYTES) bad(f.where, `${f.src}: PNG face plate is ${Math.round(st.size / 1024)} KB (at most ${PNG_PLATE_MAX_BYTES / 1024} KB)`)
       } catch {
         bad(f.where, `${f.src}: not a readable PNG`)
       }

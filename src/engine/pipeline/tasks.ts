@@ -99,6 +99,9 @@ export const rigClaudeAnswer = z
     if (!a.viaTool && !(a.rig && a.parts)) ctx.addIssue({ code: 'custom', message: 'give rig and parts, or write them with cts_rig_set and answer {"viaTool": true}' })
   })
 
+/** A face box `[x, y, width, height]` in pixels of ref.png. */
+const faceBox = z.tuple([z.number().min(0), z.number().min(0), z.number().min(8), z.number().min(8)])
+
 /** The raster rig: cut polygons and pivots in the pixels of ref.png; the code crops the parts. `parent` null is the root (the body; its pivot is the feet point). */
 export const rigRasterAnswer = z.strictObject({
   height: z.number().positive().describe('the figure height in px of ref.png (feet to top of head)'),
@@ -115,7 +118,7 @@ export const rigRasterAnswer = z.strictObject({
       })
     )
     .min(2),
-  face: z.strictObject({ eyes: point, brows: point, mouth: point, scale: z.number().positive().default(1) }),
+  face: z.strictObject({ mouth: faceBox, eyes: faceBox, brows: faceBox }),
   overlap: z.number().min(0).max(24).default(6),
   notes: z.string().default('')
 })

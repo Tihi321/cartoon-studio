@@ -6,12 +6,13 @@ import type { Bible, ClipEntry, Lang, RigVariant } from '../../shared/contracts'
 import { budgetState, localIso } from '../budget/spend'
 import { isAbortError } from '../models/types'
 import { makeSetArt, SET_SIZE } from '../images/background'
+import { comfyInpaint } from '../images/face'
 import { REF_SIZE, SHEET_CANDIDATES, SHEET_DENOISE, composeSheet, generateFromSketch, readSheetMeta, refPrompt } from '../images/reference'
 import type { SheetMeta } from '../images/reference'
 import { SHEET_POSES, SKETCH_BACKGROUND, SKETCH_SIZE, bodyPlanProblems, poseSketch, renderSketch, sketchProblems } from '../images/sketch'
 import { buildEpisodeTimelines } from '../anim/timeline'
 import { renderEpisode } from '../render/render'
-import { contactSheet, poseSheet } from '../render/sheet'
+import { contactSheet, poseSheet, rigSheetName } from '../render/sheet'
 import { checkRig, lintSeries } from '../series/lint'
 import { voiceDeps } from '../voice/tools'
 import { readManifest } from '../voice/manifest'
@@ -187,7 +188,6 @@ async function buildClaude(e: Env, bible: Bible, castId: string, variant: RigVar
 
 async function rasterTask(e: Env, bible: Bible, castId: string, variant: RigVariant, style: string, extraImages: string[], kind: string, note: string): Promise<Raster> {
   const c = bible.cast.find((x) => x.id === castId)!
-  const a = await e.store.readRig(e.series, castId, 'a').catch(() => null)
   const r = await ask<Raster>(
     e,
     {
@@ -195,7 +195,7 @@ async function rasterTask(e: Env, bible: Bible, castId: string, variant: RigVari
       role: 'character-designer',
       kind,
       prompt: note,
-      inputs: { paths: [`cast/${castId}/ref.png`, ...extraImages], json: { character: castView(c), partIdsOfVariantA: a?.parts.map((p) => ({ id: p.id, parent: p.parent, z: p.z })) ?? null, imageSize: REF_SIZE, variant } },
+      inputs: { paths: [`cast/${castId}/ref.png`, ...extraImages], json: { character: castView(c), imageSize: REF_SIZE, variant } },
       output: { schema: 'rig-raster', path: `tasks/${kind}-${castId}.json` }
     },
     { system: style }
@@ -208,10 +208,23 @@ async function buildVariant(e: Env, bible: Bible, castId: string, rp: RigPath, s
   const log = (m: string) => e.log(m)
   if (rp === 'claude-svg') return { status: 'built', note: await buildClaude(e, bible, castId, variant, style) }
   if (rp === 'raster') {
-    const answer = await rasterTask(e, bible, castId, variant, style, [], 'rig-raster', `Cut ${castId}'s reference picture into rotatable parts for path raster (variant c): a polygon per part in the pixels of ref.png (the picture is ${REF_SIZE.width}x${REF_SIZE.height}), the pivot of each part, the z order, and where the eyes, brows and mouth go. Use the same part ids as variant a. The code keys the grey away and crops the parts with an overlap at the joints.`)
-    const res = await buildRasterRig({ store: e.store, series: e.series, cast: castId, answer, log })
+    const answer = await rasterTask(e, bible, castId, variant, style, [], 'rig-raster', `Cut ${castId}'s master picture into rotatable parts for path raster (variant c): a polygon per part in the pixels of ref.png (the picture is ${REF_SIZE.width}x${REF_SIZE.height}), the pivot of each part, the z order, and the boxes of the mouth, the eyes and the brows. The code keys the grey away, crops the parts with an overlap at the joints and makes the face states as image patches of those boxes.`)
+    const sheet = await readSheetMeta(e.store.paths(e.series).castDir(castId))
+    const member = bible.cast.find((x) => x.id === castId)!
+    const res = await buildRasterRig({
+      store: e.store,
+      series: e.series,
+      cast: castId,
+      answer,
+      prompt: sheet?.prompt ?? `${member.name.en}. ${member.look ?? ''}`,
+      seed: sheet?.seed ?? seedOf(castId),
+      inpaint: comfyInpaint(imageCtx(e, `character ${castId} face`), REF_SIZE, { log, signal: e.ctx.signal }),
+      log,
+      signal: e.ctx.signal
+    })
+    for (const r of res.face) if (!r.ok) log(`face ${castId}: ${r.kind}/${r.state} stayed under its minimum difference (${r.diff} < ${r.minDiff}): read the pose sheet`)
     if (!res.check.ok) throw new Error(`raster rig of ${castId} fails cts_rig_check: ${res.check.issues.filter((i) => i.severity === 'error').slice(0, 5).map((i) => i.message).join('; ')}`)
-    return { status: 'built', note: answer.notes || 'cut from the keyed reference' }
+    return { status: 'built', note: answer.notes || 'cut from the keyed master, face patches by inpaint' }
   }
   throw new Error(`unknown rig path "${String(rp)}"`)
 }
@@ -251,7 +264,7 @@ export async function rigStep(e: Env): Promise<string> {
   const notes: string[] = []
   for (const [i, c] of bible.cast.entries()) {
     e.progress(i / bible.cast.length, `rig of ${c.id}`)
-    const wanted = [...new Set(['claude-svg', ...(paths[c.id] ?? [])])].filter((p): p is RigPath => (RIG_PATHS as readonly string[]).includes(p))
+    const wanted = [...new Set(paths[c.id] ?? ['raster'])].filter((p): p is RigPath => (RIG_PATHS as readonly string[]).includes(p))
     for (const rp of wanted) {
       const rec = (await readVariants(e.store, e.series, c.id)).variants[VARIANT_OF[rp]]
       if (rec && (rec.status === 'built' || rec.status === 'not-run') && !e.redo) continue
@@ -348,7 +361,7 @@ export async function voiceStep(e: Env): Promise<string> {
 export async function reviewClip(e: Env, clip: string, file: string, who: string[]): Promise<'pass' | 'revise'> {
   const p = e.store.paths(e.series)
   const sheet = await clipSheet(file, path.join(videoDir(e.store, e.series, e.episode), 'review'), clip)
-  const poses = (await Promise.all(who.map(async (id) => (await exists(path.join(p.castDir(id), 'sheet.png')) ? `cast/${id}/sheet.png` : null)))).filter((x): x is string => !!x)
+  const poses = (await Promise.all(who.map(async (id) => await rigSheetName(p.castDir(id), p.castDir(id)).then((n) => (n ? `cast/${id}/${n}` : null))))).filter((x): x is string => !!x)
   const existing = await fs.readdir(path.join(p.episodeDir(e.episode), 'reviews')).catch(() => [] as string[])
   const n = existing.filter((f) => f.startsWith(`clip-${clip}-`)).length + 1
   const r = await ask<z.infer<typeof reviewAnswer>>(
