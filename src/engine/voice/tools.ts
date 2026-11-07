@@ -1,9 +1,9 @@
 import { z } from 'zod'
-import { CHIPS, VOICE_PROVIDERS } from '../../shared/media'
+import { VOICE_PROVIDERS } from '../../shared/media'
 import type { VoiceProvider } from '../../shared/media'
 import type { Engine } from '../engine'
 import type { Tool, ToolDef } from '../mcp/tools'
-import { generateMusic } from '../music/chiptune'
+import { generateTheme } from '../music/comfy'
 import type { CtsService } from '../service'
 import { SeriesStore } from '../series/service'
 import { comfyKindSwitch } from '../comfy/kind-switch'
@@ -37,11 +37,10 @@ const voiceJobSchema = z.object({
   provider: z.enum(VOICE_PROVIDERS).optional()
 })
 const musicJobSchema = z.object({
-  mood: z.string(),
-  chip: z.enum(CHIPS),
-  seed: z.number().int().min(0),
-  seconds: z.number().min(20).max(60).optional(),
-  sfx: z.array(z.object({ kind: z.enum(['sfx', 'stinger', 'ambience']), sound: z.string(), name: z.string().optional(), chip: z.enum(CHIPS).optional(), seed: z.number().int().min(0).optional(), seconds: z.number().optional() })).max(2).optional()
+  tags: z.string(),
+  bpm: z.number().min(60).max(180).optional(),
+  seed: z.number().int().min(0).optional(),
+  seconds: z.number().min(20).max(60).optional()
 })
 
 /** The request is the JSON at the top of the job body (the scheduler's log lines may follow it after a restart). */
@@ -149,20 +148,19 @@ export function voiceTools(svc: CtsService, def: ToolDef): Tool[] {
     ),
     def(
       'cts_music_generate',
-      'Make the series theme (a 30-40 s loop, Chiptune Studio compose_track + render_audio) and up to 2 sound effects (compose_sfx) as .ogg files under series/<slug>/music/. Returns a job id at once. Chiptune Studio missing or failing is a warning and no music, never a failed job. Free and local.',
+      'Make the series theme: a 40 s instrumental background track from ComfyUI (config/providers.md comfy.musicModel, ACE-Step by default) as series/<slug>/music/theme.ogg with a 0.5 s fade-in and a 2 s fade-out. Returns a job id at once; the job result is { file, seconds, engine, wallSeconds }. ComfyUI missing or failing is a warning and no music, never a failed job. Free and local.',
       z.object({
         series,
-        mood: z.string().describe('A Chiptune Studio mood id: lullaby, peaceful, chill, heroic, ...'),
-        chip: z.enum(CHIPS).describe('nes, gb, genesis, snes, pce, ps1, dreamcast'),
-        seed: z.number().int().min(0).describe('Same seed + same arguments = same theme'),
-        seconds: z.number().min(20).max(60).optional().describe('Theme length, default 35 (rounded to whole bars)'),
-        sfx: z.array(z.object({ kind: z.enum(['sfx', 'stinger', 'ambience']), sound: z.string().describe('coin, jump, chime, ... / success, reveal, discovery, ... / wind, rain, night, ...'), name: z.string().optional(), chip: z.enum(CHIPS).optional(), seed: z.number().int().min(0).optional(), seconds: z.number().optional() })).max(2).optional()
+        tags: z.string().describe('Style tags, e.g. "soft ukulele, glockenspiel, light percussion, playful, warm"'),
+        bpm: z.number().min(60).max(180).optional().describe('Tempo, e.g. 100'),
+        seed: z.number().int().min(0).optional().describe('Same seed + same arguments = same theme'),
+        seconds: z.number().min(20).max(60).optional().describe('Theme length, default 40')
       }),
       async (a) => {
         if (!(await svc.seriesExists(a.series))) throw new Error(`no series "${a.series}"`)
         const { series: slug, ...body } = a
         const job = await enqueueJob(svc, { series: slug, task: 'music', role: 'composer', unit: 'theme', label: 'series theme', body })
-        return { job, hint: 'cts_wait {series}; the files are series/<slug>/music/theme.ogg and the effects beside it' }
+        return { job, hint: 'cts_wait {series}; the file is series/<slug>/music/theme.ogg' }
       }
     )
   ]
@@ -191,10 +189,10 @@ export function registerVoice(engine: Engine): void {
       const slug = ctx.job.book
       if (!slug) throw new Error('a music job needs a series')
       const req = musicJobSchema.parse(requestOf(ctx.jobBody))
-      const { chiptune } = await svc.studios({ autoStart: true, log: (m) => ctx.log(m) })
-      const r = await generateMusic({ chiptune, store: new SeriesStore(svc.dataDir), request: { series: slug, ...req }, log: (m) => ctx.log(m), signal: ctx.signal })
+      const comfy = await svc.comfy({ autoStart: true, log: (m) => ctx.log(m) })
+      const r = await generateTheme({ comfy, store: new SeriesStore(svc.dataDir), dataDir: svc.dataDir, request: { series: slug, ...req }, log: (m) => ctx.log(m), signal: ctx.signal })
       for (const w of r.warnings) ctx.log(`warning: ${w}`)
-      return { result: r.theme ? `theme ${r.theme.file} (${r.theme.seconds.toFixed(1)} s), ${r.sfx.length} effect(s): ${r.sfx.map((s) => s.file).join(', ')}${r.warnings.length ? `; ${r.warnings.length} warning(s)` : ''}` : `no music: ${r.warnings.join('; ')}` }
+      return { result: r.theme ? JSON.stringify({ file: r.theme.file, seconds: r.theme.seconds, engine: r.theme.engine, wallSeconds: r.theme.wallSeconds }) : `no music: ${r.warnings.join('; ')}` }
     },
     { noModel: true }
   )

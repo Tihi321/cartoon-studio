@@ -10,13 +10,13 @@ import type { StudiosConfig } from './config'
 import type { Spawner } from './launch'
 
 /**
- * Starts the services a job needs when they are down: Chiptune Studio and ComfyUI. The commands, ports and health URLs come
+ * Starts the services a job needs when they are down: ComfyUI. The commands, ports and health URLs come
  * from the creative hub's `services.json` (one source of truth); whether a service may be started is decided here (`canStart`).
  * See `config/autostart.md`.
  */
 
 /** The services Cartoon Studio calls and may start. */
-export const KNOWN_SERVICES = ['chiptune-studio', 'comfyui'] as const
+export const KNOWN_SERVICES = ['comfyui'] as const
 /** Never started, whatever the config says: Scriptorium resumes a paid book factory, Strata uses most of the GPU. */
 export const NEVER_STARTED = ['scriptorium', 'strata']
 

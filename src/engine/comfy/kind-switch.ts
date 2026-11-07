@@ -11,7 +11,7 @@ import { fetchWithDeadline, firstReachableLane, loadComfyConfig } from './client
  * a state from an earlier session. A ComfyUI that does not answer is not an error here: the job that follows reports that itself.
  */
 
-export type ComfyJobKind = 'voice' | 'image'
+export type ComfyJobKind = 'voice' | 'image' | 'music'
 
 const lastKind = new Map<string, ComfyJobKind>()
 

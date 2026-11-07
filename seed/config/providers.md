@@ -163,6 +163,8 @@ providers:
 comfy:
   imageModel: z-image-turbo     # about 26 s per character reference and 39 s per background in the bake-off
   alternatives: [krea2-turbo]   # the configured alternative; Qwen-Image 2.1 was slower
+  musicModel: ace-step-v1-instrumental   # the series theme: a 40 s instrumental in about 20 s
+  musicAlternatives: [minimax-music-3]   # Stable Audio 3 is an option too, not wired yet
 ---
 # Providers
 
@@ -196,3 +198,7 @@ Strata is a fast local server with an OpenAI-style API on port 8080. Cartoon Stu
 ## ComfyUI image model
 
 `comfy.imageModel` above is the model ComfyUI uses for pictures. `z-image-turbo` is the default; `krea2-turbo` is the listed alternative. Z-Image draws a white sticker halo round the figure; that is harmless where the picture is only a reference to redraw, and the colour key removes it where the picture is cut into parts.
+
+## ComfyUI music model
+
+`comfy.musicModel` is the engine that makes the series theme (a 40 s instrumental, then converted to `music/theme.ogg` with a short fade-in and fade-out). `ace-step-v1-instrumental` is the default (about 20 s for 40 s of music); `minimax-music-3` is the listed alternative. Stable Audio 3 is an option that is not wired. Sound effects always come from `moss-soundeffect-v2`. A value that is not listed falls back to the default.

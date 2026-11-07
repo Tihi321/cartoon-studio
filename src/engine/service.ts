@@ -14,8 +14,8 @@ import type { FlowClient } from './studios/flow'
 import type { VibeTtsClient } from './studios/vibetts'
 import type { ServiceStarter } from './studios/autostart'
 import { assertSlug, seriesDir } from './series/paths'
-import { chiptuneClientFor, flowClientFor, flowStartHint, loadStudiosConfig, startHint, studioRepo, studioUrl, STUDIO_NAMES, vibettsClientFor, vibettsStartHint } from './studios/config'
-import type { StudioId, StudiosConfig } from './studios/config'
+import { chiptuneClientFor, flowClientFor, flowStartHint, loadStudiosConfig, vibettsClientFor, vibettsStartHint } from './studios/config'
+import type { StudiosConfig } from './studios/config'
 
 /**
  * The service every cartoon feature hangs on: the queries and queue helpers that the MCP tools and the app share, and the generator clients
@@ -281,17 +281,7 @@ export class CtsService {
 
   /** Asks the services for their tools. Never throws: an unreachable service is `ok: false` with the message (and how to start it). */
   async studiosStatus(): Promise<StudioStatusView[]> {
-    const { chiptune, flow, vibetts, config } = await this.studios()
-    const probeChiptune = async (): Promise<StudioStatusView> => {
-      const id: StudioId = 'chiptune'
-      const base = { id, name: STUDIO_NAMES[id], url: chiptune.url || studioUrl(config, id), repo: studioRepo(config, id), hint: startHint(config, id) }
-      try {
-        const tools = await chiptune.listTools()
-        return { ...base, ok: true, error: '', tools: tools.length }
-      } catch (e) {
-        return { ...base, ok: false, error: (e as Error).message, tools: 0 }
-      }
-    }
+    const { flow, vibetts, config } = await this.studios()
     const probeFlow = async (): Promise<StudioStatusView> => {
       const base = { id: 'flow' as const, name: 'flow-music-mcp (Google Flow)', url: flow.url || config.flowUrl, repo: config.flowRepo, hint: flowStartHint(config) }
       try {
@@ -323,7 +313,7 @@ export class CtsService {
         return { id: 'comfy', name: 'ComfyUI', ok: false, url: lane, error: (e as Error).message, repo: '', hint: 'Start ComfyUI (hub.ps1 start comfyui)', tools: 0 }
       }
     }
-    return Promise.all([probeComfy(), probeChiptune(), probeFlow(), probeVibe()])
+    return Promise.all([probeComfy(), probeFlow(), probeVibe()])
   }
 
   /** The UI commands about series and generators: each answers with its event. */

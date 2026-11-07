@@ -32,7 +32,7 @@ export const STEPS: readonly StepDef[] = [
   { id: 'safety', no: '6', label: 'Child safety review, must pass (child-safety-reviewer)', role: 'child-safety-reviewer', kind: 'role' },
   { id: 'voice_cast', no: '7', label: 'Voices per character and language (voice-director)', role: 'voice-director', kind: 'role' },
   { id: 'voice', task: 'voice_run', no: '8', label: 'Speak every line in every language', role: 'voice-director', kind: 'code' },
-  { id: 'music', task: 'music_run', no: '9', label: 'Theme and sound effects (composer, Chiptune Studio)', role: 'composer', kind: 'role' },
+  { id: 'music', task: 'music_run', no: '9', label: 'Theme and sound effects (composer, ComfyUI)', role: 'composer', kind: 'role' },
   { id: 'clip_shots', no: '9b', label: 'Flow clip shots and the video-plan input (showrunner)', role: 'showrunner', kind: 'role' },
   { id: 'clips', no: '9b', label: 'Flow clips: keyframe, video, review (frame-critic); waits for the credit cap', role: 'frame-critic', kind: 'role', vision: true },
   { id: 'timeline', no: '10', label: 'Lip-sync, timelines and lint', role: 'showrunner', kind: 'code' },

@@ -5,7 +5,7 @@ import type { z } from 'zod'
 import type { Bible, Episode, Lang } from '../../shared/contracts'
 import { localIso } from '../budget/spend'
 import type { Engine } from '../engine'
-import { generateMusic } from '../music/chiptune'
+import { generateTheme } from '../music/comfy'
 import { isAbortError } from '../models/types'
 import type { JobContext } from '../queue/scheduler'
 import { normaliseWav } from '../voice/audio'
@@ -381,18 +381,19 @@ async function musicStep(e: Env): Promise<string> {
       id: 'music',
       role: 'composer',
       kind: 'music',
-      prompt: `Pick the theme for the series (a 30 to 40 second loop): the Chiptune Studio mood, the chip and a seed. If the script has sound effect cues, plan one effect per cue (at most two; "name" is the cue name).`,
+      prompt: `Pick the theme for the series (a 40 second instrumental, soft background music for a children's cartoon under dialogue): the style tags, the tempo (bpm), the key and a seed. If the script has sound effect cues, plan one effect per cue (at most two; "name" is the cue name, "prompt" describes the sound).`,
       inputs: { paths: [], json: { tone: bible.tone, logline: bible.logline, style: bible.style.look, audience: bible.audience, scriptCues: cues } },
       output: { schema: 'music', path: 'tasks/music.json' }
     },
     { check: (v) => ((v as z.infer<typeof musicAnswer>).sfx ?? []).flatMap((s) => (s.name && cues.sfx.includes(s.name) ? [] : [`sfx name "${s.name ?? ''}" is not a cue of the script (${cues.sfx.join(', ') || 'none'})`])) }
   )
-  const { chiptune } = await e.svc.studios({ autoStart: true, log: (m) => e.log(m) })
+  const comfy = await e.svc.comfy({ autoStart: true, log: (m) => e.log(m) })
   const v = r.value
-  const res = await generateMusic({
-    chiptune,
+  const res = await generateTheme({
+    comfy,
     store: e.store,
-    request: { series: e.series, mood: v.mood, chip: v.chip, seed: v.seed, ...(v.seconds ? { seconds: v.seconds } : {}), ...(v.sfx?.length ? { sfx: v.sfx.map((s) => ({ kind: s.kind, sound: s.sound, name: `sfx-${s.name}` })) } : {}) },
+    dataDir: e.svc.dataDir,
+    request: { series: e.series, tags: v.tags, bpm: v.bpm, key: v.key, seed: v.seed, ...(v.seconds ? { seconds: v.seconds } : {}), ...(v.sfx?.length ? { sfx: v.sfx.map((s) => ({ name: `sfx-${s.name}`, prompt: s.prompt, seconds: s.seconds })) } : {}) },
     log: (m) => e.log(m),
     signal: e.ctx.signal
   })
@@ -408,7 +409,7 @@ async function musicStep(e: Env): Promise<string> {
   }
   const scenes = script.scenes.map((s) => ({ ...s, beats: s.beats.filter((b) => (b.type === 'music' ? cues.music.length > 0 && b.cue in music : b.type === 'sfx' ? b.cue in sfx : true)) }))
   await e.store.writeScript(e.series, e.episode, { ...script, scenes, music, sfx })
-  return res.theme ? `theme ${res.theme.file} (${res.theme.seconds.toFixed(1)} s), ${res.sfx.length} effect(s)${res.warnings.length ? `; ${res.warnings.length} warning(s)` : ''}` : `NO MUSIC: ${res.warnings[0] ?? 'Chiptune Studio did not answer'}`
+  return res.theme ? `theme ${res.theme.file} (${res.theme.seconds.toFixed(1)} s, ${res.theme.engine}, ${res.theme.wallSeconds} s wall), ${res.sfx.length} effect(s)${res.warnings.length ? `; ${res.warnings.length} warning(s)` : ''}` : `NO MUSIC: ${res.warnings[0] ?? 'ComfyUI did not answer'}`
 }
 
 // ---------------------------------------------------------------- step 9b: clip shots

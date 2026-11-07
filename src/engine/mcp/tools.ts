@@ -90,7 +90,7 @@ export function buildTools(svc: CtsService, opts: McpOptions = {}): Tool[] {
     ),
 
     // ---- generators ----
-    def('cts_studios_status', 'Are ComfyUI, Chiptune Studio, flow-music-mcp (Google Flow: images, Gemini voices) and VibeTTS (local text-to-speech; a tray app that Cartoon Studio never starts) reachable, and how to start them if not.', z.object({}), async () => ({ studios: await svc.studiosStatus() })),
+    def('cts_studios_status', 'Are ComfyUI, flow-music-mcp (Google Flow: images, Gemini voices) and VibeTTS (local text-to-speech; a tray app that Cartoon Studio never starts) reachable, and how to start them if not.', z.object({}), async () => ({ studios: await svc.studiosStatus() })),
 
     // ---- model work done by the MCP client (client/... models) ----
     ...clientTools(svc, def, opts),

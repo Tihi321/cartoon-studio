@@ -17,7 +17,6 @@ import {
   textSchema,
   voiceSpecSchema
 } from '../../shared/contracts'
-import { CHIPS } from '../../shared/media'
 import { parseMd } from '../../shared/md'
 import type { ChatMessage } from '../models/types'
 import type { JobContext } from '../queue/scheduler'
@@ -139,14 +138,12 @@ export const voiceCastAnswer = z.strictObject({
 })
 
 export const musicAnswer = z.strictObject({
-  mood: z.string().min(2),
-  chip: z.enum(CHIPS),
+  tags: z.string().min(2),
+  bpm: z.number().min(60).max(180),
+  key: z.string().min(1),
   seed: z.number().int().min(0),
   seconds: z.number().min(20).max(60).optional(),
-  sfx: z
-    .array(z.strictObject({ kind: z.enum(['sfx', 'stinger', 'ambience']), sound: z.string(), name: z.string().optional() }))
-    .max(2)
-    .optional(),
+  sfx: z.array(z.strictObject({ name: z.string().min(1), prompt: z.string().min(2), seconds: z.number().min(1).max(10) })).max(2).optional(),
   notes: z.string().default('')
 })
 
