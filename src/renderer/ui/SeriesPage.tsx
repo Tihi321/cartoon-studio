@@ -103,7 +103,7 @@ function SeriesDetail({ slug, bible, read, onChanged }: { slug: string; bible: B
         )}
       </section>
 
-      <BibleForm key={`${slug}:${bible.title?.en}:${bible.logline?.en}`} slug={slug} bible={bible} onSaved={onChanged} />
+      <BibleForm key={slug} slug={slug} bible={bible} onSaved={onChanged} />
 
       {(bible.episodes ?? []).length > 0 && (
         <section className="sheet panel" aria-labelledby="ser-eps" data-testid="series-episodes">
@@ -182,14 +182,18 @@ function PitchCard({ slug, pitch, n, chosen, anyChosen, onChosen }: { slug: stri
 
 /** The bible's text fields. Saved with cts_series_update. */
 function BibleForm({ slug, bible, onSaved }: { slug: string; bible: Bible; onSaved(): void }) {
-  const [f, setF] = useState(() => ({
+  const fromBible = () => ({
     titleEn: bible.title?.en ?? '',
     titleHr: bible.title?.hr ?? '',
     loglineEn: bible.logline?.en ?? '',
     loglineHr: bible.logline?.hr ?? '',
     tone: (bible.tone ?? []).join(', '),
     rules: (bible.rules ?? []).join('\n')
-  }))
+  })
+  const [f, setF] = useState(fromBible)
+  // the bible changed in the engine (saved here, or edited by Claude Code): show what it says now
+  const sig = JSON.stringify(fromBible())
+  useEffect(() => setF(JSON.parse(sig) as ReturnType<typeof fromBible>), [sig])
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => {
@@ -201,12 +205,10 @@ function BibleForm({ slug, bible, onSaved }: { slug: string; bible: Bible; onSav
     try {
       await callTool('cts_series_update', {
         series: slug,
-        patch: {
-          title: { en: f.titleEn, hr: f.titleHr },
-          logline: { en: f.loglineEn, hr: f.loglineHr },
-          tone: f.tone.split(',').map((t) => t.trim()).filter(Boolean),
-          rules: f.rules.split('\n').map((t) => t.trim()).filter(Boolean)
-        }
+        title: { en: f.titleEn, hr: f.titleHr },
+        logline: { en: f.loglineEn, hr: f.loglineHr },
+        tone: f.tone.split(',').map((t) => t.trim()).filter(Boolean),
+        rules: f.rules.split('\n').map((t) => t.trim()).filter(Boolean)
       })
       setMsg({ ok: true, text: 'Saved.' })
       onSaved()

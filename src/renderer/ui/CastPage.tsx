@@ -1,6 +1,7 @@
+import { useState } from 'react'
 import { LANGS } from '../../shared/contracts'
-import type { CastMember, Lang, RigVariant, VoiceSpec } from '../../shared/contracts'
-import { normalizeCast, seconds, seriesFile, useTool } from '../lib/studio'
+import type { CastMember, RigVariant, VoiceSpec } from '../../shared/contracts'
+import { callTool, engineOrigin, normalizeCast, playerUrl, seconds, seriesFile, useTool } from '../lib/studio'
 import type { RigCheckView, VariantInfo } from '../lib/studio'
 import { useCts } from '../store/hooks'
 import { ctsStore } from '../store/store'
@@ -51,7 +52,6 @@ export function CastPage() {
 
 function CastMemberView({ slug, member }: { slug: string; member: CastMember }) {
   const t = useTool('cts_cast_get', { series: slug, cast: member.id }, normalizeCast)
-  const base = useTool<RigCheckView>('cts_rig_check', { series: slug, cast: member.id })
   return (
     <>
       <section className="sheet panel" aria-labelledby="cast-who" data-testid="cast-who">
@@ -61,7 +61,7 @@ function CastMemberView({ slug, member }: { slug: string; member: CastMember }) 
         <p>{member.personality}</p>
         <div className="row">
           <Pill tone="dim">{member.role}</Pill>
-          <RigCheckPill state={base} testId="cast-rig-check" />
+          {t.data && <RigCheckPill check={t.data.check} testId="cast-rig-check" none="no rig yet" />}
         </div>
       </section>
 
@@ -74,7 +74,7 @@ function CastMemberView({ slug, member }: { slug: string; member: CastMember }) 
                 <figcaption>Reference image</figcaption>
               </figure>
               <figure className="plate wide">
-                <Picture src={t.data.sheet ? seriesFile(slug, t.data.sheet) : null} alt={`Pose sheet of ${member.name.en}`} testId="cast-sheet" />
+                <PoseSheet slug={slug} cast={member.id} sheet={t.data.sheet} hasRig={!!t.data.rig} onSaved={t.reload} />
                 <figcaption>Pose sheet: neutral, each emotion, gestures, 8 mouths, 3 eye states</figcaption>
               </figure>
             </section>
@@ -84,13 +84,13 @@ function CastMemberView({ slug, member }: { slug: string; member: CastMember }) 
                 Rig variants
               </h2>
               <ul className="variants">
-                {(['a', 'b', 'c'] as const).map((v) => (
-                  <VariantCard key={v} slug={slug} cast={member.id} v={v} info={t.data?.variants.find((x) => x.variant === v)} />
+                {t.data.variants.map((v) => (
+                  <VariantCard key={v.variant} slug={slug} v={v} />
                 ))}
               </ul>
             </section>
 
-            <VoiceSection slug={slug} member={member} audition={t.data.audition} />
+            <VoiceSection slug={slug} member={member} />
           </>
         )}
       </ToolGate>
@@ -98,54 +98,103 @@ function CastMemberView({ slug, member }: { slug: string; member: CastMember }) 
   )
 }
 
-function RigCheckPill({ state, testId }: { state: { data: RigCheckView | null; error: Error | null; loading: boolean }; testId: string }) {
-  if (state.loading && !state.data) return <Pill testId={testId}>checking the rig</Pill>
-  if (state.error || !state.data) return <Pill tone="dim" testId={testId} title={state.error?.message}>rig not checked</Pill>
-  const errors = state.data.issues.filter((i) => i.severity === 'error').length
-  const warns = state.data.issues.length - errors
+/**
+ * The pose sheet: the sheet.png when it exists, else the player drawing it live from the rig (its ?sheet=<cast> mode). "Save as sheet.png" makes the file
+ * with cts_pose_sheet, which the frame critic and the comparison sheet read.
+ */
+function PoseSheet({ slug, cast, sheet, hasRig, onSaved }: { slug: string; cast: string; sheet: string | null; hasRig: boolean; onSaved(): void }) {
+  const mcp = useCts((s) => s.mcp)
+  const origin = mcp?.listening ? engineOrigin(mcp.url) : null
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const save = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await callTool('cts_pose_sheet', { series: slug, cast })
+      onSaved()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  if (sheet) return <Picture src={seriesFile(slug, sheet)} alt={`Pose sheet of ${cast}`} testId="cast-sheet" />
   return (
-    <Pill tone={state.data.ok ? 'good' : 'bad'} testId={testId} title={state.data.issues.map((i) => `${i.code}: ${i.message}`).join('\n')}>
-      {state.data.ok ? `rig ok, ${state.data.parts} parts` : `${errors} rig error${errors === 1 ? '' : 's'}`}
+    <div className="sheet-live">
+      {hasRig && origin ? (
+        <iframe className="sheet-frame" title={`Pose sheet of ${cast}`} src={playerUrl(origin, { series: slug, sheet: cast }).replace('preview=1&', '')} data-testid="cast-sheet-live" />
+      ) : (
+        <Picture src={null} alt="" testId="cast-sheet" />
+      )}
+      {hasRig && (
+        <div className="row">
+          <button onClick={() => void save()} disabled={busy} data-testid="cast-sheet-save">
+            {busy ? 'Saving...' : 'Save as sheet.png'}
+          </button>
+          {error && (
+            <span className="bad-text" role="alert" data-testid="cast-sheet-error">
+              {error}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RigCheckPill({ check, testId, none = 'not checked' }: { check: RigCheckView | null | undefined; testId: string; none?: string }) {
+  if (!check)
+    return (
+      <Pill tone="dim" testId={testId}>
+        {none}
+      </Pill>
+    )
+  const errors = check.issues.filter((i) => i.severity === 'error').length
+  const warns = check.issues.length - errors
+  return (
+    <Pill tone={check.ok ? 'good' : 'bad'} testId={testId} title={check.issues.map((i) => `${i.code}: ${i.message}`).join('\n')}>
+      {check.ok ? `rig ok, ${check.parts} parts` : `${errors} rig error${errors === 1 ? '' : 's'}`}
       {warns > 0 && `, ${warns} warning${warns === 1 ? '' : 's'}`}
     </Pill>
   )
 }
 
-function VariantCard({ slug, cast, v, info }: { slug: string; cast: string; v: RigVariant; info: VariantInfo | undefined }) {
-  const state = info?.state ?? 'not-run'
-  const check = useTool<RigCheckView>('cts_rig_check', state === 'done' ? { series: slug, cast, variant: v } : null)
+const STATE_TEXT = { done: 'made', failed: 'failed', 'not-run': 'not run' } as const
+
+function VariantCard({ slug, v }: { slug: string; v: VariantInfo }) {
   return (
-    <li className={info?.chosen ? 'variant chosen' : state === 'not-run' ? 'variant idle' : 'variant'} data-testid={`variant-${v}`}>
+    <li className={v.chosen ? 'variant chosen' : v.state === 'not-run' ? 'variant idle' : 'variant'} data-testid={`variant-${v.variant}`}>
       <div className="row spread">
         <h3 className="variant-name">
-          <span className="variant-letter">({v})</span> {PATH_NAME[v]}
+          <span className="variant-letter">({v.variant})</span> {PATH_NAME[v.variant]}
         </h3>
-        {info?.chosen && <Pill tone="accent">used in the film</Pill>}
+        {v.chosen && <Pill tone="accent">the rig</Pill>}
       </div>
-      <Picture src={info?.preview ? seriesFile(slug, info.preview) : null} alt={`Rig by path ${v}`} testId={`variant-${v}-img`} />
+      <Picture src={v.preview ? seriesFile(slug, v.preview) : null} alt={`Rig by path ${v.variant}`} testId={`variant-${v.variant}-img`} />
       <dl className="variant-facts">
         <dt>State</dt>
-        <dd data-testid={`variant-${v}-state`}>{state === 'done' ? 'made' : state === 'running' ? 'being made' : 'not run'}</dd>
+        <dd data-testid={`variant-${v.variant}-state`}>{STATE_TEXT[v.state]}</dd>
         <dt>Time</dt>
-        <dd data-testid={`variant-${v}-time`}>{info?.seconds !== undefined ? seconds(info.seconds) : 'none'}</dd>
+        <dd data-testid={`variant-${v.variant}-time`}>{v.seconds !== undefined ? seconds(v.seconds) : 'none'}</dd>
         <dt>Spend</dt>
-        <dd data-testid={`variant-${v}-spend`}>{info ? spendText(info) : 'none'}</dd>
+        <dd data-testid={`variant-${v.variant}-spend`}>{v.costUsd === undefined ? 'none' : spendText(v)}</dd>
         <dt>Rig check</dt>
-        <dd>{state === 'done' ? <RigCheckPill state={check} testId={`variant-${v}-check`} /> : <span className="dim">nothing to check</span>}</dd>
+        <dd>{v.state === 'done' ? <RigCheckPill check={v.check} testId={`variant-${v.variant}-check`} /> : <span className="dim">nothing to check</span>}</dd>
       </dl>
-      {info?.note && <p className="dim variant-note">{info.note}</p>}
+      {v.note && <p className="dim variant-note">{v.note}</p>}
     </li>
   )
 }
 
 function spendText(i: VariantInfo): string {
-  const parts: string[] = []
-  if (i.costUsd !== undefined) parts.push(`$${i.costUsd.toFixed(2)}`)
+  const parts = [`$${(i.costUsd ?? 0).toFixed(2)}`]
   if (i.credits) parts.push(`${i.credits} credits`)
-  return parts.length ? parts.join(' and ') : '$0.00'
+  return parts.join(' and ')
 }
 
-function VoiceSection({ slug, member, audition }: { slug: string; member: CastMember; audition: Partial<Record<Lang, string>> }) {
+function VoiceSection({ slug, member }: { slug: string; member: CastMember }) {
+  const [missing, setMissing] = useState<Record<string, boolean>>({})
   return (
     <section className="sheet panel" aria-labelledby="cast-voice" data-testid="cast-voice">
       <h2 className="panel-title" id="cast-voice">
@@ -154,14 +203,15 @@ function VoiceSection({ slug, member, audition }: { slug: string; member: CastMe
       <ul className="plain voices">
         {LANGS.map((lang) => {
           const spec: VoiceSpec | undefined = member.voice[lang]
-          const clip = audition[lang]
           return (
             <li key={lang} className="voice-row" data-testid={`voice-${lang}`}>
               <b className="voice-lang">{LANG_NAME[lang]}</b>
               <span data-testid={`voice-${lang}-spec`}>{spec ? voiceText(spec) : <span className="dim">no voice set yet</span>}</span>
               <span className="voice-audition">
-                <PlayButton src={clip ? seriesFile(slug, clip) : null} label={`${member.name.en} in ${LANG_NAME[lang]}`} testId={`voice-${lang}-play`} />
-                <span className="dim">{clip ? 'audition' : 'no audition yet'}</span>
+                <PlayButton src={seriesFile(slug, `cast/${member.id}/voice/${lang}.wav`)} label={`${member.name.en} in ${LANG_NAME[lang]}`} testId={`voice-${lang}-play`} onFail={() => setMissing((m) => ({ ...m, [lang]: true }))} />
+                <span className="dim" data-testid={`voice-${lang}-note`}>
+                  {missing[lang] ? 'no audition yet' : 'audition'}
+                </span>
               </span>
             </li>
           )

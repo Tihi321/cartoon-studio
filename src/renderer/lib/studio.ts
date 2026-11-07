@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Bible, BudgetFile, Episode, Lang, Rig, RigVariant, SetFile, SpendEntry, TextCatalog, VoiceManifest } from '../../shared/contracts'
+import type { Bible, Episode, Lang, RigVariant, SetFile, SpendEntry, TextCatalog } from '../../shared/contracts'
 import type { SeriesRunState } from '../../shared/protocol'
 import { seriesFileUrl } from '../api'
 import { useCts } from '../store/hooks'
@@ -73,51 +73,135 @@ export function useTool<T>(tool: string, args: Record<string, unknown> | null, m
 
 // ---- what the tools answer ----
 
+export interface EpisodeRef {
+  id: string
+  title: { hr: string; en: string }
+}
 export interface SeriesInfo {
   bible: Bible
+  /** The state of the pipeline of the series (the one that waits on the user first), or null when none ran yet. */
   state: SeriesRunState | null
   step: string | null
+  hint: string | null
+  /** Every episode folder, with the bible title when it has one. */
+  episodes: EpisodeRef[]
 }
-/** `cts_series_get { series }` -> `{ bible, state?, step? }` (or the bible itself). */
+/**
+ * `cts_series_get { series }` -> `{ bible, rigs, episodes: string[], pipelines: [{episode, state, step, hint}] }`. A series that has pitches and no
+ * chosen one is waiting for the user even before a pipeline file exists.
+ */
 export function normalizeSeries(r: Record<string, unknown>): SeriesInfo {
   const bible = (r.bible ?? r) as Bible
-  return { bible, state: (r.state as SeriesRunState | undefined) ?? null, step: (r.step as string | undefined) ?? null }
+  const pipes = (r.pipelines as { episode: string; state: SeriesRunState; step: string | null; hint?: string }[] | undefined) ?? []
+  const pipe = pipes.find((p) => p.state === 'waiting-on-user') ?? pipes[0]
+  const ids = new Set<string>([...((r.episodes as string[] | undefined) ?? []), ...(bible.episodes ?? []).map((e) => e.id)])
+  const episodes = [...ids].map((id) => ({ id, title: bible.episodes?.find((e) => e.id === id)?.title ?? { hr: id, en: id } }))
+  const waiting = !pipe && (bible.pitches ?? []).length > 0 && !bible.chosenPitch
+  return { bible, state: pipe?.state ?? (waiting ? 'waiting-on-user' : null), step: pipe?.step ?? null, hint: pipe?.hint ?? null, episodes }
 }
 
 export interface VariantInfo {
   variant: RigVariant
-  state: 'done' | 'running' | 'not-run'
+  state: 'done' | 'failed' | 'not-run'
   /** Wall time of the path, seconds. */
   seconds?: number
   costUsd?: number
   credits?: number
   note?: string
-  /** A picture of the rig made by that path, relative to the series folder. */
+  /** The pose sheet of the variant, relative to the series folder. */
   preview?: string | null
-  /** The variant the pilot film uses. */
+  /** The variant the rig of the character was chosen from. */
   chosen?: boolean
+  /** `cts_rig_check` of the variant, as `cts_cast_get` includes it. */
+  check?: RigCheckView
 }
 export interface CastInfo {
   id: string
-  rig: Rig | null
-  /** The reference image and the pose sheet, relative to the series folder. */
+  rig: { height: number; kind: string; parts: string[]; gestures: string[]; emotions: string[] } | null
+  /** The reference image and the pose sheet, relative to the series folder; null when the file does not exist. */
   ref: string | null
   sheet: string | null
   variants: VariantInfo[]
-  /** The audition clip per language, relative to the series folder. */
-  audition: Partial<Record<Lang, string>>
+  /** `cts_rig_check` of the chosen rig. */
+  check: RigCheckView | null
 }
-/** `cts_cast_get { series, cast }` -> CastInfo. */
+/** `cts_cast_get { series, cast }` -> `{ member, rig, variants: variants.json, checks: {chosen, a, b, c}, files: {ref, sheet} }`. */
 export function normalizeCast(r: Record<string, unknown>): CastInfo {
-  const c = r as Partial<CastInfo> & { id?: string }
-  return { id: c.id ?? '', rig: c.rig ?? null, ref: c.ref ?? null, sheet: c.sheet ?? null, variants: c.variants ?? [], audition: c.audition ?? {} }
+  const member = (r.member ?? {}) as { id?: string }
+  const file = (r.variants ?? {}) as { chosen?: RigVariant | null; variants?: Partial<Record<RigVariant, { status: string; wallSeconds: number; spendUsd: number; spendCredits?: number; note: string }>> }
+  const checks = (r.checks ?? {}) as Record<string, RigCheckView | undefined>
+  const files = (r.files ?? {}) as { ref?: string | null; sheet?: string | null }
+  const id = member.id ?? ''
+  const variants: VariantInfo[] = (['a', 'b', 'c'] as const).map((v) => {
+    const rec = file.variants?.[v]
+    if (!rec) return { variant: v, state: 'not-run' as const }
+    return {
+      variant: v,
+      state: rec.status === 'built' ? ('done' as const) : rec.status === 'failed' ? ('failed' as const) : ('not-run' as const),
+      seconds: rec.wallSeconds,
+      costUsd: rec.spendUsd,
+      credits: rec.spendCredits ?? 0,
+      note: rec.note,
+      preview: rec.status === 'built' ? `cast/${id}/variants/${v}/sheet.png` : null,
+      chosen: file.chosen === v,
+      check: checks[v]
+    }
+  })
+  return { id, rig: (r.rig as CastInfo['rig']) ?? null, ref: files.ref ?? null, sheet: files.sheet ?? null, variants, check: checks.chosen ?? null }
 }
 
-/** `cts_set_get { series, set }` -> `{ set }`. */
+/** `cts_set_get { series, set }` -> `{ set, layerFiles }`. */
 export function normalizeSet(r: Record<string, unknown>): SetFile {
   return (r.set ?? r) as SetFile
 }
 
+/** What `cts_episode_get` keeps of a voice line (the file is `voice/<lang>/<line>.wav` by convention). */
+export interface VoiceLineView {
+  status: 'ok' | 'placeholder' | 'failed'
+  provider: string
+  seconds: number
+}
+export interface EpisodeInfo {
+  /** The script; null when the episode has none yet. */
+  episode: Episode | null
+  text: Partial<Record<Lang, TextCatalog | null>>
+  voice: Partial<Record<Lang, Record<string, VoiceLineView>>>
+  state: SeriesRunState | null
+}
+/** `cts_episode_get { series, episode }` -> `{ script, texts, voice: {lang: {allocation, lines}}, timelines, reviews, clips, budget, pipeline }`. */
+export function normalizeEpisode(r: Record<string, unknown>): EpisodeInfo {
+  const voice: EpisodeInfo['voice'] = {}
+  for (const [lang, v] of Object.entries((r.voice ?? {}) as Record<string, { lines?: Record<string, VoiceLineView> } | null>)) if (v?.lines) voice[lang as Lang] = v.lines
+  return {
+    episode: (r.script as Episode | null) ?? null,
+    text: (r.texts ?? {}) as EpisodeInfo['text'],
+    voice,
+    state: ((r.pipeline as { state?: SeriesRunState } | null)?.state as SeriesRunState | undefined) ?? null
+  }
+}
+
+export interface BudgetInfo {
+  /** The caps, or null when no budget.json exists (both caps are 0). */
+  budget: { capUsd: number; flowCreditsCap: number } | null
+  spentUsd: number
+  spentCredits: number
+  ledger: SpendEntry[]
+}
+/** `cts_budget_get { series, episode }` -> `{ approved, capUsd, flowCreditsCap, spentUsd, spentCredits, leftUsd, leftCredits, ledger }`. */
+export function normalizeBudget(r: Record<string, unknown>): BudgetInfo {
+  const b = r as { approved?: boolean; capUsd?: number; flowCreditsCap?: number; spentUsd?: number; spentCredits?: number; ledger?: SpendEntry[] }
+  return { budget: b.approved ? { capUsd: b.capUsd ?? 0, flowCreditsCap: b.flowCreditsCap ?? 0 } : null, spentUsd: b.spentUsd ?? 0, spentCredits: b.spentCredits ?? 0, ledger: b.ledger ?? [] }
+}
+
+/** One render job of `cts_render_status` (they live in the engine process). Ids are `<series>--render--<episode>-<lang>-<quality>--r<n>`. */
+export interface RenderJobView {
+  id: string
+  state: 'running' | 'done' | 'failed'
+  progress: { done: number; total: number }
+  startedAt: string
+  result?: { file: string; seconds: number; wallSeconds: number; encoder: string; frames: number }
+  error?: string
+}
 export interface RenderInfo {
   lang: Lang
   quality: 'preview' | 'final'
@@ -127,29 +211,14 @@ export interface RenderInfo {
   wallSeconds: number
   encoder: string
 }
-export interface EpisodeInfo {
-  episode: Episode
-  text: Partial<Record<Lang, TextCatalog>>
-  voice: Partial<Record<Lang, VoiceManifest>>
-  renders: RenderInfo[]
-  state: SeriesRunState | null
-}
-/** `cts_episode_get { series, episode }` -> EpisodeInfo. */
-export function normalizeEpisode(r: Record<string, unknown>): EpisodeInfo {
-  const e = r as Partial<EpisodeInfo>
-  return { episode: (e.episode ?? r) as Episode, text: e.text ?? {}, voice: e.voice ?? {}, renders: e.renders ?? [], state: e.state ?? null }
-}
-
-export interface BudgetInfo {
-  budget: BudgetFile | null
-  spentUsd: number
-  spentCredits: number
-  ledger: SpendEntry[]
-}
-/** `cts_budget_get { series, episode }` -> BudgetInfo. */
-export function normalizeBudget(r: Record<string, unknown>): BudgetInfo {
-  const b = r as Partial<BudgetInfo>
-  return { budget: b.budget ?? null, spentUsd: b.spentUsd ?? 0, spentCredits: b.spentCredits ?? 0, ledger: b.ledger ?? [] }
+/** The finished render of a job as a row (the file is made relative to the series folder); null for a job that is not done or whose id does not parse. */
+export function renderOfJob(j: RenderJobView): (RenderInfo & { episode: string; series: string }) | null {
+  const m = /^([a-z0-9-]+)--render--([a-z0-9-]+)-(hr|en)-(preview|final)--r\d+$/.exec(j.id)
+  if (!m || j.state !== 'done' || !j.result) return null
+  const norm = j.result.file.replace(/\\/g, '/')
+  const at = norm.lastIndexOf(`/series/${m[1]}/`)
+  const file = at >= 0 ? norm.slice(at + `/series/${m[1]}/`.length) : norm
+  return { series: m[1]!, episode: m[2]!, lang: m[3] as Lang, quality: m[4] as 'preview' | 'final', file, seconds: j.result.seconds, wallSeconds: j.result.wallSeconds, encoder: j.result.encoder }
 }
 
 /** One finding of `cts_lint` / `cts_rig_check` (src/engine/series/lint.ts `LintIssue`). */

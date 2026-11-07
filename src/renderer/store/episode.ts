@@ -1,4 +1,4 @@
-import type { Lang, VoiceManifest } from '../../shared/contracts'
+import type { Lang } from '../../shared/contracts'
 import type { EngineEvent, SeriesRunState, VoiceLineStatus } from '../../shared/protocol'
 
 /**
@@ -58,10 +58,10 @@ export function lineVoice(s: Pick<EpisodeData, 'voiceLines'>, series: string, ep
   return s.voiceLines[episodeKey(series, episode)]?.[lang]?.[line] ?? PENDING
 }
 
-/** The voice state of every line in a manifest (`ok`/`placeholder`/`failed` as the manifest says). */
-export function lineVoiceFromManifest(manifest: VoiceManifest): Record<string, LineVoice> {
+/** The voice state of every line of a language as `cts_episode_get` reports it (`ok`/`placeholder`/`failed`); the clip is `voice/<lang>/<line>.wav` of the episode folder. */
+export function lineVoiceFromLines(lang: Lang, lines: Record<string, { status: 'ok' | 'placeholder' | 'failed'; provider: string; seconds: number }>): Record<string, LineVoice> {
   const out: Record<string, LineVoice> = {}
-  for (const [id, l] of Object.entries(manifest.lines)) out[id] = { status: l.status, provider: l.provider, seconds: l.seconds, file: l.file }
+  for (const [id, l] of Object.entries(lines)) out[id] = { status: l.status, provider: l.provider, seconds: l.seconds, file: `voice/${lang}/${id}.wav` }
   return out
 }
 

@@ -133,7 +133,7 @@ function VoiceProviders() {
     try {
       // the patch is a piece of the bible: the cast list with this one voice changed
       const next = cast.map((c) => (c.id === id ? { ...c, voice: { ...c.voice, [lang]: { ...(current ?? { speed: 1 }), provider } } } : c))
-      await callTool('cts_series_update', { series: slug, patch: { cast: next } })
+      await callTool('cts_series_update', { series: slug, cast: next })
       setMsg({ ok: true, text: 'Saved.' })
       info.reload()
     } catch (e) {
@@ -266,12 +266,7 @@ function BudgetBody({ b }: { b: BudgetInfo }) {
           </div>
         </div>
       </div>
-      {b.budget && (
-        <p className="dim" data-testid="budget-approval">
-          Approved by {b.budget.approvedBy} on {b.budget.approvedAt.slice(0, 10)}
-          {b.budget.note ? `: ${b.budget.note}` : ''}
-        </p>
-      )}
+
       {b.ledger.length === 0 ? (
         <p className="dim" data-testid="ledger-none">
           Nothing spent yet.

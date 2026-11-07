@@ -641,3 +641,18 @@ svg.stage {
 .issues {
   margin-top: var(--cts-space-2);
 }
+
+.sheet-live {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cts-space-2);
+}
+.sheet-frame {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1560 / 1416;
+  max-height: 560px;
+  border: 1px solid var(--st-hair);
+  border-radius: var(--cts-radius-s);
+  background: var(--cts-surface);
+}

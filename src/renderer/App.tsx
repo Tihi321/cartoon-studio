@@ -69,7 +69,7 @@ export function App() {
           <span className="brand-name">Cartoon Studio</span>
           <span className="brand-sub">cutout cartoons for children</span>
         </div>
-        <Pickers episodes={info.data?.bible.episodes ?? []} />
+        <Pickers episodes={info.data?.episodes ?? []} />
         <nav aria-label="Studio">
           {(['studio', 'engine'] as const).map((group) => (
             <ul className="nav" key={group} data-testid={`nav-group-${group}`}>

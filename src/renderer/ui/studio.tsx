@@ -108,7 +108,7 @@ export function Picture({ src, alt, testId, className }: { src: string | null | 
 }
 
 /** Plays one audio file; the button is its own play/stop toggle. */
-export function PlayButton({ src, label, testId, disabled }: { src: string | null; label: string; testId: string; disabled?: boolean }) {
+export function PlayButton({ src, label, testId, disabled, onFail }: { src: string | null; label: string; testId: string; disabled?: boolean; onFail?: () => void }) {
   const [audio] = useState(() => (typeof Audio === 'undefined' ? null : new Audio()))
   const [playing, setPlaying] = useState(false)
   useEffect(() => {
@@ -116,12 +116,18 @@ export function PlayButton({ src, label, testId, disabled }: { src: string | nul
     const end = () => setPlaying(false)
     audio.addEventListener('ended', end)
     audio.addEventListener('pause', end)
+    const fail = () => {
+      setPlaying(false)
+      onFail?.()
+    }
+    audio.addEventListener('error', fail)
     return () => {
+      audio.removeEventListener('error', fail)
       audio.removeEventListener('ended', end)
       audio.removeEventListener('pause', end)
       audio.pause()
     }
-  }, [audio])
+  }, [audio, onFail])
   const toggle = () => {
     if (!audio || !src) return
     if (playing) {
@@ -129,7 +135,7 @@ export function PlayButton({ src, label, testId, disabled }: { src: string | nul
       return
     }
     audio.src = src
-    void audio.play().then(() => setPlaying(true), () => setPlaying(false))
+    void audio.play().then(() => setPlaying(true), () => undefined)
   }
   return (
     <button className="play" onClick={toggle} disabled={disabled || !src} aria-pressed={playing} aria-label={`${playing ? 'Stop' : 'Play'} ${label}`} data-testid={testId}>
@@ -152,7 +158,7 @@ export function useAutoSelect(info: SeriesInfo | null): void {
   useEffect(() => {
     if (!info || !sel.series) return
     const st = ctsStore.getState()
-    const eps = info.bible.episodes ?? []
+    const eps = info.episodes
     if (!sel.episode || !eps.some((e) => e.id === sel.episode)) st.select({ episode: eps[0]?.id ?? null })
     if (!sel.cast || !(info.bible.cast ?? []).some((c) => c.id === sel.cast)) st.select({ cast: info.bible.cast?.[0]?.id ?? null })
     if (!sel.set || !(info.bible.sets ?? []).some((x) => x.id === sel.set)) st.select({ set: info.bible.sets?.[0]?.id ?? null })

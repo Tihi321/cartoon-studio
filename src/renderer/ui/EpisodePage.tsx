@@ -1,9 +1,9 @@
 import { useEffect } from 'react'
 import { LANGS } from '../../shared/contracts'
-import type { Beat, Lang } from '../../shared/contracts'
+import type { Beat, Episode, Lang } from '../../shared/contracts'
 import { episodeFile, normalizeEpisode, seconds, useTool } from '../lib/studio'
 import type { EpisodeInfo, IssueView, LintView } from '../lib/studio'
-import { lineVoice, lineVoiceFromManifest } from '../store/episode'
+import { lineVoice, lineVoiceFromLines } from '../store/episode'
 import { useCts } from '../store/hooks'
 import { ctsStore } from '../store/store'
 import { Pill } from './common'
@@ -43,7 +43,12 @@ function EpisodeView({ slug, ep }: { slug: string; ep: string }) {
     <>
       <LintPanel state={lint} />
       <ToolGate state={t} tool="cts_episode_get" testId="episode-detail">
-        {t.data && <Script slug={slug} ep={ep} data={t.data} />}
+        {t.data && t.data.episode && <Script slug={slug} ep={ep} data={t.data} script={t.data.episode} />}
+        {t.data && !t.data.episode && (
+          <p className="dim" data-testid="episode-no-script">
+            This episode has no script yet{t.data.state ? ` (pipeline: ${t.data.state})` : ''}.
+          </p>
+        )}
       </ToolGate>
     </>
   )
@@ -87,7 +92,7 @@ function LintPanel({ state }: { state: { data: LintView | null; error: Error | n
   )
 }
 
-function Script({ slug, ep, data }: { slug: string; ep: string; data: EpisodeInfo }) {
+function Script({ slug, ep, data, script }: { slug: string; ep: string; data: EpisodeInfo; script: Episode }) {
   const info = useSeries()
   const cast = info.data?.bible.cast ?? []
   const name = (id: string) => cast.find((c) => c.id === id)?.name.en ?? id
@@ -95,19 +100,19 @@ function Script({ slug, ep, data }: { slug: string; ep: string; data: EpisodeInf
   useEffect(() => {
     for (const lang of LANGS) {
       const m = data.voice[lang]
-      if (m) ctsStore.getState().seedVoice(slug, ep, lang, lineVoiceFromManifest(m))
+      if (m) ctsStore.getState().seedVoice(slug, ep, lang, lineVoiceFromLines(lang, m))
     }
   }, [slug, ep, data.voice])
-  const lines = data.episode.scenes.flatMap((s) => s.beats).filter((b) => b.type === 'line').length
+  const lines = script.scenes.flatMap((s) => s.beats).filter((b) => b.type === 'line').length
   return (
     <section aria-labelledby="ep-script" data-testid="episode-script">
       <div className="row spread">
         <h2 className="panel-title" id="ep-script">
-          Script <span className="dim title-alt">{lines} lines, {data.episode.scenes.length} scene{data.episode.scenes.length === 1 ? '' : 's'}</span>
+          Script <span className="dim title-alt">{lines} lines, {script.scenes.length} scene{script.scenes.length === 1 ? '' : 's'}</span>
         </h2>
-        <VoiceTotals slug={slug} ep={ep} data={data} />
+        <VoiceTotals slug={slug} ep={ep} script={script} />
       </div>
-      {data.episode.scenes.map((scene) => (
+      {script.scenes.map((scene) => (
         <div className="scene" key={scene.id} data-testid={`scene-${scene.id}`}>
           <h3 className="scene-head">
             <span className="scene-id">{scene.id}</span>
@@ -126,9 +131,9 @@ function Script({ slug, ep, data }: { slug: string; ep: string; data: EpisodeInf
   )
 }
 
-function VoiceTotals({ slug, ep, data }: { slug: string; ep: string; data: EpisodeInfo }) {
+function VoiceTotals({ slug, ep, script }: { slug: string; ep: string; script: Episode }) {
   const voice = useCts((s) => s.voiceLines)
-  const ids = data.episode.scenes.flatMap((s) => s.beats).flatMap((b) => (b.type === 'line' ? [b.line] : []))
+  const ids = script.scenes.flatMap((s) => s.beats).flatMap((b) => (b.type === 'line' ? [b.line] : []))
   return (
     <span className="row">
       {LANGS.map((lang) => {
