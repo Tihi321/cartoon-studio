@@ -361,6 +361,8 @@ def assemble_command(job):
     blend = os.path.join(out, "scene.blend")
     progress(4, 6, "save")
     bpy.ops.wm.save_as_mainfile(filepath=blend, compress=True)
+    if os.path.exists(blend + "1"):  # Blender keeps the file it overwrote as scene.blend1: not wanted in the data folder
+        os.remove(blend + "1")
 
     chars = {}
     for cid, c in job["characters"].items():

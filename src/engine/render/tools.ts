@@ -5,8 +5,10 @@ import { ToolOutput } from '../mcp/tools'
 import type { Tool, ToolDef } from '../mcp/tools'
 import type { CtsService } from '../service'
 import { assertId, assertSlug } from '../series/paths'
+import { SeriesStore } from '../series/service'
+import { blenderContactSheet, renderBlenderEpisode } from './blender'
 import { renderEpisode } from './render'
-import type { RenderResult } from './render'
+import type { BlenderTimes, RenderResult } from './render'
 import { contactSheet, poseSheet } from './sheet'
 
 /**
@@ -26,6 +28,8 @@ export interface RenderJob {
   result?: Pick<RenderResult, 'file' | 'seconds' | 'wallSeconds' | 'encoder' | 'frames' | 'logFile' | 'warnings'> & {
     /** The least dB the music is under the voice over the lines (final renders; null without music or voice). */
     minUnderDb: number | null
+    /** Blender series: first frame, warm mean, p95 and total of the Blender frame times. */
+    blenderTimes?: BlenderTimes
   }
   error?: string
 }
@@ -48,7 +52,7 @@ export function renderTools(svc: CtsService, def: ToolDef): Tool[] {
   return [
     def(
       'cts_render',
-      'Render an episode to MP4 with the Canvas player in headless Chromium and ffmpeg: out/<lang>.mp4 (quality final, 1920x1080, real Flow clips spliced in) or out/<lang>.preview.mp4 (quality preview, 960x540, clips show a placeholder card), under the episode folder. Audio is mixed (voices, music ducked under voices, sfx), normalised to -16 LUFS. Every input is brought to its level relative to the voice first (render.md mix: music 18 dB under while a voice plays, 8 dB under in the gaps); a final render writes render/<lang>/mix-check.json and the result has minUnderDb (the least dB the music is under the voice over the lines). Long: returns one job id per language at once; follow with cts_render_status, or pass wait true to get the results. render/<lang>/render.log has the frame count, stage times and encoder.',
+      'Render an episode to MP4. A canvas series: the Canvas player in headless Chromium and ffmpeg. A Blender series (bible renderer "blender"): headless Blender (EEVEE) renders the assembled scene (cts_scene_assemble; assembled again when the timeline changed) in chunks of chunkFrames, each chunk is encoded while the next renders; preview is 960x540 with 4 samples, final 1920x1080 with 16 (config/blender.md); the result has blenderTimes (first frame, warm mean, p95, total) and render/<lang>/blender-times.json has every frame. Output: out/<lang>.mp4 (quality final, 1920x1080, real Flow clips spliced in) or out/<lang>.preview.mp4 (quality preview, 960x540, clips show a placeholder card), under the episode folder. Audio is mixed (voices, music ducked under voices, sfx), normalised to -16 LUFS. Every input is brought to its level relative to the voice first (render.md mix: music 18 dB under while a voice plays, 8 dB under in the gaps); a final render writes render/<lang>/mix-check.json and the result has minUnderDb (the least dB the music is under the voice over the lines). Long: returns one job id per language at once; follow with cts_render_status, or pass wait true to get the results. render/<lang>/render.log has the frame count, stage times and encoder.',
       z.object({
         series,
         episode,
@@ -68,19 +72,21 @@ export function renderTools(svc: CtsService, def: ToolDef): Tool[] {
           const job: RenderJob = { id: `${key}--r${run}`, state: 'running', progress: { done: 0, total: 0 }, startedAt: new Date().toISOString() }
           jobs.set(job.id, job)
           while (jobs.size > MAX_KEPT) jobs.delete(jobs.keys().next().value as string)
-          const p = renderEpisode({
+          const blender = (await new SeriesStore(svc.dataDir).readBible(a.series)).renderer === 'blender'
+          const request = {
             dataDir: svc.dataDir,
             series: a.series,
             episode: a.episode,
             lang: l,
             quality: a.quality,
             ...(a.maxSeconds ? { maxSeconds: a.maxSeconds } : {}),
-            onProgress: (done, total) => (job.progress = { done, total })
-          }).then(
+            onProgress: (done: number, total: number) => (job.progress = { done, total })
+          }
+          const p = (blender ? renderBlenderEpisode(request) : renderEpisode(request)).then(
             (r) => {
               job.state = 'done'
               job.progress = { done: r.frames, total: r.frames }
-              job.result = { file: r.file, seconds: r.seconds, wallSeconds: r.wallSeconds, encoder: r.encoder, frames: r.frames, logFile: r.logFile, warnings: r.warnings, minUnderDb: r.mixCheck?.minUnderDb ?? null }
+              job.result = { file: r.file, seconds: r.seconds, wallSeconds: r.wallSeconds, encoder: r.encoder, frames: r.frames, logFile: r.logFile, warnings: r.warnings, minUnderDb: r.mixCheck?.minUnderDb ?? null, ...(r.blenderTimes ? { blenderTimes: r.blenderTimes } : {}) }
               svc.log(`render ${job.id} done: ${r.file} (${r.wallSeconds.toFixed(1)} s, ${r.encoder})`)
             },
             (err: Error) => {
@@ -103,9 +109,11 @@ export function renderTools(svc: CtsService, def: ToolDef): Tool[] {
     ),
     def(
       'cts_frames',
-      'Contact sheet of an episode: N frames evenly spread (count, default 12) or at the given times in seconds, each labelled with its time, in one PNG at episodes/<ep>/render/<lang>/sheet-<n>.png. Returns the path and the picture. Clip ranges show the placeholder card.',
+      'Contact sheet of an episode: N frames evenly spread (count, default 12) or at the given times in seconds, each labelled with its time, in one PNG at episodes/<ep>/render/<lang>/sheet-<n>.png. Returns the path and the picture. Clip ranges show the placeholder card. A Blender series: the frames are cut from the rendered out/<lang>.preview.mp4 (else the final), so render first.',
       z.object({ series, episode, lang: lang.default('hr'), count: z.number().int().min(1).max(60).optional(), times: z.array(z.number().min(0)).max(60).optional() }),
       async (a) => {
+        const blenderSeries = (await new SeriesStore(svc.dataDir).readBible(a.series)).renderer === 'blender'
+        if (blenderSeries) return withImage(await blenderContactSheet({ dataDir: svc.dataDir, series: a.series, episode: a.episode, lang: a.lang, ...(a.count ? { count: a.count } : {}), ...(a.times ? { times: a.times } : {}) }), {})
         const file = await contactSheet({ dataDir: svc.dataDir, series: a.series, episode: a.episode, lang: a.lang, ...(a.count ? { count: a.count } : {}), ...(a.times ? { times: a.times } : {}) })
         return withImage(file, {})
       }

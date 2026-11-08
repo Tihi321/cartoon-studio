@@ -6,7 +6,7 @@ set does not leave the frame. The rules, in numbers:
 - the camera looks along +y with a small tilt; the lens is a 36 mm sensor (`sensor_fit` AUTO, so the width), the visible width at distance d is 2 d 18 / lens;
 - `wide`: the group fills 70 % of the width, never less than 3.8 m visible, the group's middle sits at 42 % of the height, never with the feet nearer than 13 % to the bottom edge or the tallest head nearer than 13 % to the top (a seated actor counts at its seat height);
 - `two`: the pair fills 62 % of the width, never less than 2.6 m visible, the pair's middle sits at 45 % of the height with the feet in frame;
-- `cu-<id>`: head and shoulders, the visible height 0.8 of the character's height, the top of the character at 90 % of the height and the speaker on a third (turned toward the open side);
+- `cu-<id>`: head and shoulders, the visible height 0.8 of the character's height (plus how far it rises or sinks while the shot lasts), the top of the character at 90 % of the height and the speaker on a third (turned toward the open side);
 - `ots-<a>-<b>`: behind a, a's shoulder at the frame edge, b on the opposite third.
 A named camera of the set (`ctx.shots`) wins over a computed one of the same name.
 """
@@ -74,7 +74,7 @@ def close_up(ctx, who, f0, f1, aspect, lens=50.0):
     actor = ctx.actors[who]
     tr = _track(ctx, [who], f0, f1)[who]
     x, y = float(tr[:, 0].mean()), float(tr[:, 1].mean())  # (the third column is the root height: a seated head is higher)
-    vis_h = 0.8 * actor.rig.height
+    vis_h = 0.8 * actor.rig.height + float(tr[:, 2].max() - tr[:, 2].min())  # room for a sit or a hop inside the shot
     vis_w = vis_h * aspect
     d = dist_for_width(lens, vis_w)
     tz = float(tr[:, 2].max()) + actor.rig.height - 0.40 * vis_h  # the top of the character (ears included) at 90 % of the height

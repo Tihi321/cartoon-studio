@@ -65,6 +65,21 @@ export interface RenderResult {
   mixCheck: MixCheck | null
   logFile: string
   warnings: string[]
+  /** Blender series: the frame times of the Blender render (also in `render/<lang>/blender-times.json`). */
+  blenderTimes?: BlenderTimes
+}
+
+/** The Blender frame stats of a render: the first frame (it compiles shaders), the mean of the others, their 95th percentile and the sum, in seconds. */
+export interface BlenderTimes {
+  frames: number
+  first: number
+  warmMean: number
+  p95: number
+  total: number
+  width: number
+  height: number
+  samples: number
+  file: string
 }
 
 // ---------------------------------------------------------------- what a frame looks like
@@ -229,7 +244,7 @@ async function encodeRange(session: PlayerSession, tl: Timeline, seg: Segment, o
 }
 
 /** A real clip -> a video-only mp4 of exactly the segment's frames: scaled and padded to the frame size, fps, yuv420p, square pixels. */
-async function normaliseClip(file: string, seg: Segment, out: string, w: number, h: number, fps: number, enc: EncoderSpec, cfg: RenderConfig, signal?: AbortSignal): Promise<void> {
+export async function normaliseClip(file: string, seg: Segment, out: string, w: number, h: number, fps: number, enc: EncoderSpec, cfg: RenderConfig, signal?: AbortSignal): Promise<void> {
   const frames = seg.to - seg.from
   const vf = `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:black,fps=${fps},setsar=1,format=${cfg.pixelFormat},tpad=stop_mode=clone:stop_duration=${Math.ceil(frames / fps) + 1}`
   await ffmpeg(['-y', '-v', 'error', '-i', file, '-an', '-vf', vf, '-frames:v', String(frames), ...encoderArgs(enc, cfg.pixelFormat), '-r', String(fps), '-movflags', '+faststart', out], signal)
@@ -237,7 +252,7 @@ async function normaliseClip(file: string, seg: Segment, out: string, w: number,
 
 // ---------------------------------------------------------------- audio inputs
 
-async function exists(file: string): Promise<boolean> {
+export async function exists(file: string): Promise<boolean> {
   try {
     return (await fs.stat(file)).isFile()
   } catch {
@@ -247,7 +262,7 @@ async function exists(file: string): Promise<boolean> {
 
 const hasAudio = async (file: string): Promise<boolean> => (await ffprobe(file)).streams.some((s) => s.codec_type === 'audio')
 
-async function audioInputs(tl: Timeline, root: string, seconds: number, real: readonly TimelineClip[], store: SeriesStore, series: string, warnings: string[]): Promise<MixInput[]> {
+export async function audioInputs(tl: Pick<Timeline, 'audio'>, root: string, seconds: number, real: readonly TimelineClip[], store: SeriesStore, series: string, warnings: string[]): Promise<MixInput[]> {
   const paths = store.paths(series)
   const inputs: MixInput[] = []
   for (const a of tl.audio) {
