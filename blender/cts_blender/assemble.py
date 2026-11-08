@@ -22,6 +22,7 @@ from mathutils import Vector
 from . import command, materials as M
 from .acting import ACTIONS, compose
 from .acting import framing
+from .acting.camera import _clip
 from .acting.core import FPS, Ctx
 from .acting.gait import facing_yaw  # noqa: F401  (kept for the docs: the turn action reads 'left' | 'right' | 'front' | 'back')
 from .acting.gestures import _brows
@@ -271,8 +272,10 @@ def plan_camera(ctx, shots, cards, aspect):
             f_on = ctx.f(float(s["t"]) + secs)
             nxt = ordered[idx + 1]["t"] if idx + 1 < len(ordered) else None
             f_off = ctx.f(float(nxt)) if nxt is not None else ctx.n - 1
+            f_off = min(max(f_off, f_on), ctx.n - 1)
             try:
-                dct = framing.shot(ctx, s["shot"], f_on, max(f_off, f_on), aspect)
+                trk = framing.track(ctx, s["shot"], f_on, f_off, aspect)
+                dct = framing.shot(ctx, s["shot"], f_on, f_off, aspect) if trk is None else {"loc": trk[0, :3].tolist(), "target": trk[0, 3:6].tolist(), "lens": float(trk[0, 6])}
             except KeyError as e:
                 raise CtsError("E_SHOT_UNKNOWN", str(e).strip("'\""))
             kinds = {"cut": "cut", "pan": "pan", "push": "push"}
@@ -281,6 +284,8 @@ def plan_camera(ctx, shots, cards, aspect):
                 continue
             clip = ACTIONS[kinds[s["transition"]]](ctx, None, float(s["t"]), float(s["t"]) + secs, {"shot": dct})
             ctx.camera.apply(clip)
+            if trk is not None and len(trk) > 1:  # the shot follows its subject from here on
+                ctx.camera.apply(_clip(f_on, f_off, f_on, trk))
             resolved.append({"t": float(s["t"]), "shot": s["shot"], "transition": s["transition"], **({"seconds": secs} if secs else {}), **{k: [round(float(x), 3) for x in v] if isinstance(v, (list, tuple)) else v for k, v in dct.items()}})
     return resolved
 

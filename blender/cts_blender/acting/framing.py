@@ -14,6 +14,8 @@ import math
 
 import numpy as np
 
+from .camera import vec7
+
 SENSOR = 36.0
 
 
@@ -117,3 +119,65 @@ def shot(ctx, name, f0, f1, aspect=16 / 9):
             return wide(ctx, f0, f1, aspect)
         return two(ctx, pair[0], pair[1], f0, f1, aspect)
     raise KeyError(f"unknown shot {name!r} (a camera of the set, wide, two, cu-<id> or ots-<a>-<b>)")
+
+
+# ---------------------------------------------------------------- following shots: the frame at each moment, eased
+
+TRACKED = ("wide", "two", "cu-")
+MOVE_WINDOW = 6  # frames either side: how far an actor moved says whether it is walking
+MOVING = 0.05  # metres over that window
+TAU_GROUP = 0.45
+TAU_CU = 0.3
+
+
+def is_tracked(name, ctx):
+    return name not in ctx.shots and (name in ("wide", "two") or name.startswith(("two:", "cu-")))
+
+
+def _moved(ctx, who, f):
+    a, b = ctx.actors[who].root(max(f - MOVE_WINDOW, 0)), ctx.actors[who].root(min(f + MOVE_WINDOW, ctx.n - 1))
+    return math.hypot(a[0] - b[0], a[1] - b[1])
+
+
+def smooth(arr, tau, fps=24.0):
+    """A zero-phase exponential filter (forward, then backward): eased, without lag, the ends held."""
+    a = 1.0 - math.exp(-1.0 / (tau * fps))
+    out = np.array(arr, dtype=float)
+    for rev in (False, True):
+        seq = out[::-1] if rev else out
+        cur = seq[0].copy()
+        for i in range(len(seq)):
+            cur = cur + (seq[i] - cur) * a
+            seq[i] = cur
+    return out
+
+
+def track(ctx, name, f0, f1, aspect=16 / 9):
+    """The camera (m, 7: loc, target, lens) for each frame f0..f1 of a following shot: `wide`, `two`, `cu-<id>` frame the group (or the head) as it is at that
+    frame, then the series is eased. In `two`, when the pair is too far apart for the figures to stay at 40-60 % of the frame height and one of them is walking,
+    the shot follows the walker alone. None for a shot that does not follow."""
+    if not is_tracked(name, ctx):
+        return None
+    ids = list(ctx.actors)
+    pair = name.split(":")[1:3] if name.startswith("two:") else ids[:2]
+    rows = []
+    for f in range(f0, f1 + 1):
+        if name == "wide":
+            d = wide(ctx, f, f, aspect)
+        elif name.startswith("cu-"):
+            d = close_up(ctx, name[3:], f, f, aspect)
+        elif len(pair) < 2:
+            d = wide(ctx, f, f, aspect)
+        else:
+            a, b = pair
+            hmax = max(ctx.actors[a].rig.height, ctx.actors[b].rig.height)
+            xa, xb = ctx.actors[a].root(f)[0], ctx.actors[b].root(f)[0]
+            too_far = (abs(xa - xb) + 0.8 * hmax) / 0.62 > 1.1 * 2.5 * hmax * aspect
+            ma, mb = _moved(ctx, a, f), _moved(ctx, b, f)
+            if too_far and max(ma, mb) > MOVING:
+                who = a if ma >= mb else b
+                d = two(ctx, who, who, f, f, aspect)
+            else:
+                d = two(ctx, a, b, f, f, aspect)
+        rows.append(vec7(d))
+    return smooth(np.array(rows), TAU_CU if name.startswith("cu-") else TAU_GROUP)
