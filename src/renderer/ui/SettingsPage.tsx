@@ -108,7 +108,7 @@ function MediaEngines() {
                 Nano Banana (gemini): {t.data.gemini.refused ? `refused, the USD cap is $${t.data.gemini.capUsd.toFixed(2)}` : `allowed up to $${t.data.gemini.capUsd.toFixed(2)}`}
               </dd>
             </dl>
-            <p className="dim">Fallback order when the image model cannot hold a character or a pose:</p>
+            <p className="dim">Fallback order for concept pictures and clip polish (3D (Blender) is the route: a 3D series builds its characters and sets in Blender, not from images; this order is kept for the old canvas series):</p>
             <ol data-testid="media-image-order">
               {t.data.image.order.map((o) => (
                 <li key={o.id}>

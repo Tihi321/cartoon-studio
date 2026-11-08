@@ -2,7 +2,7 @@
   "name": "cartoon-studio",
   "version": "0.0.1",
   "private": true,
-  "description": "Cartoon Studio: makes a series of cutout-puppet cartoons for children, in Croatian and English",
+  "description": "Cartoon Studio: makes a series of 3D toon cartoons for children in Blender, in Croatian and English (the older cutout canvas series are kept)",
   "license": "MIT",
   "main": "./out/main/index.js",
   "packageManager": "yarn@4.13.0",

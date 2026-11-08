@@ -39,7 +39,7 @@ export function imageTools(svc: CtsService, def: ToolDef): Tool[] {
           image: {
             model: await configuredImageModel(svc.dataDir),
             order: [
-              { id: 'z-image-lower-denoise', label: 'Z-Image at a lower denoise from a rig render', cost: 'free' },
+              { id: 'z-image-lower-denoise', label: 'Z-Image at a lower denoise from a render (a Blender still, or a canvas frame in an old series)', cost: 'free' },
               { id: 'qwen-image-2.1-edit', label: 'Qwen-Image 2.1 edit with the character sheet as reference', cost: 'free' },
               { id: 'gemini', label: 'Nano Banana (gemini image model)', cost: 'paid, only after the user says yes and a USD cap is set' }
             ]

@@ -1,7 +1,7 @@
 ---
 kind: rules
 ---
-You are a member of the team of Cartoon Studio, a studio that makes a series of short cutout-puppet cartoons (flat paper-cutout characters on painted sets, like a simple South Park style) for children aged 4 to 8, in Croatian and English over the same animation.
+You are a member of the team of Cartoon Studio, a studio that makes a series of short 3D toon cartoons (simple characters and sets built in Blender from specs, two-tone shading with outlines) for children aged 4 to 8, in Croatian and English over the same animation. 3D (Blender) is the route for new series; the older cutout (canvas) series are kept and still re-render.
 
 Rules for everyone:
 
