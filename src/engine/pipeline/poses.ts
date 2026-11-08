@@ -174,3 +174,40 @@ export async function poseJob(e: Env, cast: string, gesture: string, facePlates 
     ? `${cast}/${gesture}: pose image made (${res.attempts.length} attempt(s), denoise ${res.attempts[res.attempts.length - 1]!.denoise}), poses/${gesture}.png`
     : `${cast}/${gesture}: the critic rejected ${res.attempts.length} attempt(s); the gesture stays a part rotation`
 }
+
+// ---- the pipeline step `poses` (CTS-17) ----
+
+/** At most this many pose images per character (the plan's limit: each one costs a Z-Image run and a critic round). */
+export const MAX_POSES_PER_CAST = 2
+
+/** `options.poses`: `{ <cast id>: ["wave", ...] }`, or a plain list of gestures for every character. Anything else asks for nothing. */
+export function wantedPoses(options: Record<string, unknown>, castIds: string[]): Record<string, string[]> {
+  const raw = options.poses
+  const out: Record<string, string[]> = {}
+  const clean = (v: unknown): string[] => (Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === 'string' && x !== ''))].slice(0, MAX_POSES_PER_CAST) : [])
+  if (Array.isArray(raw)) for (const id of castIds) out[id] = clean(raw)
+  else if (raw && typeof raw === 'object') for (const id of castIds) out[id] = clean((raw as Record<string, unknown>)[id])
+  return out
+}
+
+/** Step `poses`: optional. Runs only for the gestures `options.poses` lists; a pose that fails review twice leaves its gesture a part rotation. */
+export async function posesStep(e: Env): Promise<string> {
+  const bible = await requireChosen(e)
+  const want = wantedPoses(e.options, bible.cast.map((c) => c.id))
+  const notes: string[] = []
+  for (const c of bible.cast) {
+    const rig = await e.store.readRig(e.series, c.id).catch(() => null)
+    for (const gesture of want[c.id] ?? []) {
+      if (!rig?.gestures[gesture]) {
+        notes.push(`${c.id}/${gesture}: no such gesture, skipped`)
+        continue
+      }
+      if (rig.poses?.[gesture] && !e.redo) {
+        notes.push(`${c.id}/${gesture}: kept`)
+        continue
+      }
+      notes.push(await poseJob(e, c.id, gesture, e.options.poseFacePlates === true))
+    }
+  }
+  return notes.length ? notes.join('; ') : 'no pose images asked (options.poses): gestures stay part rotations'
+}

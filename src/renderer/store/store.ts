@@ -64,7 +64,7 @@ export interface CtsState extends SeriesData, McpData, EpisodeData {
   roleDefaults: Record<string, string>
   /** The local model servers (Strata, LM Studio): running or not. */
   servers: ServerStatus[]
-  /** ComfyUI, Chiptune Studio, flow-music-mcp and VibeTTS: reachable or not (the last `studios.status`). */
+  /** ComfyUI, flow-music-mcp and VibeTTS: reachable or not (the last `studios.status`). */
   studios: StudioStatusView[]
   settings: SettingsSummary | null
   secretsSet: string[]

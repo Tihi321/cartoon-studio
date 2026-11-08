@@ -233,7 +233,7 @@ export type EngineEvent =
   | { type: 'command.error'; command: string; message: string; slug?: string }
   /** The answer to `listSeries`. */
   | { type: 'series.listed'; series: SeriesSummaryView[] }
-  /** ComfyUI, Chiptune Studio, flow-music-mcp and VibeTTS: reachable or not. The answer to `studiosStatus`. */
+  /** ComfyUI, flow-music-mcp and VibeTTS: reachable or not. The answer to `studiosStatus`. */
   | { type: 'studios.status'; studios: StudioStatusView[] }
   /** The MCP HTTP server (config/mcp.md): listening or not. Sent when it changes and as the answer to `mcpStatus` and `saveMcpConfig`. `error` is empty when there is none; `token` is never sent, only whether one is set. */
   | { type: 'mcp.status'; enabled: boolean; listening: boolean; url: string | null; error: string; port: number; tokenSet: boolean }
@@ -299,9 +299,9 @@ export interface ToolResultEvent {
   error?: string
 }
 
-/** One service (ComfyUI, Chiptune Studio, flow-music-mcp, VibeTTS) as `studiosStatus` saw it. For VibeTTS `tools` is the number of voices it lists. */
+/** One service (ComfyUI, flow-music-mcp, VibeTTS) as `studiosStatus` saw it. For VibeTTS `tools` is the number of voices it lists. */
 export interface StudioStatusView {
-  id: 'comfy' | 'chiptune' | 'flow' | 'vibetts'
+  id: 'comfy' | 'flow' | 'vibetts'
   name: string
   ok: boolean
   url: string
@@ -366,7 +366,7 @@ export type Command =
   // ---- series ----
   /** The series in the data folder. Answers with `series.listed`. */
   | { type: 'listSeries' }
-  /** Checks ComfyUI, Chiptune Studio, flow-music-mcp and VibeTTS. Answers with `studios.status`. */
+  /** Checks ComfyUI, flow-music-mcp and VibeTTS. Answers with `studios.status`. */
   | { type: 'studiosStatus' }
   /** Asks for the state of the MCP server. Answers with `mcp.status`. */
   | { type: 'mcpStatus' }

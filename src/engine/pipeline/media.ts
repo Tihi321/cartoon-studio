@@ -77,7 +77,7 @@ export async function castSheetStep(e: Env): Promise<string> {
         output: { schema: 'body-plan', path: `tasks/body-plan-${c.id}.json` }
       },
       {
-        // no style guide here: its drawing rules are for SVG parts (CTS-17 rewrites it); the body-plan guide has the sketch rules
+        // the style guide's SVG rules are path (a), optional; its top sections and the body-plan prompt have the sketch rules
         check: async (v) => {
           const a = v as z.infer<typeof bodyPlanAnswer>
           const out = bodyPlanProblems(a.bodyPlan, palette)
@@ -475,8 +475,8 @@ export async function finalRenderStep(e: Env): Promise<string> {
   for (const [i, lang] of bible.languages.entries()) {
     e.progress(i / bible.languages.length, `final ${lang}`)
     const r = await renderEpisode({ dataDir: e.svc.dataDir, series: e.series, episode: e.episode, lang, quality: 'final', signal: e.ctx.signal, onProgress: (done, total) => e.progress((i + done / Math.max(1, total)) / bible.languages.length, `final ${lang} ${done}/${total}`) })
-    languages[lang] = { file: relTo(e, r.file), seconds: Math.round(r.seconds * 10) / 10, renderSeconds: Math.round(r.wallSeconds * 10) / 10, encoder: r.encoder, frames: r.frames, loudnessInputLufs: r.loudness?.input_i ?? null, log: relTo(e, r.logFile), warnings: r.warnings }
-    out.push(`${lang}: ${r.seconds.toFixed(1)} s in ${r.wallSeconds.toFixed(1)} s (${r.encoder})`)
+    languages[lang] = { file: relTo(e, r.file), seconds: Math.round(r.seconds * 10) / 10, renderSeconds: Math.round(r.wallSeconds * 10) / 10, encoder: r.encoder, frames: r.frames, loudnessInputLufs: r.loudness?.input_i ?? null, mixMinUnderDb: r.mixCheck?.minUnderDb ?? null, mixMedianUnderDb: r.mixCheck?.medianUnderDb ?? null, log: relTo(e, r.logFile), warnings: r.warnings }
+    out.push(`${lang}: ${r.seconds.toFixed(1)} s in ${r.wallSeconds.toFixed(1)} s (${r.encoder}), loudness ${r.loudness?.input_i ?? 'n/a'} LUFS in, music min ${r.mixCheck?.minUnderDb ?? 'n/a'} dB under the voice`)
     const reviews = await frameReviews(e, lang)
     const lastReview = reviews[reviews.length - 1]
     if (lastReview && lastReview.verdict === 'revise') {

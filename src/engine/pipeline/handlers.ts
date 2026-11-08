@@ -20,7 +20,7 @@ import { lintSeries } from '../series/lint'
 import { ask, castView, makeEnv, relTo, requireChosen } from './env'
 import type { Env } from './env'
 import { buildRig, clipsStep, finalRenderStep, castSheetStep, makeClip, previewRenderStep, reviewClip, rigStep, setStep, timelineStep, voiceStep, frameReviews } from './media'
-import { poseJob } from './poses'
+import { poseJob, posesStep } from './poses'
 import { RIG_PATHS } from './rig'
 import type { RigPath } from './rig'
 import { Pipeline } from './run'
@@ -498,6 +498,7 @@ const STEP_FNS: Record<string, StepFn> = {
   bible: bibleStep,
   cast_sheet: castSheetStep,
   rig: rigStep,
+  poses: posesStep,
   set: setStep,
   script: scriptStep,
   safety: safetyStep,

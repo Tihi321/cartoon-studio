@@ -28,6 +28,14 @@ const episode = z.string().describe('The episode id, e.g. ep00-pilot')
 const cast = z.string().describe('The cast id, e.g. mia')
 const variant = z.enum(RIG_VARIANTS)
 
+/** CTS-17: where a character's sheet stands: the files, the bible's approval and the user's last verdict (cts_sheet_approve). */
+export async function sheetState(st: SeriesStore, seriesSlug: string, castId: string, approvedAt?: string): Promise<{ approved: boolean; approvedAt: string | null; review: { ok: boolean; note: string | null; at: string } | null; hasSheet: boolean; poses: string[] }> {
+  const dir = st.paths(seriesSlug).castDir(castId)
+  const review = await fs.readFile(path.join(dir, 'sheet', 'review.json'), 'utf8').then((x) => JSON.parse(x) as { ok: boolean; note: string | null; at: string }, () => null)
+  const poses = (await fs.readdir(path.join(dir, 'sheet')).catch(() => [] as string[])).filter((n) => n.endsWith('.png')).map((n) => n.replace(/.png$/, '')).sort()
+  return { approved: !!approvedAt, approvedAt: approvedAt ?? null, review: review ? { ok: review.ok, note: review.note ?? null, at: review.at } : null, hasSheet: await st.exists(path.join(dir, 'sheet.png')), poses }
+}
+
 const HUB_COMMAND = 'node <creative-hub>/scripts/video-plan.mjs'
 
 /** The next free job id of `<series>--<task>--<unit>--r<n>`. Explicit requests go before the pipeline's own jobs (priority 1). */
@@ -96,7 +104,7 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
       async (a) => {
         const st = store()
         const bible = await st.readBible(a.series)
-        const rigs = await Promise.all(bible.cast.map(async (c) => ({ cast: c.id, variants: (await readVariants(st, a.series, c.id)).variants, chosen: (await readVariants(st, a.series, c.id)).chosen, hasRef: await st.exists(path.join(st.paths(a.series).castDir(c.id), 'ref.png')), hasRig: await st.exists(st.paths(a.series).rigFile(c.id)) })))
+        const rigs = await Promise.all(bible.cast.map(async (c) => ({ cast: c.id, variants: (await readVariants(st, a.series, c.id)).variants, chosen: (await readVariants(st, a.series, c.id)).chosen, hasRef: await st.exists(path.join(st.paths(a.series).castDir(c.id), 'ref.png')), sheet: await sheetState(st, a.series, c.id, c.sheet?.approvedAt), hasRig: await st.exists(st.paths(a.series).rigFile(c.id)) })))
         return { bible, rigs, episodes: await st.listEpisodes(a.series), pipelines: await pipelineSummaries(svc, a.series) }
       }
     ),
@@ -125,7 +133,7 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
     ),
     def(
       'cts_cast_get',
-      'Read one cast member (or all): the bible entry, the rig at cast/<id>/rig.json (parts, gestures, emotions), the variants (path, wall time, spend), the cts_rig_check result of the rig and of each variant, and the reference and pose sheet paths.',
+      'Read one cast member (or all): the bible entry, the rig at cast/<id>/rig.json (parts, gestures, emotions), the variants (path, wall time, spend), the cts_rig_check result of the rig and of each variant, the reference, sketch, sheet and pose sheet paths, and the sheet approval (approved, approvedAt, the last verdict of the user, the sheet poses).',
       z.object({ series, cast: cast.optional() }),
       async (a) => {
         const st = store()
@@ -141,7 +149,7 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
           const checks: Record<string, unknown> = {}
           if (rig) checks.chosen = await checkRig(st, a.series, id)
           for (const v of RIG_VARIANTS) if (variants.variants[v]?.status === 'built') checks[v] = await checkRig(st, a.series, id, v)
-          out.push({ member, rig: rig ? { height: rig.height, kind: rig.kind, parts: rig.parts.map((x) => x.id), gestures: Object.keys(rig.gestures), emotions: Object.keys(rig.emotions) } : null, variants, checks, files: { sketch: (await st.exists(path.join(p.castDir(id), 'sketch.png'))) ? `cast/${id}/sketch.png` : null, ref: (await st.exists(path.join(p.castDir(id), 'ref.png'))) ? `cast/${id}/ref.png` : null, sheet: (await st.exists(path.join(p.castDir(id), 'sheet.png'))) ? `cast/${id}/sheet.png` : null, rigSheet: await rigSheetName(p.castDir(id), p.castDir(id)).then((n) => (n ? `cast/${id}/${n}` : null)) } })
+          out.push({ member, sheet: await sheetState(st, a.series, id, member.sheet?.approvedAt), rig: rig ? { height: rig.height, kind: rig.kind, parts: rig.parts.map((x) => x.id), gestures: Object.keys(rig.gestures), emotions: Object.keys(rig.emotions) } : null, variants, checks, files: { sketch: (await st.exists(path.join(p.castDir(id), 'sketch.png'))) ? `cast/${id}/sketch.png` : null, ref: (await st.exists(path.join(p.castDir(id), 'ref.png'))) ? `cast/${id}/ref.png` : null, sheet: (await st.exists(path.join(p.castDir(id), 'sheet.png'))) ? `cast/${id}/sheet.png` : null, rigSheet: await rigSheetName(p.castDir(id), p.castDir(id)).then((n) => (n ? `cast/${id}/${n}` : null)) } })
         }
         return a.cast ? out[0] : { cast: out }
       }
@@ -303,7 +311,7 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
     // ---------------------------------------------------------------- the pipeline
     def(
       'cts_run_pipeline',
-      'Start or resume the episode pipeline: pitch (3 premises) -> STOP until the user chooses (cts_pitch_choose) -> bible -> character sheets (sketch, Z-Image master, 3 poses) -> STOP until the user approves every sheet (cts_sheet_approve) -> rigs -> sets -> script -> child-safety review -> voice casting -> voices -> music -> Flow clips -> lip-sync/timelines/lint -> preview renders -> frame review -> final renders (hr and en MP4s). Call it again with the same series and episode to resume (it never skips the pause). The first call needs a brief {idea, title?, ageMin?, ageMax?, notes?, seconds?, lineRange?: [12,16], intro?: false, outro?: false}. retry: true puts failed steps back; from: "<step>" redoes that step and all after it. options: rigPaths {castId: ["claude-svg","raster"]} (extra rig variants), rigChoice {castId: "a"|"c"}, skipClips: true (drop the Flow clips), clipCredits {clipId: max_credits}. Model work is done through cts_get_task / cts_submit_task; the answer says what to do next (hint) and shows every step.',
+      'Start or resume the episode pipeline: pitch (3 premises) -> STOP until the user chooses (cts_pitch_choose) -> bible -> character sheets (sketch, Z-Image master, 3 poses) -> STOP until the user approves every sheet (cts_sheet_approve) -> rigs (raster from the master) -> pose images (optional) -> sets -> script -> child-safety review -> voice casting -> voices -> music (ComfyUI) -> Flow intro/outro clips -> lip-sync/timelines/lint -> preview renders -> frame review -> final renders with the mix check (hr and en MP4s). Call it again with the same series and episode to resume (it never skips a pause). The first call needs a brief {idea, title?, ageMin?, ageMax?, notes?, seconds?, lineRange?: [12,16], intro?: false, outro?: false}, or brief.pitch {id?: "p1", title: {hr,en}, logline: {hr,en}, leads: [{name, what}], sets: [], why}: that premise is the chosen one, the pitch step and its pause are skipped and the bible starts from it. retry: true puts failed steps back; from: "<step>" redoes that step and all after it. options: rigPaths {castId: ["raster"] (default) or ["claude-svg"]} (SVG only when asked), rigChoice {castId: "a"|"c"}, poses {castId: [gesture, ...]} (pose images, at most 2 per character; default none), skipClips: true (drop the Flow clips), clipCredits {clipId: max_credits}. Model work is done through cts_get_task / cts_submit_task; the answer says what to do next (hint) and shows every step.',
       z.object({
         series,
         episode,

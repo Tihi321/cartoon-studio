@@ -28,6 +28,7 @@ export const STEPS: readonly StepDef[] = [
   { id: 'cast_sheet', no: '2', label: 'Character sheets: sketch, Z-Image master, pose sheet (character-designer, ComfyUI)', role: 'character-designer', kind: 'role', vision: true },
   { id: 'sheet_review', no: '2', label: 'The user approves every character sheet', role: 'character-designer', kind: 'gate' },
   { id: 'rig', no: '3', label: 'Rigs (character-designer): claude-svg, raster', role: 'character-designer', kind: 'role', vision: true },
+  { id: 'poses', no: '3b', label: 'Pose images for gesture peaks, optional: at most 2 gestures per character (ComfyUI, frame-critic)', role: 'frame-critic', kind: 'role', vision: true },
   { id: 'set', no: '4', label: 'Sets (background-artist, ComfyUI)', role: 'background-artist', kind: 'role', vision: true },
   { id: 'script', no: '5', label: 'Script and texts (writer)', role: 'writer', kind: 'role' },
   { id: 'safety', no: '6', label: 'Child safety review, must pass (child-safety-reviewer)', role: 'child-safety-reviewer', kind: 'role' },
@@ -80,6 +81,8 @@ export function normalise(state: PipelineState): PipelineState {
     }
     delete state.steps.cast_ref
   }
+  // CTS-17: `poses` is new. A state from before it (pilot 1) has its rig finished or not: finished means the poses step is skipped.
+  if (!state.steps.poses) state.steps.poses = state.steps.rig?.state === 'done' ? { state: 'skipped', detail: 'made before the poses step' } : { state: 'pending' }
   for (const id of STEP_IDS) state.steps[id] ??= { state: 'pending' }
   return state
 }

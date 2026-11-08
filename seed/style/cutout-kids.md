@@ -3,7 +3,32 @@ kind: style
 ---
 # The cutout puppet style (ages 4 to 8)
 
-This is the drawing guide for the character-designer. A character is a **paper cutout puppet**: a few flat shapes that slide and turn about pivots, with a face made of swappable pieces. The look is South Park-simple: solid colours, one thick dark outline, no gradients, no shading, no texture unless the series asks for it.
+This is the guide for the character-designer. A character is a **paper cutout puppet**: a few flat shapes that slide and turn about pivots, with a face made of swappable pieces. The look is South Park-simple: solid colours, one thick dark outline, no gradients, no shading, no texture unless the series asks for it.
+
+**You do not draw the character.** The default way (path c, raster) is: you describe the character and give a **body plan**, a rough sketch of flat coloured shapes that the app draws; Z-Image (a local image model) redraws the sketch as the finished cartoon; the user approves that sheet; then the master picture is cut into rotatable PNG parts and the face states are PNG patches. Drawing SVG parts yourself is path (a), optional, kept at the end of this guide.
+
+## The image prompt (what the character is)
+
+English, one or two sentences, the character only: body shape, main colours, clothes, face, one telling detail from the series palette and the bible's `look`. No background, floor, pose, camera or lighting: the code adds the pose (arms held away from the body), the flat #808080 grey, the flat solid colours, the thick dark outline and "no text".
+
+## The body plan (the sketch the app draws)
+
+- A list of primitives (`ellipse`, `circle`, `capsule`, `polygon`) in palette colours on a 1024 x 1536 canvas of `#808080`, back to front, each named for the limb that moves it (`body`, `head`, `arm-l`, `arm-r`, `leg-l`, `leg-r`, `tail` ...) with a joint point per limb, plus three pose angle sets: `wave`, `point`, `shrug`. The prompt `body-plan` has the exact schema and the silhouette rules.
+- Z-Image keeps the silhouette and the colours of the sketch and invents the details, so the shapes you draw are the shapes you get: a big round head with no gap to the body, thick arms held clear of the torso, two legs apart with both feet visible, a tail that does not cross an arm, a belly or ear in a second palette colour.
+- Palette: only the series palette, never the grey. The two leads differ in silhouette and in main colour, so they are told apart in a thumbnail.
+- The body plan is a throwaway sketch: nothing in it is a rig part, and no SVG is written.
+
+## What a good master looks like (what you check on the pictures)
+
+One character, full body, standing, arms away from the body, flat solid colours, thick dark outline, clean grey background, no white halo, no extra limbs, the face readable with an open and a closed mouth possible. The three sheet poses (wave, point, shrug) must be the same character: same colours, markings and proportions.
+
+## The raster cut (path c)
+
+Polygons in `ref.png` pixels for each part (`body`, `head`, `arm_l`, `arm_r`, `feet` plus any tail or ear), a pivot for each, and three face boxes (mouth, eyes, brows) that enclose the feature at its widest. The prompt `rig-raster` has the rules. Cut a little past each joint so no gap shows when a part turns.
+
+# Path (a), optional: Claude draws SVG parts
+
+Used only when the run asks for it (`options.rigPaths`: `claude-svg`), for example when Z-Image cannot hold a character. The rules below are for SVG parts and the SVG face plates. Pilot 1's characters were made this way.
 
 ## How a part is drawn
 

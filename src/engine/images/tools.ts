@@ -5,6 +5,8 @@ import type { Tool, ToolDef } from '../mcp/tools'
 import type { CtsService } from '../service'
 import { assertId } from '../series/paths'
 import { SeriesStore } from '../series/service'
+import { MUSIC_MODELS, SFX_ENGINE, configuredMusicModel } from '../music/comfy'
+import { configuredImageModel } from './comfy'
 import { IMAGE_PROVIDERS, pick } from './provider'
 
 /** MCP tools of CTS-08: the production budget (`cts_budget_set`, `cts_budget_get`), and image generation. */
@@ -24,6 +26,27 @@ export function imageTools(svc: CtsService, def: ToolDef): Tool[] {
         assertId(a.episode, 'episode id')
         const saved = await store().writeBudget(a.series, a.episode, { schema: 'cts.budget/1', capUsd: a.capUsd, flowCreditsCap: a.flowCreditsCap, approvedBy: a.approvedBy, approvedAt: localIso(new Date()), note: a.note })
         return { budget: saved }
+      }
+    ),
+    def(
+      'cts_media_config',
+      'Read-only: the image model and the order of fallbacks, the music engine (config/providers.md comfy.imageModel / comfy.musicModel) and the USD cap that gates the paid Nano Banana (gemini) provider (of the episode when series and episode are given, else 0). The Settings view shows it.',
+      z.object({ series: series.optional(), episode: episode.optional() }),
+      async (a) => {
+        const capUsd = a.series && a.episode ? (await budgetState(store(), a.series, a.episode)).capUsd : 0
+        const music = await configuredMusicModel(svc.dataDir)
+        return {
+          image: {
+            model: await configuredImageModel(svc.dataDir),
+            order: [
+              { id: 'z-image-lower-denoise', label: 'Z-Image at a lower denoise from a rig render', cost: 'free' },
+              { id: 'qwen-image-2.1-edit', label: 'Qwen-Image 2.1 edit with the character sheet as reference', cost: 'free' },
+              { id: 'gemini', label: 'Nano Banana (gemini image model)', cost: 'paid, only after the user says yes and a USD cap is set' }
+            ]
+          },
+          music: { model: music, alternatives: MUSIC_MODELS.filter((m) => m !== music), sfx: SFX_ENGINE },
+          gemini: { capUsd, refused: capUsd <= 0 }
+        }
       }
     ),
     def(

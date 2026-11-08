@@ -105,6 +105,19 @@ for (const lang of ['hr', 'en']) await buildTimeline(store, 'mini', 'ep00-mini',
   if (!ENGINE) {
     // two rig variants with pose sheets (pictures from the parts), so the Cast view has something to show
     const sharp = (await import('sharp')).default
+    // pilot 2 character sheets: the app's rough sketch (flat blobs on grey), the master and three sheet poses (stand-in pictures: shapes, not Z-Image output)
+    const blob = async (file, w, h, fill, arm) => {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="#808080"/><ellipse cx="${w / 2}" cy="${h * 0.62}" rx="${w * 0.2}" ry="${h * 0.2}" fill="${fill}"/><circle cx="${w / 2}" cy="${h * 0.3}" r="${w * 0.16}" fill="${fill}"/><rect x="${w * 0.5}" y="${h * 0.45}" width="${w * 0.3}" height="${h * 0.05}" rx="${h * 0.025}" fill="${fill}" transform="rotate(${arm} ${w * 0.5} ${h * 0.47})"/></svg>`
+      fs.mkdirSync(path.dirname(file), { recursive: true })
+      await sharp(Buffer.from(svg)).png().toFile(file)
+    }
+    for (const [id, fill] of [['mia', '#e07a3f'], ['bobo', '#8a5a44']]) {
+      const dir = path.join(MINI, 'cast', id)
+      await blob(path.join(dir, 'sketch.png'), 256, 384, '#c8c8c8', -20)
+      await blob(path.join(dir, 'ref.png'), 256, 384, fill, -20)
+      for (const [p, a] of [['wave', -80], ['point', 0], ['shrug', 30]]) await blob(path.join(dir, 'sheet', `${p}.png`), 256, 384, fill, a)
+      await sharp({ create: { width: 1024, height: 384, channels: 3, background: '#808080' } }).png().toFile(path.join(dir, 'sheet.png'))
+    }
     for (const id of ['mia', 'bobo'])
       for (const v of ['a', 'c']) {
         const dir = path.join(MINI, 'cast', id, 'variants', v)
@@ -209,7 +222,7 @@ function bridge({ fix, origin, engine, engineOrigin }) {
   const emit = (e) => setTimeout(() => listeners.forEach((l) => l(e)), 0)
   window.__emit = emit
   const at = new Date().toISOString()
-  const state = { run: 'waiting-on-user', chosen: null, cap: null, renders: [] }
+  const state = { run: 'waiting-on-user', chosen: null, cap: null, renders: [], approved: { mia: '2026-11-08 09:30' }, redo: {} }
   const rigCheck = (cast, variant) => ({ cast, ...(variant ? { variant } : {}), ok: variant !== 'c', parts: fix.rigs[cast]?.parts.length ?? 0, issues: variant === 'c' ? [{ code: 'E_RIG_PART', severity: 'error', message: 'missing mouth shape "MBP"', file: `cast/${cast}/variants/c/rig.json`, where: 'face.mouth' }] : [] })
   const built = (s) => ({ path: s, status: 'built', startedAt: '2026-11-07T10:00:00.000', endedAt: '2026-11-07T10:20:00.000', wallSeconds: s === 'raster' ? 2410 : 1260, spendUsd: 0, spendCredits: 0, note: s === 'raster' ? 'keyed from the reference' : 'parts drawn by Claude as SVG from the reference' })
   const tools = {
@@ -231,10 +244,26 @@ function bridge({ fix, origin, engine, engineOrigin }) {
       variants: {
         schema: 'cts.variants/1',
         chosen: 'a',
-        variants: { a: built('claude-svg'), b: { path: 'recraft-svg', status: 'not-run', startedAt: '2026-11-07T10:00:00.000', endedAt: '2026-11-07T10:00:00.000', wallSeconds: 0, spendUsd: 0, spendCredits: 0, note: 'not run: no budget' }, c: built('raster') }
+        variants: { a: built('claude-svg'), c: built('raster') }
       },
       checks: { chosen: rigCheck(a.cast), a: rigCheck(a.cast, 'a'), c: rigCheck(a.cast, 'c') },
-      files: { ref: `cast/${a.cast}/parts/head.svg`, sheet: null }
+      sheet: { approved: !!state.approved[a.cast], approvedAt: state.approved[a.cast] ?? null, review: state.redo[a.cast] ?? null, poses: ['wave', 'point', 'shrug'] },
+      files: { sketch: `cast/${a.cast}/sketch.png`, ref: `cast/${a.cast}/ref.png`, sheet: `cast/${a.cast}/sheet.png`, rigSheet: `cast/${a.cast}/variants/c/rig-sheet.png` }
+    }),
+    cts_sheet_approve: (a) => {
+      if (a.ok) {
+        state.approved[a.cast] = '2026-11-08 10:00'
+        delete state.redo[a.cast]
+      } else {
+        delete state.approved[a.cast]
+        state.redo[a.cast] = { ok: false, note: a.note ?? null, at: '2026-11-08 10:00' }
+      }
+      return { cast: a.cast, ok: a.ok, stillOpen: [], resumed: [] }
+    },
+    cts_media_config: () => ({
+      image: { model: 'z-image-turbo', order: [{ id: 'z-image-lower-denoise', label: 'Z-Image at a lower denoise from a rig render', cost: 'free' }, { id: 'qwen-image-2.1-edit', label: 'Qwen-Image 2.1 edit with the character sheet as reference', cost: 'free' }, { id: 'gemini', label: 'Nano Banana (gemini image model)', cost: 'paid, only after the user says yes and a USD cap is set' }] },
+      music: { model: 'ace-step-v1-instrumental', alternatives: ['minimax-music-3'], sfx: 'moss-soundeffect-v2' },
+      gemini: { capUsd: 0, refused: true }
     }),
     cts_pose_sheet: (a) => ({ file: `cast/${a.cast}/rig-sheet.png` }),
     cts_set_get: (a) => ({ set: fix.set, layerFiles: fix.set.layers.map((l) => `sets/${a.set}/${l.src}`) }),
@@ -342,7 +371,7 @@ function bridge({ fix, origin, engine, engineOrigin }) {
           running: [],
           settings: { fallbacks: ['client/claude-code'], fallbackShared: false, lmstudioParallel: 4, lmstudioContext: 131072, lmstudioTtlMinutes: 60 },
           secretsSet: ['FAL_KEY'],
-          keyNames: ['FAL_KEY', 'RECRAFT_API_KEY'],
+          keyNames: ['FAL_API_KEY', 'GEMINI_API_KEY'],
           at
         })
       }
@@ -355,10 +384,10 @@ function bridge({ fix, origin, engine, engineOrigin }) {
         if (engine) void window.__callTool('cts_studios_status', {}).then((r) => emit({ type: 'studios.status', studios: r.result?.studios ?? [] }))
         else {
           const s = (id, name, ok, tools, hint) => ({ id, name, ok, url: `http://127.0.0.1/${id}`, error: ok ? '' : 'not reachable', repo: '', hint: hint ?? '', tools })
-          emit({ type: 'studios.status', studios: [s('comfy', 'ComfyUI', true, 0), s('chiptune', 'Chiptune Studio', true, 38), s('flow', 'flow-music-mcp', false, 0, 'Start it with: scripts\\hub.ps1 start flow-music-mcp'), s('vibetts', 'VibeTTS', true, 24)] })
+          emit({ type: 'studios.status', studios: [s('comfy', 'ComfyUI', true, 0), s('flow', 'flow-music-mcp', false, 0, 'Start it with: scripts\\hub.ps1 start flow-music-mcp'), s('vibetts', 'VibeTTS', true, 24)] })
         }
       }
-      if (cmd.type === 'clearSecret') emit({ type: 'secrets.updated', secretsSet: [], keyNames: ['FAL_KEY', 'RECRAFT_API_KEY'] })
+      if (cmd.type === 'clearSecret') emit({ type: 'secrets.updated', secretsSet: [], keyNames: ['FAL_API_KEY', 'GEMINI_API_KEY'] })
     }
   }
   // the mcp.status the Settings page and the preview need, as the engine sends it once it listens
@@ -480,10 +509,24 @@ async function main() {
 
     // 2. Cast: three rig variants side by side, rig check, voices, the pose sheet
     await go('cast')
-    await must('cast variants', '.variant', 3)
+    await must('cast variants', '.variant', 2)
     await must('rig check of the cast member', T('cast-rig-check'))
     await must('voice rows', T('voice-hr-play'))
     await must('pose sheet', `${T('cast-sheet-live')}, ${T('cast-sheet')}`)
+    // the character sheet (CTS-12): sketch, master, three sheet poses and the approval state; Redo needs a note, Approve is off once approved
+    await must('approve state', T('cast-approval'))
+    if (!ENGINE) {
+      await must('sketch', T('cast-sketch'))
+      await must('master image', T('cast-ref'))
+      await must('sheet poses', '[data-testid^="cast-pose-"]', 3)
+      const pill = await page.textContent(T('cast-approval'))
+      if (!/approved/.test(pill ?? '')) fail(`the first character should read approved, it says "${pill}"`)
+      await page.click(T('cast-pick-bobo'))
+      await page.waitForFunction(() => /waiting for your look/.test(document.querySelector('[data-testid="cast-approval"]')?.textContent ?? ''), null, { timeout: 5000 }).catch(() => fail('the second character should be waiting for the look'))
+      if (!(await page.isDisabled(T('cast-redo')))) fail('Redo should be off while the note is empty')
+      await page.click(T('cast-approve'))
+      await page.waitForFunction(() => /approved/.test(document.querySelector('[data-testid="cast-approval"]')?.textContent ?? ''), null, { timeout: 5000 }).catch(() => fail('Approve did not change the state'))
+    }
     if (!ENGINE) {
       await must('variant c check', T('variant-c-check'))
       await must('variant pictures', `${T('variant-a-img')}`)
@@ -547,7 +590,10 @@ async function main() {
 
     // 8. Settings: studios, providers, budget with a confirm dialog, keys
     await go('settings')
-    await must('studios', '[data-testid^="studio-"][data-testid$="-state"]', 4)
+    await must('studios', '[data-testid^="studio-"][data-testid$="-state"]', 3)
+    await must('music engine', T('media-music-model'))
+    await must('image fallback order', T('media-image-order'))
+    await must('gemini cap', T('media-gemini-cap'))
     await must('budget', T('budget-credits'))
     await must('voice providers', T('voice-provider-mia-hr'))
     if (ENGINE && !(await page.locator(T('budget-unset')).count())) fail('an episode without a budget file should say that no budget is set')

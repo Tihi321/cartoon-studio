@@ -115,22 +115,34 @@ export interface VariantInfo {
   /** `cts_rig_check` of the variant, as `cts_cast_get` includes it. */
   check?: RigCheckView
 }
+export interface SheetApproval {
+  approved: boolean
+  approvedAt: string | null
+  /** The user's last verdict (`cts_sheet_approve`): ok false = asked to make the sheet again, with the note. */
+  review: { ok: boolean; note: string | null; at: string } | null
+}
 export interface CastInfo {
   id: string
   rig: { height: number; kind: string; parts: string[]; gestures: string[]; emotions: string[] } | null
-  /** The reference image and the rig pose sheet (`rig-sheet.png`; the character sheet is `sheet.png`), relative to the series folder; null when the file does not exist. */
+  /** The master image (`ref.png`), the rough sketch it was drawn from, the character sheet (`sheet.png`: the master and the poses side by side) and the rig pose sheet (`rig-sheet.png`), relative to the series folder; null when the file does not exist. */
   ref: string | null
+  sketch: string | null
+  charSheet: string | null
   sheet: string | null
+  /** The names of the sheet poses (`sheet/<pose>.png`) and where the user's approval stands (CTS-12; `cts_cast_get` reports it since CTS-17). */
+  sheetPoses: string[]
+  approval: SheetApproval
   variants: VariantInfo[]
   /** `cts_rig_check` of the chosen rig. */
   check: RigCheckView | null
 }
-/** `cts_cast_get { series, cast }` -> `{ member, rig, variants: variants.json, checks: {chosen, a, c}, files: {ref, sheet} }`. */
+/** `cts_cast_get { series, cast }` -> `{ member, sheet: {approved, approvedAt, review, poses}, rig, variants: variants.json, checks: {chosen, a, c}, files: {sketch, ref, sheet, rigSheet} }`. */
 export function normalizeCast(r: Record<string, unknown>): CastInfo {
   const member = (r.member ?? {}) as { id?: string }
   const file = (r.variants ?? {}) as { chosen?: RigVariant | null; variants?: Partial<Record<RigVariant, { status: string; wallSeconds: number; spendUsd: number; spendCredits?: number; note: string }>> }
   const checks = (r.checks ?? {}) as Record<string, RigCheckView | undefined>
-  const files = (r.files ?? {}) as { ref?: string | null; sheet?: string | null; rigSheet?: string | null }
+  const files = (r.files ?? {}) as { sketch?: string | null; ref?: string | null; sheet?: string | null; rigSheet?: string | null }
+  const sh = (r.sheet ?? {}) as { approved?: boolean; approvedAt?: string | null; review?: SheetApproval['review']; poses?: string[] }
   const id = member.id ?? ''
   const variants: VariantInfo[] = (['a', 'c'] as const).map((v) => {
     const rec = file.variants?.[v]
@@ -147,7 +159,7 @@ export function normalizeCast(r: Record<string, unknown>): CastInfo {
       check: checks[v]
     }
   })
-  return { id, rig: (r.rig as CastInfo['rig']) ?? null, ref: files.ref ?? null, sheet: files.rigSheet ?? null, variants, check: checks.chosen ?? null }
+  return { id, rig: (r.rig as CastInfo['rig']) ?? null, ref: files.ref ?? null, sketch: files.sketch ?? null, charSheet: files.sheet ?? null, sheet: files.rigSheet ?? null, sheetPoses: sh.poses ?? [], approval: { approved: !!sh.approved, approvedAt: sh.approvedAt ?? null, review: sh.review ?? null }, variants, check: checks.chosen ?? null }
 }
 
 /** `cts_set_get { series, set }` -> `{ set, layerFiles }`. */
@@ -191,6 +203,21 @@ export interface BudgetInfo {
 export function normalizeBudget(r: Record<string, unknown>): BudgetInfo {
   const b = r as { approved?: boolean; capUsd?: number; flowCreditsCap?: number; spentUsd?: number; spentCredits?: number; ledger?: SpendEntry[] }
   return { budget: b.approved ? { capUsd: b.capUsd ?? 0, flowCreditsCap: b.flowCreditsCap ?? 0 } : null, spentUsd: b.spentUsd ?? 0, spentCredits: b.spentCredits ?? 0, ledger: b.ledger ?? [] }
+}
+
+export interface MediaConfig {
+  image: { model: string; order: { id: string; label: string; cost: string }[] }
+  music: { model: string; alternatives: string[]; sfx: string }
+  gemini: { capUsd: number; refused: boolean }
+}
+/** `cts_media_config { series?, episode? }` -> the image model and fallback order, the music engine and the cap that gates Nano Banana. */
+export function normalizeMediaConfig(r: Record<string, unknown>): MediaConfig {
+  const m = r as Partial<MediaConfig>
+  return {
+    image: { model: m.image?.model ?? 'z-image-turbo', order: m.image?.order ?? [] },
+    music: { model: m.music?.model ?? '', alternatives: m.music?.alternatives ?? [], sfx: m.music?.sfx ?? '' },
+    gemini: { capUsd: m.gemini?.capUsd ?? 0, refused: m.gemini?.refused ?? true }
+  }
 }
 
 /** One render job of `cts_render_status` (they live in the engine process). Ids are `<series>--render--<episode>-<lang>-<quality>--r<n>`. */

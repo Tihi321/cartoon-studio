@@ -2,15 +2,15 @@ import { useState } from 'react'
 import { LANGS } from '../../shared/contracts'
 import type { CastMember, RigVariant, VoiceSpec } from '../../shared/contracts'
 import { callTool, engineOrigin, normalizeCast, playerUrl, seconds, seriesFile, useTool } from '../lib/studio'
-import type { RigCheckView, VariantInfo } from '../lib/studio'
+import type { CastInfo, RigCheckView, VariantInfo } from '../lib/studio'
 import { useCts } from '../store/hooks'
 import { ctsStore } from '../store/store'
 import { Pill } from './common'
 import { LANG_NAME, NeedSeries, Picture, PlayButton, ToolGate, useSeries } from './studio'
 
-const PATH_NAME: Record<RigVariant, string> = { a: 'Claude draws SVG parts', c: 'Raster cut-out from the reference' }
+const PATH_NAME: Record<RigVariant, string> = { a: 'Claude draws SVG parts (path a, optional)', c: 'Raster cut-out from the master image (default)' }
 
-/** Cast: the reference image, the pose sheet, the rig made by each path side by side, the rig check and the voice of each character. */
+/** Cast: the character sheet (sketch, master, sheet poses, approve or redo), the rig pose sheet, the rig made by each path side by side, the rig check and the voice of each character. */
 export function CastPage() {
   const slug = useCts((s) => s.selection.series)
   const castId = useCts((s) => s.selection.cast)
@@ -68,14 +68,12 @@ function CastMemberView({ slug, member }: { slug: string; member: CastMember }) 
       <ToolGate state={t} tool="cts_cast_get" testId="cast-detail">
         {t.data && (
           <>
-            <section className="look-pair" aria-label="Look" data-testid="cast-look">
-              <figure className="plate">
-                <Picture src={t.data.ref ? seriesFile(slug, t.data.ref) : null} alt={`Reference image of ${member.name.en}`} testId="cast-ref" />
-                <figcaption>Reference image</figcaption>
-              </figure>
+            <CharacterSheet slug={slug} cast={member.id} info={t.data} onChanged={t.reload} />
+
+            <section className="look-pair" aria-label="Rig" data-testid="cast-look">
               <figure className="plate wide">
                 <PoseSheet slug={slug} cast={member.id} sheet={t.data.sheet} hasRig={!!t.data.rig} onSaved={t.reload} />
-                <figcaption>Pose sheet: neutral, each emotion, gestures, 8 mouths, 3 eye states</figcaption>
+                <figcaption>Rig pose sheet: neutral, each emotion, gestures, 8 mouths, 3 eye states</figcaption>
               </figure>
             </section>
 
@@ -95,6 +93,86 @@ function CastMemberView({ slug, member }: { slug: string; member: CastMember }) 
         )}
       </ToolGate>
     </>
+  )
+}
+
+/**
+ * The character sheet of CTS-12: the rough sketch the app drew, the master Z-Image made from it, the sheet poses and the user's verdict. The pipeline
+ * waits at `sheet_review` until every character is approved; Redo needs a note, which goes into the image prompt of the next try.
+ */
+function CharacterSheet({ slug, cast, info, onChanged }: { slug: string; cast: string; info: CastInfo; onChanged(): void }) {
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const verdict = async (ok: boolean) => {
+    setBusy(true)
+    setError(null)
+    try {
+      await callTool('cts_sheet_approve', { series: slug, cast, ok, ...(note.trim() ? { note: note.trim() } : {}) })
+      if (!ok) setNote('')
+      onChanged()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const a = info.approval
+  const redo = a.review && !a.review.ok ? a.review : null
+  return (
+    <section className="panel" aria-labelledby="cast-charsheet" data-testid="cast-charsheet">
+      <div className="row spread">
+        <h2 className="panel-title" id="cast-charsheet">
+          Character sheet
+        </h2>
+        <Pill tone={a.approved ? 'good' : redo ? 'bad' : 'dim'} testId="cast-approval" title={redo?.note ?? undefined}>
+          {a.approved ? `approved ${a.approvedAt ?? ''}` : redo ? 'redo asked' : info.charSheet ? 'waiting for your look' : 'no sheet yet'}
+        </Pill>
+      </div>
+      <div className="row">
+        <figure className="plate">
+          <Picture src={info.sketch ? seriesFile(slug, info.sketch) : null} alt={`Rough sketch of ${cast}`} testId="cast-sketch" />
+          <figcaption>Sketch the app drew</figcaption>
+        </figure>
+        <figure className="plate">
+          <Picture src={info.ref ? seriesFile(slug, info.ref) : null} alt={`Master image of ${cast}`} testId="cast-ref" />
+          <figcaption>Master image (Z-Image)</figcaption>
+        </figure>
+        {info.sheetPoses.map((p) => (
+          <figure className="plate" key={p}>
+            <Picture src={seriesFile(slug, `cast/${cast}/sheet/${p}.png`)} alt={`Sheet pose ${p} of ${cast}`} testId={`cast-pose-${p}`} />
+            <figcaption>Pose: {p}</figcaption>
+          </figure>
+        ))}
+        {info.sheetPoses.length === 0 && info.charSheet && (
+          <figure className="plate wide">
+            <Picture src={seriesFile(slug, info.charSheet)} alt={`Character sheet of ${cast}`} testId="cast-pose-sheet" />
+            <figcaption>sheet.png: the master and the poses</figcaption>
+          </figure>
+        )}
+      </div>
+      {redo?.note && (
+        <p className="dim" data-testid="cast-redo-asked">
+          Redo asked: {redo.note}
+        </p>
+      )}
+      {info.charSheet && (
+        <div className="row">
+          <button onClick={() => void verdict(true)} disabled={busy || a.approved} data-testid="cast-approve">
+            Approve
+          </button>
+          <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Redo: what to change" aria-label={`Redo note for ${cast}`} data-testid="cast-redo-note" />
+          <button onClick={() => void verdict(false)} disabled={busy || !note.trim()} data-testid="cast-redo">
+            Redo with this note
+          </button>
+          {error && (
+            <span className="bad-text" role="alert" data-testid="cast-approve-error">
+              {error}
+            </span>
+          )}
+        </div>
+      )}
+    </section>
   )
 }
 

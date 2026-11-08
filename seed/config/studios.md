@@ -1,15 +1,6 @@
 ---
 kind: studios
-# Chiptune Studio (music): the user's own app. It runs an MCP server.
-# Start it without a window: `cd <repo> && yarn build && yarn mcp` (or `<exe> --mcp-only`).
-chiptuneStudioUrl: http://127.0.0.1:7458/mcp
-# Where the code is: used for the start hints.
-chiptuneStudioRepo: ../midi-generator
-# A packaged app to launch instead of `yarn electron .` in the repo. Empty: use the repo.
-chiptuneStudioExe: ''
-# Bearer token, only when the app's MCP server asks for one. The environment variable CHIPTUNE_STUDIO_MCP_TOKEN and the credential store win over this field.
-chiptuneStudioToken: ''
-# flow-music-mcp: Google Flow images (free), narration voices (free Gemini) and, later, video clips (SPEND CREDITS, always under a cap).
+# flow-music-mcp: narration voices (free Gemini) and the intro and outro video clips (SPEND CREDITS, always under a cap). No images go through Flow.
 # Start it: hub.ps1 start flow-music-mcp. Sign in once: yarn login in the repo.
 flowUrl: http://127.0.0.1:7462/mcp
 flowRepo: ../flow-music-mcp
@@ -35,9 +26,8 @@ renderTimeoutS: 300
 
 Where the other tools of the creative hub are. Each is an MCP server on 127.0.0.1.
 
-- **Chiptune Studio** makes the theme and the stings of a series.
-- **flow-music-mcp** reaches Google Flow: free images, free Gemini narration voices, and (only under a credit cap) video clips.
+- **flow-music-mcp** reaches Google Flow: free Gemini narration voices and (only under a credit cap) the intro and outro video clips. It makes no images.
 - **VibeTTS** is the local voice app. Cartoon Studio never starts it.
-- ComfyUI uses the lane http://127.0.0.1:8188 unless an optional `config/comfy.md` lists others, and is started by `config/autostart.md` when a job needs it.
+- ComfyUI makes the images (Z-Image), the series music (ACE-Step) and the Croatian voice. It uses the lane http://127.0.0.1:8188 unless an optional `config/comfy.md` lists others, and is started by `config/autostart.md` when a job needs it.
 
-`cts_studios_status` checks all four and says how to start one that is down.
+`cts_studios_status` checks all three and says how to start one that is down.

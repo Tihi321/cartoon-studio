@@ -6,15 +6,15 @@ License: MIT.
 
 ## Status
 
-Phase 1 is being built ticket by ticket (see [ROADMAP.md](ROADMAP.md)): the scaffold and engine core (CTS-01), then the data contracts, the Canvas player, the timeline, the render, the voices, the pipeline and the studio UI, ending in a 60-second pilot episode. What exists after CTS-01 is the engine core, the MCP server with ten `cts_` tools, the Electron shell with an empty "Series" view, the seed configuration and the build. There is no cartoon yet.
+Phase 1 (CTS-01..09) is built: the engine, contracts, Canvas player, timeline, render, voices, pipeline and studio UI, and pilot 1 was watched and judged good. Pilot 2 (CTS-10..17, see [ROADMAP.md](ROADMAP.md)) changes the method: the character sheet is a Z-Image image-to-image drawing over a rough sketch the app makes (the user approves it before anything is rigged), the rig is raster with image face patches (SVG drawing is an optional path), music comes from ComfyUI (ACE-Step) and sits at least 15 dB under the voice by measurement, and Flow is used only for the intro and outro videos. The pipeline order is pitch (skipped when `brief.pitch` is given) -> bible -> `cast_sheet` -> `sheet_review` (pause) -> rig -> poses (optional) -> set -> script -> safety -> voice -> music -> clips -> timeline -> preview -> frame review -> final render and mix check. See [docs/pipeline.md](docs/pipeline.md).
 
 ## What is in the repository
 
 | Path | What |
 |---|---|
-| `src/engine/` | The headless engine: job queue and scheduler, agents and roles, model providers (`client`, `mock`, OpenAI-compatible for Strata and LM Studio, Anthropic, Gemini), budget, logs, the MCP server, and the clients of the other tools (ComfyUI, Chiptune Studio, flow-music-mcp, VibeTTS). |
+| `src/engine/` | The headless engine: job queue and scheduler, agents and roles, model providers (`client`, `mock`, OpenAI-compatible for Strata and LM Studio, Anthropic, Gemini), budget, logs, the MCP server, and the clients of the other tools (ComfyUI, flow-music-mcp, VibeTTS). |
 | `src/main`, `src/preload`, `src/renderer` | The Electron app: main process, the `window.cartoonstudio` bridge, the React studio UI. |
-| `src/player/` | The Canvas puppet player (a stub until CTS-03). It is served by the engine at `/preview/`. |
+| `src/player/` | The Canvas puppet player. It is served by the engine at `/preview/`. |
 | `seed/` | What a new data folder (`~/CartoonStudio`) starts from: `config/*.md` and the eight agents in `agents/`. |
 | `docs/` | `mcp-guide.md` (the MCP tools), `provenance.md` (where the code came from). |
 | `scripts/` | Icons, the studio screenshot harness, the package check. |
@@ -35,7 +35,7 @@ yarn dist:installer                          # the Windows installer and portabl
 Point a scratch run at its own data folder with `CTS_DATA=<dir>`; the default is `~/CartoonStudio`. Connect Claude Code with
 `claude mcp add --transport http cartoon-studio http://127.0.0.1:7465/mcp`, then it can take the model calls of the agents (`cts_get_task`, `cts_submit_task`).
 
-Environment: `CTS_DATA`, `CTS_MCP_PORT`, `CTS_MCP_TOKEN`, `CTS_SEED`, `CTS_AUTOSTART` (`0` turns off the auto-start of ComfyUI and Chiptune Studio).
+Environment: `CTS_DATA`, `CTS_MCP_PORT`, `CTS_MCP_TOKEN`, `CTS_SEED`, `CTS_AUTOSTART` (`0` turns off the auto-start of ComfyUI).
 
 ## Cost
 

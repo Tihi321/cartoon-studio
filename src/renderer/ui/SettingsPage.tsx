@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { LANGS, VOICE_PROVIDERS } from '../../shared/contracts'
 import type { Lang, VoiceSpec } from '../../shared/contracts'
 import { getStartWithWindows, sendCommand, setStartWithWindows } from '../api'
-import { callTool, normalizeBudget, useTool } from '../lib/studio'
+import { callTool, normalizeBudget, normalizeMediaConfig, useTool } from '../lib/studio'
 import type { BudgetInfo } from '../lib/studio'
 import { useCts } from '../store/hooks'
 import { SCHEMES, type Scheme } from '../lib/scheme'
@@ -28,6 +28,7 @@ export function SettingsPage() {
       </header>
 
       <Studios />
+      <MediaEngines />
       <VoiceProviders />
       <Budget />
 
@@ -73,10 +74,53 @@ export function SettingsPage() {
 
 /** What each generator makes for the studio, shown next to whether it answers. */
 const STUDIO_USE: Record<string, string> = {
-  comfy: 'images, background keying, the Croatian voice (OmniVoice)',
-  chiptune: 'theme music and sound effects',
-  flow: 'Gemini voices, video clips (credits), images at 0 credits',
+  comfy: 'images (Z-Image), theme music and sound effects, the Croatian voice (OmniVoice)',
+  flow: 'Gemini voices and the intro and outro video clips (credits); no images',
   vibetts: 'local voices: English (Kokoro), Croatian fallback'
+}
+
+/**
+ * The image and music engines and the order of fallbacks, read-only (cts_media_config): the engines are chosen in config/providers.md (`comfy.imageModel`,
+ * `comfy.musicModel`), which the engine reloads without a restart. Editing them here needs an engine command that writes that file; there is none yet.
+ */
+function MediaEngines() {
+  const slug = useCts((s) => s.selection.series)
+  const ep = useCts((s) => s.selection.episode)
+  const t = useTool('cts_media_config', slug && ep ? { series: slug, episode: ep } : {}, normalizeMediaConfig)
+  return (
+    <section className="sheet panel" aria-labelledby="set-media" data-testid="set-media">
+      <h2 className="panel-title" id="set-media">
+        Image and music engines
+      </h2>
+      <ToolGate state={t} tool="cts_media_config" testId="media">
+        {t.data && (
+          <>
+            <dl className="variant-facts">
+              <dt>Music engine</dt>
+              <dd data-testid="media-music-model">
+                {t.data.music.model} <span className="dim">(alternatives: {t.data.music.alternatives.join(', ') || 'none'}; sound effects: {t.data.music.sfx})</span>
+              </dd>
+              <dt>Image model</dt>
+              <dd data-testid="media-image-model">{t.data.image.model}</dd>
+              <dt>Paid image fallback</dt>
+              <dd data-testid="media-gemini-cap">
+                Nano Banana (gemini): {t.data.gemini.refused ? `refused, the USD cap is $${t.data.gemini.capUsd.toFixed(2)}` : `allowed up to $${t.data.gemini.capUsd.toFixed(2)}`}
+              </dd>
+            </dl>
+            <p className="dim">Fallback order when the image model cannot hold a character or a pose:</p>
+            <ol data-testid="media-image-order">
+              {t.data.image.order.map((o) => (
+                <li key={o.id}>
+                  {o.label} <span className="dim">({o.cost})</span>
+                </li>
+              ))}
+            </ol>
+            <p className="dim">Read-only: change the engines in config/providers.md (comfy.imageModel, comfy.musicModel).</p>
+          </>
+        )}
+      </ToolGate>
+    </section>
+  )
 }
 
 function Studios() {
@@ -146,7 +190,7 @@ function VoiceProviders() {
         Provider choice
       </h2>
       <p className="dim">
-        Images come from ComfyUI (the model in config/providers.md); Flow images only at 0 credits, and the paid providers only behind the budget below. Voices: auto picks Gemini within its free quota, else the local engines.
+        Images and music come from ComfyUI (the models in config/providers.md); Flow makes video clips only, and the paid providers only behind the budget below. Voices: auto picks Gemini within its free quota, else the local engines.
       </p>
       {!slug && <p className="dim">Choose a series to set its voices.</p>}
       {slug && cast.length === 0 && <p className="dim">The cast is made after you choose a premise.</p>}

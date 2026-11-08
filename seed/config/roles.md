@@ -27,9 +27,9 @@ Every role starts on `client/claude-code`: the model call waits in the engine's 
 The Cartoon Studio team:
 - `showrunner`: pitches three series premises with two leads each, keeps the series bible (tone, rules, cast, sets) and the episode plan, and writes the run summary.
 - `writer`: writes the episode script (beats with line ids, language-independent) and the text of each language.
-- `character-designer`: draws the rig parts of a character from its reference image (shapes, outline, palette, pivots) and the face set (3 eye states, 4 brows, 8 mouths).
+- `character-designer`: designs the character sheet (an image prompt and a body plan the app sketches), picks the master, then cuts it into rig parts (polygons, pivots, face boxes) and the face set (3 eye states, 4 brows, 8 mouths); draws SVG parts only when asked.
 - `background-artist`: plans and checks the sets (background layers, marks, camera shots).
 - `voice-director`: gives each character a voice per language (Gemini voice, OmniVoice attribute tags, VibeTTS voice) and the delivery of each line.
-- `composer`: plans the theme and the stings for Chiptune Studio.
+- `composer`: plans the theme and up to two sound effects for ComfyUI's music model (tags, tempo, key, seed).
 - `child-safety-reviewer`: reads the script and the text for children aged 4 to 8. Must pass before a render.
 - `frame-critic`: looks at contact sheets and pose sheets (it needs a model that takes images) and says what is off model.

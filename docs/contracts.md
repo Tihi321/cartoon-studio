@@ -20,12 +20,12 @@ Other code imports the schemas and types; it never redefines them.
 ```
 series/<slug>/
   bible.json
-  cast/<id>/            ref.png (master)  sheet.png (character sheet)  parts/*.svg|*.png  rig.json  rig-sheet.png (rig pose sheet)   (variants/<a|c>/{parts/, rig.json, rig-sheet.png})
+  cast/<id>/            sketch.png (the app's rough sketch)  ref.png (master)  sheet/<pose>.png  sheet.png (character sheet)  parts/*.svg|*.png  rig.json  rig-sheet.png (rig pose sheet)   (variants/<a|c>/{parts/, rig.json, rig-sheet.png})
   sets/<id>/            layers/*.png  set.json
-  music/                <cue>.ogg
-  clips/                <id>.mp4  clips.json
+  music/                theme.ogg  sfx-<cue>.ogg (ComfyUI)
+  clips/                intro.mp4  outro.mp4  clips.json  keyframes/<id>.png
   episodes/<ep>/        budget.json  spend.json  pipeline.json  script.json  text/<lang>.json
-                        clips/  reviews/  voice/<lang>/  lipsync/<lang>/  timeline.<lang>.json  render/  out/
+                        clips/  reviews/  voice/<lang>/  lipsync/<lang>/  timeline.<lang>.json  render/<lang>/{levels.json,mix-check.json}  out/
 ```
 
 ## Series bible `bible.json`
@@ -278,6 +278,8 @@ key at B. `clips` are the `clip` beats: the cutout segments between them are ren
   "beats": [ { "id": "b00", "t0": 0, "t1": 8 }, { "id": "b03", "t0": 8, "t1": 10.5 } ]
 }
 ```
+
+The mix is not in the timeline: `music` `gain` is only a trim (at most 0 dB, never a boost) and `duckTo` is kept for the schema. The levels come from `config/render.md` `mix` (voices to `voiceLufs` -20 LUFS, music `musicUnderVoiceDb` 18 dB under the voice while someone speaks and `musicGapUnderVoiceDb` 8 dB under in the gaps, sfx and clip audio at their own offsets, then `loudness` -16 LUFS on the sum). A final render measures each input once (`render/<lang>/levels.json`, cached by file hash) and writes `render/<lang>/mix-check.json` `{ lines: [{ id, voice, music, underDb }], minUnderDb, medianUnderDb, gapMusicUnderVoiceDb }`; lint gives `W_MIX_MUSIC_LOUD` when `minUnderDb` is below `mix.minUnderVoiceDb` (15).
 
 ## Clips `clips/clips.json` (series) and `episodes/<ep>/clips/clips.json`
 

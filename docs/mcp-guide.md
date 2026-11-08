@@ -2,7 +2,7 @@
 
 Cartoon Studio makes a series of cutout-puppet cartoons for children aged 4 to 8: the cast, the rigs and the sets are made once and reused, each episode has a Croatian and an English voice track over the same animation, and the base animation is rendered locally to MP4. This server lets an agent such as Claude Code drive the studio: see the series and the job queue, and do the model work of the jobs itself, at no cost.
 
-**Status: CTS-07 (the pipeline).** Every tool below exists; the full list is at the end of this guide. Everything that needs ComfyUI, Flow, Chiptune Studio, VibeTTS or a browser was checked with fakes only until the pilot runs it (what is UNTESTED is said under each section).
+**Status: pilot 2 (CTS-17).** Every tool below exists; the full list is at the end of this guide. Everything that needs ComfyUI, Flow, VibeTTS or a browser was checked with fakes only until the pilot runs it (what is UNTESTED is said under each section).
 
 ## Connect
 
@@ -24,7 +24,7 @@ All tool names start with `cts_`. Every call returns JSON, also as `structuredCo
 |---|---|
 | Queue | `cts_status {series?}` (the job counts of a series, or of every series; `clientTasks`), `cts_wait {series?, timeoutSeconds?}` (waits until the series has nothing left to run), `cts_pause_all`, `cts_resume_all`, `cts_stop_now {drop?, slug?}` |
 | Client provider | `cts_client_tasks`, `cts_get_task {client?, role?, series?, task?}`, `cts_submit_task {taskId, text}`, `cts_release_task {taskId}` |
-| Generators | `cts_studios_status` (ComfyUI, Chiptune Studio, flow-music-mcp, VibeTTS) |
+| Generators | `cts_studios_status` (ComfyUI, flow-music-mcp, VibeTTS) |
 
 A job id is `<series>--<task>--<unit>--r<run>`, so `cts_status {series}` finds the jobs of a series by their prefix.
 
@@ -38,7 +38,8 @@ A role or agent set to the model `client/claude-code` (in `config/roles.md`) par
 |---|---|
 | `cts_budget_set {series, episode, capUsd, flowCreditsCap?, approvedBy, note?}` | Writes `episodes/<ep>/budget.json` (with `approvedAt`). Call it only after the user approved the amount. Without it both caps are 0 and every paid call is refused. |
 | `cts_budget_get {series, episode}` | Caps, spent per currency (usd, credits), what is left, and the ledger `spend.json`. |
-| `cts_image_generate {series, episode, provider?, prompt, width?, height?, format?, out?, refs?, model?, seed?}` | `comfy` (default, also `auto`): local, free; `refs` makes it an edit (Qwen). `gemini` (Nano Banana): a stub until CTS-11, refuses. `fal`: paid, charged to the episode budget. No image goes through Flow. |
+| `cts_media_config {series?, episode?}` | Read-only: the image model (`comfy.imageModel`) and the fallback order (Z-Image at a lower denoise, Qwen edit, then Nano Banana only after the user's yes), the music engine (`comfy.musicModel`, the alternatives, the sound-effect engine) and the USD cap that gates Nano Banana. The Settings view shows it. |
+| `cts_image_generate {series, episode, provider?, prompt, width?, height?, format?, out?, refs?, model?, seed?}` | `comfy` (default, also `auto`): local, free; `refs` makes it an edit (Qwen). `gemini` (Nano Banana): paid, refused with `BUDGET_EXCEEDED` at cap $0 before any network call; needs the user's yes and a recorded cap. `fal`: paid, charged to the episode budget. No image goes through Flow. |
 
 Every paid call goes through `charge` (`src/engine/budget/spend.ts`): the price estimate (from `config/prices.md`, unverified, check before use) is checked against the cap BEFORE the call (`BUDGET_EXCEEDED` for dollars, `FLOW_CREDITS_EXCEEDED` for Flow credits) and the real cost is appended to `spend.json` afterwards. A series-level spend (the series intro or outro clip) is charged to the episode that triggers it. The key for `fal` is read only from this tool's credential store: a missing one is `KEY_MISSING <provider>`; store it with `node out/engine/index.js key-set fal`.
 
@@ -50,7 +51,7 @@ Every paid call goes through `charge` (`src/engine/budget/spend.ts`): the price 
 | `cts_voice_generate {series, episode, lang?, ids?, force?, provider?}` | Returns a job id; the job speaks every clip that needs it and writes `episodes/<ep>/voice/<lang>/<line>.wav` (44.1 kHz mono, edge silence trimmed) and `manifest.json`. A clip is made again only when its hash (text, language, voice, speed, style) changes; a clip no provider can speak becomes a silent placeholder (2.5 words a second) with status `placeholder` and a warning, never a failed run. `costUsd` is 0. |
 | `cts_voice_status {series, episode}` | Per language: the allocation, every line's status/provider/engine/seconds, total seconds; and the voice jobs of the series. |
 | `cts_voice_quota {reset?}` | Today's Gemini TTS counter (`state/gemini-tts.json`): limit 10, used, remaining; the day ends at Pacific midnight. |
-| `cts_music_generate {series, mood, chip, seed, seconds?, sfx?}` | Returns a job id; Chiptune Studio makes `series/<slug>/music/theme.ogg` (a 30-40 s loop) and up to 2 effects (`sfx`: `{kind: sfx|stinger|ambience, sound, name?}`) as `.ogg` beside it. No Chiptune Studio = a warning in the job log and no music. |
+| `cts_music_generate {series, tags, bpm?, seed?, seconds?}` | Returns a job id; ComfyUI (`config/providers.md` `comfy.musicModel`: `ace-step-v1-instrumental` by default, `minimax-music-3` as the alternative) makes `series/<slug>/music/theme.ogg`, a 40 s instrumental with a 0.5 s fade-in and a 2 s fade-out; the job result is `{file, seconds, engine, wallSeconds}`. Sound effects (up to 2, `moss-soundeffect-v2`) are made by the pipeline's `music` step. ComfyUI down or failing = a warning in the job log and no music. Free and local. |
 
 Who speaks: the hub rule (`config/voice.md`). Gemini (`flow_narrate`, engine `gemini`, one request per clip) only when a whole language fits in the free requests left today; otherwise the local chain `localOrder`: Croatian OmniVoice through ComfyUI, then Supertonic through VibeTTS; English Kokoro through VibeTTS, then OmniVoice. A character's bible voice can pin `comfy`, `vibetts` or `paid` (the paid slot goes through the budget gate and then throws `NOT_IMPLEMENTED` in phase 1). OmniVoice reads `voice.<lang>.comfy.instruct` as attribute tags only (`male|female`, `child|teenager|young adult|middle-aged|elderly`, `very low|low|moderate|high|very high pitch`, `whisper`, and one English accent); other words are dropped with a warning in `cts_voice_plan`. ComfyUI memory is freed (`comfyKindSwitch`, `src/engine/comfy/kind-switch.ts`) before voice work after image work and the other way round.
 
@@ -58,7 +59,7 @@ Who speaks: the hub rule (`config/voice.md`). Gemini (`flow_narrate`, engine `ge
 
 | Tool | What it does |
 |---|---|
-| `cts_render {series, episode, langs?, quality?, maxSeconds?, wait?}` | Returns one job id per language (`<series>--render--<ep>-<lang>-<quality>--r<n>`); the Canvas player in headless Chromium draws every frame, ffmpeg encodes (`h264_amf` when it works on this machine, else `libx264`), the audio is mixed (music ducked under voices, -16 LUFS). `quality: final` -> `episodes/<ep>/out/<lang>.mp4` (1920x1080, real clips spliced in); `preview` -> `out/<lang>.preview.mp4` (960x540, clips show a placeholder card). `render/<lang>/render.log` has the frames, stage times and encoder. A missing clip file that is not marked `fallback` fails the final render (`E_CLIP_MISSING`); a `fallback` clip shows the cutout scene with the actors bouncing. |
+| `cts_render {series, episode, langs?, quality?, maxSeconds?, wait?}` | Returns one job id per language (`<series>--render--<ep>-<lang>-<quality>--r<n>`); the Canvas player in headless Chromium draws every frame, ffmpeg encodes (`h264_amf` when it works on this machine, else `libx264`), the audio is mixed (each input is brought to its level from `config/render.md` `mix`: voices -20 LUFS, music 18 dB under the voice while someone speaks and 8 dB under in the gaps, then -16 LUFS on the sum; a final render also writes `render/<lang>/mix-check.json` and `cts_render` returns `minUnderDb`). `quality: final` -> `episodes/<ep>/out/<lang>.mp4` (1920x1080, real clips spliced in); `preview` -> `out/<lang>.preview.mp4` (960x540, clips show a placeholder card). `render/<lang>/render.log` has the frames, stage times and encoder. A missing clip file that is not marked `fallback` fails the final render (`E_CLIP_MISSING`); a `fallback` clip shows the cutout scene with the actors bouncing. |
 | `cts_render_status {id?}` | State (running, done, failed), progress in frames, and the result or error of the render jobs of this engine session (they are not in the markdown job queue: a render needs no model). |
 | `cts_frames {series, episode, lang?, count? or times?}` | Contact sheet PNG of N frames (default 12) with time labels: `episodes/<ep>/render/<lang>/sheet-<n>.png`. Returns the path and the picture. |
 | `cts_pose_sheet {series, cast, variant?}` | Pose sheet PNG of a rig: `cast/<id>/rig-sheet.png` (or the variant's; `sheet.png` is the character sheet). Returns the path and the picture. |
@@ -71,13 +72,13 @@ The model work of the pipeline is done through the client task tools above; `doc
 
 | Tool | What it does |
 |---|---|
-| `cts_run_pipeline {series, episode, brief?, options?, retry?, from?}` | Starts or resumes the episode pipeline (creates the series from the brief when it does not exist). The first call needs `brief {idea, title?, ageMin?, ageMax?, notes?, seconds?, lineRange?, intro?, outro?}`. Answers with the state, the current step, every step, a `hint` on what to do next, the pitches while they wait and the `summary` when done. Re-calling with the same ids resumes; it never skips the pitch pause. `retry: true` puts failed steps back; `from: "<step>"` redoes a step and everything after it; `options {rigPaths, rigChoice, skipClips, clipCredits}`. |
+| `cts_run_pipeline {series, episode, brief?, options?, retry?, from?}` | Starts or resumes the episode pipeline (creates the series from the brief when it does not exist). The first call needs `brief {idea, title?, ageMin?, ageMax?, notes?, seconds?, lineRange?, intro?, outro?}`. Answers with the state, the current step, every step, a `hint` on what to do next, the pitches while they wait and the `summary` when done. Re-calling with the same ids resumes; it never skips a pause. `brief.pitch` (a pitch object) is the user's earlier pick: the pitch step and its pause are skipped. `retry: true` puts failed steps back; `from: "<step>"` redoes a step and everything after it; `options {rigPaths (default raster), rigChoice, poses {castId: [gesture]}, poseFacePlates, skipClips, clipCredits}`. Step order: pitch (or `brief.pitch`) -> bible -> cast_sheet -> sheet_review (pause) -> rig -> poses (optional) -> set -> script -> safety -> voice_cast -> voice -> music -> clip_shots -> clips -> timeline -> preview_render -> frame_review -> final_render (with the mix check). |
 | `cts_pitch_choose {series, pitch}` | The user's pick of premise p1/p2/p3: writes `bible.chosenPitch` and `chosenAt`, and lets every pipeline that waits go on. Call it only with the pitch the user chose. |
 | `cts_sheet_approve {series, cast, ok, note?}` | The user's verdict on one character sheet (`cast/<id>/sheet.png`: master + wave, point, shrug). The pipeline waits at `sheet_review` until every character is approved; `ok: true` writes `bible.cast[].sheet`; `ok: false` needs a note and makes that sheet again with new seeds. Call it only with the user's answer. |
 | `cts_series_create {slug, title?, logline?, ageMin?, ageMax?, languages?}` | A stub bible. Usually not needed. |
-| `cts_series_get {series}` | The bible, pitches and the chosen one, the rig variants per character, the episodes and the pipelines. |
+| `cts_series_get {series}` | The bible, pitches and the chosen one, the rig variants per character (with `hasRef` and the sheet approval `sheet {approved, approvedAt, review, poses}`), the episodes and the pipelines. |
 | `cts_series_update {series, title?, logline?, tone?, rules?, audience?, languages?, style?, music?, cast?, sets?}` | Changes the bible (validated). The pitches and the choice cannot be changed here. |
-| `cts_cast_get {series, cast?}` | The cast entry, the rig (parts, gestures, emotions), the variants (path, wall time, spend), `cts_rig_check` of the chosen rig and of each built variant, the reference and sheet paths. |
+| `cts_cast_get {series, cast?}` | The cast entry, the rig (parts, gestures, emotions), the variants (path, wall time, spend), `cts_rig_check` of the chosen rig and of each built variant, the sketch, master (`ref.png`), character sheet and rig sheet paths, and the sheet approval (`sheet {approved, approvedAt, review, poses}`). |
 | `cts_rig_set {series, cast, variant?, rig, parts}` | Writes `rig.json` and the part SVGs under `cast/<id>/` (or `variants/<v>/`) and returns the `cts_rig_check` result. `parts` maps a rig file (`parts/body.svg`, `body.svg` or `body`) to SVG text; a file not given must already exist. Nothing is written when the rig does not parse or a file is missing. |
 | `cts_rig_check {series, cast, variant?}` | (CTS-02) The part rules, all 8 mouths, 3 eye states and 4 brows. |
 | `cts_rig_build {series, episode, cast, path?}` | Job: builds one rig path (`claude-svg` = a, `raster` = c) as a variant, with the pose sheet and the time and spend in `variants.json`. |
@@ -95,7 +96,7 @@ The model work of the pipeline is done through the client task tools above; `doc
 
 `cts_status {series}` also lists the pipelines of the series: `state` (`running`, `waiting-on-user` after the pitches until `cts_pitch_choose`, or while Flow clips wait for a credit cap; `waiting-on-client`; `failed`; `done`), the current step and a hint.
 
-UNTESTED against the real services (checked with fakes): ComfyUI image jobs (`cast_sheet` in the app's flow, `set`; the sheet images were probed live with a hand-made body plan, not through a model task), Flow video (`flow.generateVideo` is new in `studios/flow.ts` and follows `flow_generate` in `flow-music-mcp/src/flow/tools.ts`), the player still of a clip (Chromium), the Chiptune and VibeTTS calls of the pipeline, and the pose sheets and renders (Chromium).
+UNTESTED against the real services (checked with fakes): ComfyUI image jobs (`cast_sheet` in the app's flow, `set`; the sheet images were probed live with a hand-made body plan, not through a model task), Flow video (`flow.generateVideo` is new in `studios/flow.ts` and follows `flow_generate` in `flow-music-mcp/src/flow/tools.ts`), the player still of a clip (Chromium), the VibeTTS calls of the pipeline, and the pose sheets and renders (Chromium).
 
 ## All tools
 
@@ -106,5 +107,5 @@ UNTESTED against the real services (checked with fakes): ComfyUI image jobs (`ca
 | Rigs | `cts_rig_set`, `cts_rig_check`, `cts_rig_build`, `cts_rig_compare`, `cts_rig_choose`, `cts_pose_make`, `cts_pose_sheet` |
 | Pipeline and clips | `cts_run_pipeline`, `cts_timeline_build`, `cts_lint`, `cts_clip_plan`, `cts_clip_generate`, `cts_clip_review` |
 | Voices and music | `cts_voice_plan`, `cts_voice_generate`, `cts_voice_status`, `cts_voice_quota`, `cts_music_generate` |
-| Budget and images | `cts_budget_set`, `cts_budget_get`, `cts_image_generate` |
+| Budget and images | `cts_budget_set`, `cts_budget_get`, `cts_media_config`, `cts_image_generate` |
 | Render | `cts_render`, `cts_render_status`, `cts_frames` |

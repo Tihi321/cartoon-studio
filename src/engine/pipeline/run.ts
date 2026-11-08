@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { pitchSchema } from '../../shared/contracts'
 import type { Bible, PipelineState } from '../../shared/contracts'
 import type { SeriesRunState } from '../../shared/protocol'
 import { localIso } from '../budget/spend'
@@ -116,7 +117,8 @@ export class Pipeline {
       const store = this.store
       if (!(await store.seriesExists(o.series))) {
         const b = o.brief ?? {}
-        const title = typeof b.title === 'string' && b.title ? b.title : o.series
+        const pitchTitle = (b.pitch as { title?: { en?: unknown } } | undefined)?.title?.en
+        const title = typeof b.title === 'string' && b.title ? b.title : typeof pitchTitle === 'string' && pitchTitle ? pitchTitle : o.series
         await store.createSeries(o.series, { title, ...(typeof b.idea === 'string' ? { logline: b.idea } : {}), ...(typeof b.ageMin === 'number' ? { ageMin: b.ageMin } : {}), ...(typeof b.ageMax === 'number' ? { ageMax: b.ageMax } : {}) })
       }
       const state = (await this.read(o.series, o.episode)) ?? emptyState(o.series, o.episode, this.now())
@@ -136,6 +138,18 @@ export class Pipeline {
       if (o.retry) {
         for (const [id, st] of Object.entries(state.steps)) if (st.state === 'failed') Object.assign(st, { state: 'pending', error: undefined, detail: 'retry', ...(id === 'safety' ? { attempts: 0 } : {}) })
         if (state.state === 'failed') state.state = 'idle'
+      }
+      // CTS-17: a given pitch (brief.pitch, the user's pick made earlier) is the chosen premise: no pitch step, no pause
+      const given = state.brief?.pitch
+      if (given !== undefined && o.from !== 'pitch') {
+        const pitch = pitchSchema.parse({ id: 'p1', ...(given as object) })
+        const bible = await store.readBible(o.series)
+        if (bible.chosenPitch !== pitch.id || !bible.pitches.some((p) => p.id === pitch.id)) {
+          await store.writeBible(o.series, { ...bible, pitches: [pitch], chosenPitch: pitch.id, chosenAt: this.now() })
+        }
+        for (const id of ['pitch', 'pitch_choice']) {
+          if (state.steps[id]?.state !== 'done') state.steps[id] = { state: 'done', endedAt: this.now(), detail: `given pitch ${pitch.id}` }
+        }
       }
       state.run = (state.run ?? 0) + 1
       await this.save(state, null)
