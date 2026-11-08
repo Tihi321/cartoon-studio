@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""B1: the character builder on the mini3d fixture: every standard control, six mouth slots, outlines; a buried mouth is E_FACE_HIDDEN; the same spec builds to the same hashes."""
+import copy
+import os
+import unittest
+
+import bpy
+
+from cts_blender import materials as M
+from cts_blender.build_character import SLOTS, build_character, read_spec, reset_scene
+from cts_blender.fingerprint import fingerprint
+from cts_blender.io import CtsError
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TILLY = os.path.join(ROOT, "tests", "fixtures", "mini3d", "cast", "tilly", "character.json")
+STANDARD = ["root", "squash", "body", "head", "arm_L", "arm_R", "leg_L", "leg_R", "ear_L1", "ear_R1", "lid_L", "lid_R", "pupil_L", "pupil_R", "mouth"]
+
+
+def build(spec):
+    reset_scene()
+    return build_character(spec, M.load_style())
+
+
+class Build(unittest.TestCase):
+    def test_legged_character_has_controls_slots_and_outlines(self):
+        spec = read_spec(TILLY)
+        rig = build(spec)["rig"]
+        for name in STANDARD:
+            self.assertIn(name, rig["controls"])
+        self.assertEqual(sorted(rig["slots"]), sorted(SLOTS))
+        shown = [k for k, ob in rig["slots"].items() if ob.scale.x > 0.5]
+        self.assertEqual(shown, ["rest"])
+        parts = [o for o in rig["objects"] if "cts_part" in o]
+        self.assertEqual(len(parts), len(spec["parts"]))
+        self.assertTrue(all(any(m.type == "SOLIDIFY" for m in o.modifiers) for o in parts))
+
+    def test_buried_mouth_is_face_hidden(self):
+        spec = read_spec(TILLY)
+        bad = copy.deepcopy(spec)
+        bad["face"]["mouth"]["at"][1] += 0.06
+        with self.assertRaises(CtsError) as e:
+            build(bad)
+        self.assertEqual(e.exception.code, "E_FACE_HIDDEN")
+
+    def test_same_spec_same_hashes(self):
+        spec = read_spec(TILLY)
+        a = fingerprint(build(spec)["rig"]["objects"])
+        b = fingerprint(build(spec)["rig"]["objects"])
+        self.assertEqual(a, b)
+
+
+if __name__ == "__main__":
+    unittest.main()

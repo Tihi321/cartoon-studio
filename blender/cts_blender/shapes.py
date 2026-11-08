@@ -9,7 +9,7 @@
     arc        [R, r, sweep degrees?]  (a tube along an arc in the XZ plane, default 140, bulging down like a smile, centred on its middle)
     spines     [rx, ry, rz]  (the radii of the surface the spines grow from; see `spines_mesh`)
 
-x is the character's right, -y is its front, z is up.
+z is up, -y is the front of a character; `_L` parts sit at -x (the viewer's left when the character faces the camera).
 """
 import math
 

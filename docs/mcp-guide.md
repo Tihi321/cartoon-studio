@@ -66,12 +66,15 @@ Who speaks: the hub rule (`config/voice.md`). Gemini (`flow_narrate`, engine `ge
 
 The render serves the player and the series folders itself on a random 127.0.0.1 port (same routes as the MCP server's `/preview/` and `/files/`), so it does not need the MCP server or its token. `state/encoder.json` caches the encoder probe (delete it to probe again). Sizes, fps, encoder order, frame format and loudness are in `config/render.md`.
 
-## Blender (CTS-18)
+## Blender (CTS-18, CTS-20)
 
 | Tool | What it does |
 |---|---|
 | `cts_blender_status {}` | Is Blender usable: the path of `config/blender.md` exists (`E_BLENDER_MISSING` if not), its version is the pinned major.minor (`E_BLENDER_VERSION` if not, unless `allowUntestedVersion`), and the GPU EEVEE would use (a headless `probe` run, `gpu.platform`). Returns `{ ok: true, path, version, gpu }` or `{ ok: false, code, message, path }`. The version is read once per engine start. |
 | `cts_blender_config {path?, version?, allowUntestedVersion?, chunkFrames?, preview?, final?}` | Reads `config/blender.md`; with fields it changes them (`preview` and `final` take `{width?, height?, samples?}`). Blender is checked again at the next use. |
+| `cts_character_set {series, cast, spec}` | Checks and writes the 3D spec `cast/<cast>/character.json` (`cts.character3d/1`, see `seed/style/toon-3d.md`); sets the cast member's `character` path in the bible. Returns `{ file, specHash }`. |
+| `cts_character_build {series, cast, sheet?}` | Builds the character with Blender: `character.blend`, `sheet.png` (turnaround, six mouths, blink, half lid, happy, sad, surprised, looks; pieces in `sheet/`) and `build.json` (spec hash, controls, determinism hashes, warnings). A queue job (`<series>--character_build--<cast>--r<n>`, `job.progress`); its result is JSON `{ ok: true, blend, sheet, warnings, buildSeconds }` or `{ ok: false, code, message }` for a spec Blender cannot build (`E_FACE_HIDDEN`, `E_SPEC_INVALID`). |
+| `cts_character_get {series, cast}` | The spec, `specHash`, the last `build.json`, `stale` (the spec changed since the build) and the `sheet.png` picture. |
 
 Every Blender run is `blender -b --factory-startup --python-exit-code 1 --python blender/run.py -- <job.json>` with `PYTHONNOUSERSITE=1`. The job is `{command, ...}`; `blender/run.py` prints `CTS {...}` lines (`progress`, `chunk`, `result`, `error`) that the runner (`src/engine/blender/runner.ts`) turns into progress events and the result. A non-zero exit without a result is `E_BLENDER_FAILED` with the last 40 log lines.
 

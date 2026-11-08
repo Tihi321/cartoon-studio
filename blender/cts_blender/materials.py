@@ -155,7 +155,7 @@ def add_outline(ob, width, style):
     s.use_even_offset = True
 
 
-def blob_shadow(name, radii, style, parent=None, alpha=0.42):
+def blob_shadow(name, radii, style, parent=None, alpha=0.42, collection=None):
     """A soft dark disc on the ground under a character or prop (the sun casts no shadows, so the hull is not shadowed by itself)."""
     import bmesh
 
@@ -205,7 +205,7 @@ def blob_shadow(name, radii, style, parent=None, alpha=0.42):
     bm.to_mesh(me)
     bm.free()
     ob = bpy.data.objects.new(name, me)
-    bpy.context.scene.collection.objects.link(ob)
+    (collection or bpy.context.scene.collection).objects.link(ob)
     ob.data.materials.append(mat)
     if parent:
         ob.parent = parent
