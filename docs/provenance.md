@@ -4,6 +4,16 @@ Cartoon Studio started from **Edu Studio** (`Tihi321/edu-game-studio`, the user'
 
 Totals at CTS-01: 143 files, 41 copied unchanged, 87 copied and changed, 15 new.
 
+## The Blender probe (HUB-30, CTS-18..29)
+
+Not copied from Edu: the 3D route started from a 15 s probe of Pip and Bruno in a park, made in the creative hub on 2026-11-08 (`.claude/temp/blender-probe/` there: `build_scene.py`, `render.py`, `notes.md`). The probe is the **origin** of three pieces of code, which were rewritten into this repository's structure and tested:
+
+- the **character and set builders** (`blender/cts_blender/build_character.py`, `build_set.py`, `shapes.py`): primitives on parented empties, the six-mouth slots shown by scale, inverted-hull outlines, blob shadows, and the ray test that came from the probe's buried-mouth bug (`E_FACE_HIDDEN`);
+- the **lip-sync** (`src/engine/anim/visemes.ts`): the probe's Croatian letter table (`lj`/`nj`/`dž` as one letter, vowel visemes, labials to `MBP`, `k g h` to the next vowel), the RMS voiced-segment matching and the 24 fps rules (a minimum hold of 2 frames, a lip closure shown for 2 frames); CTS-24 added the English grapheme table and whisper word times on top;
+- the **look** (`blender/cts_blender/materials.py`, `seed/style/style3d.json`): Diffuse, Shader to RGB, a constant two-stop ColorRamp and Emission, the `Standard` view transform, a sun without shadows, a sky gradient, and the 5.x compositor group used for the optional post effects.
+
+The probe also supplied the Blender 5.x gotchas collected in `blender/cts_blender/api5.py` and [blender.md](blender.md), and the render-time numbers (about 0.13 s a frame at 1080p on the AMD 8060S) that the pilot 3 acceptance criteria are based on. The acting library, the scene assembler and the engine side are new code.
+
 ## What was kept, renamed and replaced
 
 - **Engine core, kept:** `src/engine/store` (atomic writes, data folder, seed refresh, watcher, the data-folder lock), `queue` (jobs, scheduler), `logs`, `budget/spend.ts`, `agents`, `models` (client, mock, OpenAI-compatible, Anthropic, Gemini, router, registry, limiter, keys, custom providers), `summary.ts`, `transport.ts`, `cli.ts` (probe, key-set), `pipeline/llm.ts` (JSON extraction and schema helpers only), `mcp` (HTTP, server, stdio, relay, config, controller, client-task tools), `studios` (mcp-http, autostart, launch, config, VibeTTS, Chiptune Studio, Flow), `comfy` (client, graphs, TTS engines, audio save, custom workflows).

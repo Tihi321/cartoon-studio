@@ -1,13 +1,13 @@
 # Rules for agents working in this repository
 
-Cartoon Studio makes a series of cutout-puppet cartoons for children (Croatian and English tracks, local MP4 render). Read `README.md` for what it is, `ROADMAP.md` for what is done and what comes next, and `docs/provenance.md` for where the copied engine code came from. The big plan is `HUB-29` in the creative hub (`../creative-hub`); this repo only holds its own tickets.
+Cartoon Studio makes a series of 3D toon cartoons for children (Croatian and English tracks, local MP4 render): characters and sets are specs that Python scripts build and render in a headless Blender 5.2. Read `README.md` for what it is, `ROADMAP.md` for what is done and what comes next, `docs/blender.md` for the Blender backend and `docs/provenance.md` for where the copied engine code came from. The big plans are `HUB-29` and `HUB-30` (the 3D route) in the creative hub (`../creative-hub`); this repo only holds its own tickets.
 
 ## Stack and commands
 
-Electron 44, electron-vite, React 19, zustand, TypeScript strict, zod 4, Vitest, ESLint flat config, Yarn 4 (`nodeLinker: node-modules`), Node 24.
+Electron 44, electron-vite, React 19, zustand, TypeScript strict, zod 4, Vitest, ESLint flat config, Yarn 4 (`nodeLinker: node-modules`), Node 24; Blender 5.2 with its own Python (the scripts in `blender/`, GPL-3.0-or-later; no pip installs); the legacy Canvas 2D player and Playwright for `canvas` series.
 
 - Node is managed by fnm. If `node` or `yarn` is not on `PATH`, run `fnm exec --using default <command>`; `fnm exec yarn` can fail, so put the fnm default alias folder on `PATH` and run `yarn <script>`. Do not leave a test unrun because Node was missing.
-- Check your work with `yarn typecheck`, `yarn lint` and `yarn test` (the fast suite, no Chromium). A test that needs a browser goes in a `*.e2e.test.ts` file and runs in `yarn test:e2e` (it fails, not skips, without a browser). `yarn build` must keep working.
+- Check your work with `yarn typecheck`, `yarn lint` and `yarn test` (the fast suite: no Chromium, no Blender). A test that needs a browser or Blender goes in a `*.e2e.test.ts` file and runs in `yarn test:e2e` (it fails, not skips, without them); the Python tests in `blender/tests/` run with `yarn test:blender` in Blender's own Python. `yarn build` must keep working.
 - `yarn build:engine && node out/engine/index.js --mcp-only` starts the headless MCP server (port 7465). Point it at a scratch data folder (`CTS_DATA=.claude/temp/<name>`), never at `~/CartoonStudio`.
 
 ## Work in tickets
@@ -20,7 +20,7 @@ Electron 44, electron-vite, React 19, zustand, TypeScript strict, zod 4, Vitest,
 ## Rules
 
 - **The repository is public.** No keys, tokens, e-mail addresses, personal data, `~/CartoonStudio` content or Windows user-profile paths in any committed file. Sibling tools are found by relative paths (`../creative-hub`). Before a push run the A3 grep of the HUB-29 plan (`git grep` for a user-profile path prefix, the user name, an API-key prefix such as the OpenAI or Google ones): it must print nothing.
-- **Our own renderer.** The player is our own Canvas 2D runtime; the render is headless Chromium plus ffmpeg. Do not add a game-engine or animation library.
+- **Our own renderer, two backends.** A series renders with `renderer: "blender"` (the default for new work): headless Blender (EEVEE) driven by the scripts in `blender/` through a job JSON and `CTS {...}` stdout lines, then ffmpeg; characters and sets are specs built by code, never AI pictures. The older `renderer: "canvas"` is our own Canvas 2D player in headless Chromium plus ffmpeg; it is frozen (pilots 1 and 2, the `mini` fixture): no new features. Do not add a game engine, an animation library or a Python package: the Blender side uses only Blender's own Python and numpy. Every Blender 5.x API difference lives in `blender/cts_blender/api5.py`. Scripts under `blender/` carry the GPL-3.0-or-later SPDX line; the rest of the repository is MIT.
 - **Every interactive element has a `data-testid`**, in the studio UI and in the player, so Playwright can drive it.
 - **No "director" behaviour.** An agent working on a ticket does the assigned work directly: it does not re-plan an approved ticket, take over another agent's files or act as an orchestrator. (The product's own `showrunner` role is a different thing.)
 - Tools are named `cts_*`, the preload bridge is `window.cartoonstudio`, the file protocol is `cartoonstudio-file://`, the MCP port is 7465 (`CTS_MCP_PORT`, `CTS_MCP_TOKEN`), the data folder is `~/CartoonStudio` (`CTS_DATA`, `--data`; `CTS_SEED` for the seed; `CTS_AUTOSTART=0` turns off the auto-start of other tools).

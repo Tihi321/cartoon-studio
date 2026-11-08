@@ -14,6 +14,14 @@ Flat toon shading with a clean ink outline, close to a children's picture book:
 - A sun with no cast shadows, a soft **blob shadow** under each character, a sky gradient, no raytracing. `post` is `none` (default), `paper` (grain) or `posterize` (flat bands, crushes dark spines: avoid).
 - Choose palette colours with **clear value contrast** between neighbours (a light belly on a dark body, a pale muzzle). Avoid pure black and pure white in big areas.
 
+`style3d.json` (`cts.style3d/1`) holds these numbers; the default (the file the bible step writes) is:
+
+```jsonc
+{"schema": "cts.style3d/1", "toon": {"shade": 0.74, "threshold": 0.36}, "outline": {"colour": "#2b2118", "scale": 1}, "world": {"sky": {"top": "#86cdf0", "horizon": "#e4f6fb"}}, "sun": {"angle": [50, -10, -35], "energy": 3.2}, "samples": {"final": 16, "preview": 4}, "post": "none", "stepped": false}
+```
+
+`outline.scale` multiplies every outline width; `sun.angle` is the sun's rotation in degrees; `samples` are the EEVEE (TAA) samples of the final and the preview; `stepped: true` holds poses on twos for a stop-motion feel (off by default). A character's sheet and the episode both use this file, so change it before the sheets are approved, not after.
+
 ## A character spec (`cast/<id>/character.json`, `cts.character3d/1`)
 
 Units are metres, z is up, a character faces **-y** at rest, `_L` parts sit at **-x** (the viewer's left when the character faces the camera) and `_R` at +x. Rotations are degrees.

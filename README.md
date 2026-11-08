@@ -1,12 +1,16 @@
 # Cartoon Studio
 
-A desktop studio that makes **a series of cutout-puppet cartoons for children aged 4 to 8**, in the flat, paper-cutout style of South Park. The cast, the rigs and the sets are made once and reused; every episode (5 to 10 minutes) has a **Croatian and an English voice track over the same animation**, and the base animation is **rendered locally to MP4 at no cost**. A team of agent roles (showrunner, writer, character designer, background artist, voice director, composer, child-safety reviewer, frame critic) does the model work, through Claude Code over MCP (the `client` provider) or through local models.
+A desktop studio that makes **a series of 3D toon cartoons for children aged 4 to 8**. Characters and sets are **data** (JSON specs of simple shapes) that Python scripts build in a headless **Blender 5.2** and render with EEVEE; the cast and the sets are made once and reused, every episode (5 to 10 minutes) has a **Croatian and an English voice track over the same animation**, and the film is **rendered locally to MP4 at no cost**. A team of agent roles (showrunner, writer, character designer, background artist, voice director, composer, child-safety reviewer, frame critic) does the model work, through Claude Code over MCP (the `client` provider) or through local models.
 
-License: MIT.
+The older **Canvas puppet player** (flat paper-cutout puppets drawn by a headless Chromium) is **legacy and frozen**: it still renders the series made with it (`renderer: "canvas"`, the default of the bible field) and gets no new features. Its authoring path (Z-Image sheets, raster rigs, face patches, pose images, 2D sets) was retired in CTS-28.
+
+**Requirement for 3D:** Blender 5.2 installed on the machine (not bundled, not downloaded). The default path is `C:/Program Files/Blender Foundation/Blender 5.2/blender.exe`; change it in Settings or `config/blender.md`. Any other major.minor is refused (`E_BLENDER_VERSION`).
+
+**Licences:** the repository is MIT, except the [`blender/`](blender) folder (the scripts that `import bpy`), which is **GPL-3.0-or-later** (see `blender/LICENSE`). The engine starts Blender as a separate program and talks to it through a JSON file and stdout lines. See [docs/blender.md](docs/blender.md).
 
 ## Status
 
-Phase 1 (CTS-01..09) is built: the engine, contracts, Canvas player, timeline, render, voices, pipeline and studio UI, and pilot 1 was watched and judged good. Pilot 2 (CTS-10..17, see [ROADMAP.md](ROADMAP.md)) changes the method: the character sheet is a Z-Image image-to-image drawing over a rough sketch the app makes (the user approves it before anything is rigged), the rig is raster with image face patches (SVG drawing is an optional path), music comes from ComfyUI (ACE-Step) and sits at least 15 dB under the voice by measurement, and Flow is used only for the intro and outro videos. The pipeline order is pitch (skipped when `brief.pitch` is given) -> bible -> `cast_sheet` -> `sheet_review` (pause) -> rig -> poses (optional) -> set -> script -> safety -> voice -> music -> clips -> timeline -> preview -> frame review -> final render and mix check. See [docs/pipeline.md](docs/pipeline.md).
+Phase 1 (CTS-01..09) is built: the engine, contracts, Canvas player, timeline, render, voices, pipeline and studio UI. Pilots 1 and 2 (cutout puppets) were judged not good by the user on 2026-11-08, so the project moved to 3D (CTS-18..29, see [ROADMAP.md](ROADMAP.md)): a Blender render backend, character and set builders, an acting library (walks with planted feet, gestures, springs), six-viseme lip-sync from text, audio and whisper word times, and a pipeline for `renderer: "blender"` series. The pilot 3 run (Pip and Bruno, 60 s, hr and en) is tracked in the creative hub's `HUB-30` plan. The pipeline order of a 3D series is pitch (skipped when `brief.pitch` is given) -> bible -> `character` -> `sheet_review` (pause) -> `set3d` -> script -> safety -> voice -> music -> clips -> timeline -> assemble -> preview -> frame review -> final render and mix check. Music comes from ComfyUI (ACE-Step) and sits at least 15 dB under the voice by measurement; Flow is used only for the intro and outro videos. See [docs/pipeline.md](docs/pipeline.md).
 
 ## What is in the repository
 
@@ -14,9 +18,10 @@ Phase 1 (CTS-01..09) is built: the engine, contracts, Canvas player, timeline, r
 |---|---|
 | `src/engine/` | The headless engine: job queue and scheduler, agents and roles, model providers (`client`, `mock`, OpenAI-compatible for Strata and LM Studio, Anthropic, Gemini), budget, logs, the MCP server, and the clients of the other tools (ComfyUI, flow-music-mcp, VibeTTS). |
 | `src/main`, `src/preload`, `src/renderer` | The Electron app: main process, the `window.cartoonstudio` bridge, the React studio UI. |
-| `src/player/` | The Canvas puppet player. It is served by the engine at `/preview/`. |
+| `blender/` | The Blender side (GPL-3.0-or-later): `run.py`, `cts_blender/` (character and set builders, the acting library, the assembler, the render, the 5.x API shims) and its tests. |
+| `src/player/` | The Canvas puppet player (legacy, frozen), used for `canvas` series. It is served by the engine at `/preview/`. |
 | `seed/` | What a new data folder (`~/CartoonStudio`) starts from: `config/*.md` and the eight agents in `agents/`. |
-| `docs/` | `mcp-guide.md` (the MCP tools), `provenance.md` (where the code came from). |
+| `docs/` | `blender.md` (the Blender backend), `mcp-guide.md` (the MCP tools), `pipeline.md`, `contracts.md`, `provenance.md` (where the code came from). |
 | `scripts/` | Icons, the studio screenshot harness, the package check. |
 
 ## Run it
@@ -25,7 +30,9 @@ Needs Node 24 and Yarn 4. Under fnm, put the fnm default alias folder on `PATH`.
 
 ```
 yarn install
-yarn typecheck && yarn lint && yarn test     # the fast suite: mock provider, no browser, no real app
+yarn typecheck && yarn lint && yarn test     # the fast suite: mock provider, no browser, no Blender, no real app
+yarn test:blender                            # the Blender scripts, in Blender's own Python (needs Blender 5.2)
+yarn test:e2e                                # a real render: Blender (3D) and headless Chromium (canvas)
 yarn build:engine                            # out/engine/index.js and out/player/
 node out/engine/index.js --mcp-only          # headless: MCP on http://127.0.0.1:7465/mcp
 yarn dev                                     # the desktop app
@@ -35,11 +42,11 @@ yarn dist:installer                          # the Windows installer and portabl
 Point a scratch run at its own data folder with `CTS_DATA=<dir>`; the default is `~/CartoonStudio`. Connect Claude Code with
 `claude mcp add --transport http cartoon-studio http://127.0.0.1:7465/mcp`, then it can take the model calls of the agents (`cts_get_task`, `cts_submit_task`).
 
-Environment: `CTS_DATA`, `CTS_MCP_PORT`, `CTS_MCP_TOKEN`, `CTS_SEED`, `CTS_AUTOSTART` (`0` turns off the auto-start of ComfyUI).
+Environment: `CTS_DATA`, `CTS_MCP_PORT`, `CTS_MCP_TOKEN`, `CTS_SEED`, `CTS_AUTOSTART` (`0` turns off the auto-start of ComfyUI), `CTS_BLENDER_SCRIPTS` (the folder with `run.py`, for a non-standard layout).
 
 ## Cost
 
-The pilot is a **$0** run: the agents use `client/claude-code` or local models, voices are local (OmniVoice through ComfyUI for Croatian, Kokoro for English) unless the free Gemini quota fits, images come from local ComfyUI, and the render is local ffmpeg. `config/budget.md` caps paid spending at 0. Nothing paid is called without a cap you set.
+The pilot is a **$0** run: the agents use `client/claude-code` or local models, voices are local (OmniVoice through ComfyUI for Croatian, Kokoro for English) unless the free Gemini quota fits, characters and sets are built by code, ComfyUI only makes music (and optional concept art), and the render is local Blender plus ffmpeg. `config/budget.md` caps paid spending at 0. Nothing paid is called without a cap you set.
 
 ## Origin
 
