@@ -13,13 +13,13 @@
       "set": "park",
       "start": {
         "tilly": {
-          "mark": "left",
-          "facing": "right",
+          "mark": "right",
+          "facing": "left",
           "emotion": "happy"
         },
         "blobby": {
-          "mark": "right",
-          "facing": "left"
+          "mark": "left",
+          "facing": "right"
         }
       },
       "shot": "wide",
@@ -47,6 +47,34 @@
           "who": "tilly",
           "gesture": "point",
           "target": "oak",
+          "with": "prev"
+        },
+        {
+          "id": "b04",
+          "type": "camera",
+          "shot": "two",
+          "transition": "pan",
+          "seconds": 1
+        },
+        {
+          "id": "b05",
+          "type": "move",
+          "who": "tilly",
+          "to": "bench",
+          "seconds": 3
+        },
+        {
+          "id": "b06",
+          "type": "gesture",
+          "who": "tilly",
+          "gesture": "sit",
+          "target": "bench"
+        },
+        {
+          "id": "b07",
+          "type": "camera",
+          "shot": "cu-tilly",
+          "transition": "cut",
           "with": "prev"
         }
       ]

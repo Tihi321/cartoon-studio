@@ -6,7 +6,7 @@ automatic acting: lip-sync, blinks, talking accents, idle, and last the springs)
 write(ctx, scene): bakes them to keys on the Blender objects, one dense curve per animated channel, through api5.
 
 plan = { actor_id: { "actions": [ {"action": "walk", "t0": 0.0, "t1": 3.2, "params": {...}} ],
-                     "speaking": [[t0, t1]], "accents": [t], "blinks": [t], "mouth": [[t, "A"]], "listen": speaker_id } }
+                     "speaking": [[t0, t1]], "accents": [t], "blinks": [t], "mouth": [[t, "A"]], "listen": speaker_id | [speaker_ids] } }
 camera = [ {"action": "cut", "t0": 0, "t1": 0, "params": {"shot": "wide"}}, ... ]   (cut, pan, push, follow, shake_small)
 """
 import numpy as np
@@ -46,11 +46,12 @@ def build(ctx, plan, camera=None):
                 _run(ctx, ctx.actors[aid], a)
     # 2. listening: looks at the speaker and nods, for actors nobody gave a beat
     for aid, p in plan.items():
-        sp = p.get("listen")
-        if sp and sp in plan:
-            listener = ctx.actors[aid]
-            extra = listening_actions(ctx, listener, sp, plan[sp].get("speaking") or [], plan[sp].get("accents") or [], [a for a in acts[aid] if a["action"] == "look_at"])
-            acts[aid] = sorted(acts[aid] + extra, key=lambda a: (a["t0"], a["t1"]))
+        sps = p.get("listen")  # one speaker id, or a list of them
+        for sp in [sps] if isinstance(sps, str) else (sps or []):
+            if sp in plan and sp != aid:
+                listener = ctx.actors[aid]
+                extra = listening_actions(ctx, listener, sp, plan[sp].get("speaking") or [], plan[sp].get("accents") or [], [a for a in acts[aid] if a["action"] == "look_at"])
+                acts[aid] = sorted(acts[aid] + extra, key=lambda a: (a["t0"], a["t1"]))
     # 3. lip-sync first, so a laugh can open the mouth over it
     for aid, p in plan.items():
         if p.get("mouth"):

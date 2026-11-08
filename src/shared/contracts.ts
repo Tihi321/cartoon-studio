@@ -278,7 +278,7 @@ export const beatSchema = z.discriminatedUnion('type', [
     target: nameSchema.optional()
   }),
   z.strictObject({ ...beatBase, type: z.literal('look'), who: idSchema, target: idSchema }),
-  z.strictObject({ ...beatBase, type: z.literal('camera'), shot: nameSchema, transition: z.enum(['cut', 'pan']), seconds: z.number().positive().optional() }),
+  z.strictObject({ ...beatBase, type: z.literal('camera'), shot: nameSchema, transition: z.enum(['cut', 'pan', 'push']), seconds: z.number().positive().optional() }),
   z.strictObject({ ...beatBase, type: z.literal('pause'), seconds: z.number().positive() }),
   z.strictObject({ ...beatBase, type: z.literal('sfx'), cue: nameSchema }),
   z.strictObject({

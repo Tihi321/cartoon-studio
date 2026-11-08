@@ -303,7 +303,7 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
     ),
     def(
       'cts_timeline_build',
-      'Lip-sync every line of every language from its voice clip, then build timeline.<lang>.json for each language from the one script (same beat order, durations from the voices). Needs the voice step first (silent placeholders otherwise). Returns the durations, line and clip counts and warnings. cts_lint {requireAudio: true} must then have 0 errors.',
+      'Lip-sync every line of every language from its voice clip, then build timeline.<lang>.json for each language from the one script (same beat order, durations from the voices). A Blender series gets six-viseme lip-sync and cts.timeline3d/1 timelines (the same actions in the same order, times from the voices; cts_scene_assemble turns them into a scene). Needs the voice step first (silent placeholders otherwise). Returns the durations, line and clip counts and warnings. cts_lint {requireAudio: true} must then have 0 errors.',
       z.object({ series, episode }),
       async (a) => buildEpisodeTimelines(store(), a.series, a.episode)
     ),

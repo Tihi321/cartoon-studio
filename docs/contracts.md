@@ -164,7 +164,7 @@ The script is language-independent: scenes of beats with line ids; the words liv
 | `emote` | `who`, `emotion` |
 | `gesture` | `who`, `gesture` (one of the rig's gestures; in a Blender series an action of the acting library), `target?` (Blender series: a cast id, a prop id of the set or a mark: point at, sit on, look at) |
 | `look` | `who`, `target` |
-| `camera` | `shot` (a set shot), `transition` (`cut` or `pan`), `seconds?` (pan) |
+| `camera` | `shot` (a set shot, or in a Blender series a named camera or a computed shot: `wide`, `two`, `cu-<id>`, `ots-<a>-<b>`), `transition` (`cut`, `pan`, and `push` for a Blender series: a slow move in; the canvas player treats it as a pan), `seconds?` (pan, push; push defaults to 3) |
 | `pause` | `seconds` |
 | `sfx` | `cue` (a key of `sfx`) |
 | `music` | `cue`, `action` (`start` or `stop`), `gain?`, `fade?` |
@@ -435,6 +435,12 @@ Built by code. Node owns the timing (from each language's audio lengths); the Py
 }
 ```
 
+How `cts_timeline_build` fills it (`src/engine/anim/timeline3d.ts`): the beat clock (where a beat starts, how long it takes) is the function the canvas timeline uses too (`beatStart`, `beatDuration` in `timeline.ts`), so one script has one set of times whoever draws it. An acted opening starts after 0.5 s of idle; an opening clip or title card starts at 0. A gesture on a line takes the line's length, a gesture beat that runs `with: "prev"` the length of the beat before it, a lone gesture its default; every one is clamped to the `seconds.min` and `seconds.max` of the acting library (a long line is filled with `accents`, not with a longer gesture). A `move` is a `walk`, `hop` or `run` (by `style`, else the character's motion profile) to the mark; its `seconds` grows when the distance would need more than 1.4 times the character's nominal pace (a warning says so). `accents` are the word onsets of the manifest's `words` (else the words spread over the line); `blinks` are seeded per actor (2.5 to 5 s apart); `mouth` is the six-viseme lip-sync of each line with `rest` at the line's end. `shots` start with the scene's `shot` at 0, then the camera beats. A script has one scene in this version.
+
+### Assembly `episodes/<ep>/render/<lang>/assembly.json` (`cts.assembly/1`)
+
+Written by `cts_scene_assemble` next to `scene.blend`; not a contract the engine reads back. It holds `series`, `episode`, `lang`, `scriptHash`, `timelineHash`, the Blender version, `frames`, `size`, the set (`id`, `specHash`, `assetHash`), per actor `specHash` (sha1 of `character.json`), `assetHash` (sha1 of `character.blend`), `buildSpecHash` (the hash `build.json` recorded: a difference is a warning, the build is stale), `start`, `actions` (exactly the timeline's list) and counts of `blinks` and `accents`, `actionNames`, `shots` (each with the camera it resolved to: `loc`, `target`, `lens`), `titles`, key counts and `warnings`. Two languages of one episode have the same `actions` per actor and the same hashes; only the times differ.
+
 ### Acting library `blender/cts_blender/acting/library.json`
 
 Not a series file: the single source for the action names (`src/engine/blender/library.ts` reads it; the Python registry must list the same names). Per action: `name`, `kind` (`gesture`, `locomotion`, `react`, `camera`), `parts` (the controls it moves), `seconds` (`min`, `default`, `max`: the timeline never stretches a gesture past `max`), `overLine` (may run while the actor speaks; `W_GESTURE_OVER_LINE` when not), `needsTarget`, `params`, and `auto: true` for what the assembler makes by itself (`idle`, `blink`). A `gesture` beat or a line's `gesture` must name a non-automatic gesture or reaction.
@@ -509,13 +515,14 @@ Errors fail a step; warnings are listed. Every issue has `code`, `message`, `fil
 | `E_CAST_UNKNOWN` | a cast id in the script is not in the bible or the episode's cast |
 | `E_SET_UNKNOWN` | a scene's set is not in the bible, or a set file or layer is missing |
 | `E_MARK_UNKNOWN` / `E_SHOT_UNKNOWN` | a mark or shot is not in the set (Blender series: a shot is a camera of the set or a computed shot; a gesture `target` is a cast id, a prop or a mark, and `sit` needs a prop with a `seat`) |
+| `E_MARK_BLOCKED` | a mark of a 3D set lies inside the footprint of a prop (the radius per kind is in `props.json`): an actor would stand in the tree or the bench |
 | `E_GESTURE_UNKNOWN` | a gesture is not in the actor's rig (canvas series) |
 | `E_ACTION_UNKNOWN` | a gesture is not an action of the acting library (Blender series) |
 | `E_LINE_NO_TEXT` | a line (or title string) has no text in a language |
 | `E_LINE_NO_AUDIO` | a line has no audio in a language (checked when a voice manifest exists, or with `requireAudio`) |
 | `E_RIG_PART` | a rig file is missing, breaks the part rules, or lacks a mouth, eye or brow state |
 | `E_TIMELINE_STALE` | the timeline's `scriptHash` differs from `script.json` |
-| `E_MOUTH_SILENT` | canvas: an actor's mouth is not `rest` outside its own line intervals. Blender series: a spoken line has no six-viseme lip-sync file (or only `rest`, or no `MBP` where the text has a labial) |
+| `E_MOUTH_SILENT` | canvas and Blender timelines: an actor's mouth is not `rest` outside its own line intervals. Blender series also: a spoken line has no six-viseme lip-sync file (or only `rest`, or no `MBP` where the text has a labial) |
 | `E_LANG_ORDER` | the languages' timelines run different beat sequences |
 | `E_CLIP_MISSING` | a `clip` beat's file is missing and the clip is not marked `fallback` |
 | `W_LINE_LONG` | more than 12 words or more than 5 s |

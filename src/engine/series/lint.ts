@@ -6,6 +6,7 @@ import { character3dSchema, style3dSchema } from '../../shared/contracts'
 import type { Bible, Character3d, Episode, Lang, Rig, RigVariant, Set3d, SetFile, TextCatalog, Timeline, Timeline3d, VoiceManifest } from '../../shared/contracts'
 import { SIX_VISEMES, textHasLabial } from '../anim/visemes'
 import { loadActingLibrary } from '../blender/library'
+import { propFootprint } from '../blender/props'
 import type { ActingLibrary } from '../blender/library'
 import { loadRenderConfig } from '../render/ffmpeg'
 import { readMixCheck } from '../render/mixcheck'
@@ -23,6 +24,7 @@ export const LINT_CODES = [
   'E_CAST_UNKNOWN',
   'E_SET_UNKNOWN',
   'E_MARK_UNKNOWN',
+  'E_MARK_BLOCKED',
   'E_SHOT_UNKNOWN',
   'E_GESTURE_UNKNOWN',
   'E_ACTION_UNKNOWN',
@@ -360,6 +362,19 @@ async function lintSet3d(issues: Issues, store: SeriesStore, series: string, bib
     seen.add(prop.id)
   }
   if (set.id !== id) issues.add('E_SCHEMA', `set id "${set.id}" is not "${id}"`, { file: rel, where: 'id' })
+  // a mark inside a prop's footprint puts an actor into a tree or a bench
+  for (const [name, m] of Object.entries(set.marks)) {
+    for (const prop of set.props) {
+      let r: number
+      try {
+        r = propFootprint(prop.kind, prop.scale ?? 1)
+      } catch {
+        continue
+      }
+      const d = Math.hypot(m[0] - prop.at[0], m[1] - prop.at[1])
+      if (r > 0 && d < r) issues.add('E_MARK_BLOCKED', `mark "${name}" is inside the footprint of prop "${prop.id}" (${prop.kind}, radius ${r.toFixed(2)} m, ${d.toFixed(2)} m away): an actor would stand in it`, { file: rel, where: name })
+    }
+  }
   return set
 }
 
@@ -607,7 +622,10 @@ async function lintEpisode(
         lintMouth(issues, tl as Timeline, tlRel, lang)
         lintOffFrame(issues, tl as Timeline, tlRel, lang, setOf)
       }
-      if (b3d) await lintVisemes(issues, store, series, ep, lang, lines, texts.get(lang), manifests.get(lang))
+      if (b3d) {
+        lintMouth3d(issues, tl as Timeline3d, tlRel, lang)
+        await lintVisemes(issues, store, series, ep, lang, lines, texts.get(lang), manifests.get(lang))
+      }
       await lintMix(issues, p, ep, lang, store.dataDir)
     }
     stats.push(...(await lineStats(store, series, ep, lang, b3d ? null : ((tl as Timeline | undefined) ?? null), lines)))
@@ -665,6 +683,23 @@ async function lintMix(issues: Issues, p: SeriesPaths, ep: string, lang: Lang, d
 /** E_MOUTH_SILENT: the mouth of an actor is not `rest` outside every line interval of that actor. */
 function lintMouth(issues: Issues, tl: Timeline, file: string, lang: Lang): void {
   const tol = 1 / tl.fps.anim
+  for (const [actor, track] of Object.entries(tl.actors)) {
+    const own = tl.lines.filter((l) => l.speaker === actor).map((l) => [l.t0 - tol, l.t1 + tol] as const)
+    for (let i = 0; i < track.mouth.length; i++) {
+      const [t0, shape] = track.mouth[i]!
+      if (shape === 'rest') continue
+      const t1 = track.mouth[i + 1]?.[0] ?? tl.duration
+      if (!own.some(([a, b]) => t0 >= a - 1e-6 && t1 <= b + 1e-6)) {
+        issues.add('E_MOUTH_SILENT', `"${actor}" has the mouth "${shape}" from ${t0.toFixed(2)} s to ${t1.toFixed(2)} s outside any of its lines`, { file, where: actor, lang })
+        break
+      }
+    }
+  }
+}
+
+/** E_MOUTH_SILENT (Blender series): the mouth of an actor is `rest` outside every line interval of that actor (the same rule as the canvas timeline, at 24 fps). */
+function lintMouth3d(issues: Issues, tl: Timeline3d, file: string, lang: Lang): void {
+  const tol = 1 / tl.fps
   for (const [actor, track] of Object.entries(tl.actors)) {
     const own = tl.lines.filter((l) => l.speaker === actor).map((l) => [l.t0 - tol, l.t1 + tol] as const)
     for (let i = 0; i < track.mouth.length; i++) {

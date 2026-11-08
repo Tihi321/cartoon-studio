@@ -4,7 +4,8 @@ import type { CtsService } from '../service'
 import { ToolOutput } from '../mcp/tools'
 import type { Tool, ToolDef } from '../mcp/tools'
 import { SeriesStore } from '../series/service'
-import { enqueueBlenderJob, readBuildInfo, sha1 } from './jobs'
+import { LANGS } from '../../shared/contracts'
+import { enqueueBlenderJob, readBuildInfo, sha1, stillFrame } from './jobs'
 import { loadBlenderConfig, saveBlenderConfig } from './config'
 import { blenderRunnerFor } from './runner'
 
@@ -42,7 +43,39 @@ export function blenderTools(svc: CtsService, def: ToolDef): Tool[] {
       }
     )
   ,
-    ...assetTools(svc, def)
+    ...assetTools(svc, def),
+    ...sceneTools(svc, def)
+  ]
+}
+
+/** `cts_scene_assemble` and `cts_still` (CTS-25). */
+function sceneTools(svc: CtsService, def: ToolDef): Tool[] {
+  const series = z.string().describe('The series slug')
+  const episode = z.string().describe('The episode id')
+  return [
+    def(
+      'cts_scene_assemble',
+      'Assemble the 3D scene of a Blender episode from its timeline (cts_timeline_build first) and the built characters and set: appends the assets, puts the actors on their marks, runs the acting library on the timeline actions, keys mouths, lids and pupils, frames the camera shots (wide, two, cu-<id>, ots-<a>-<b> or a named camera of the set), adds the title cards, and writes episodes/<ep>/render/<lang>/scene.blend and assembly.json (actions per actor, shots, spec and asset hashes, warnings). One job per language (all languages of the bible when lang is left out); returns job ids at once (cts_wait, cts_status). The job result is JSON { ok: true, blend, assembly, frames, actions, shots, warnings } or { ok: false, code, message } (E_ACTION_UNKNOWN, E_MARK_UNKNOWN, E_SHOT_UNKNOWN, E_ASSEMBLE_FAILED).',
+      z.object({ series, episode, lang: z.enum(LANGS).optional() }),
+      async (a) => {
+        const st = new SeriesStore(svc.dataDir)
+        const langs = a.lang ? [a.lang] : (await st.readBible(a.series)).languages
+        const jobs: string[] = []
+        for (const lang of langs) jobs.push(await enqueueBlenderJob(svc, { series: a.series, task: 'scene_assemble', role: 'background-artist', unit: `${a.episode}-${lang}`, label: `assemble ${a.episode} ${lang}`, body: { episode: a.episode, lang } }))
+        return { jobs, hint: 'cts_wait {series}; then cts_still {series, episode, lang, t} to look at a frame, cts_render for the film' }
+      }
+    ),
+    def(
+      'cts_still',
+      'One frame of the assembled 3D scene as a PNG (default 960x540, 4 samples): a quick look at the staging at time t (seconds), or the keyframe of a Flow clip. Needs cts_scene_assemble first. Runs Blender and waits (a few seconds). Returns the file path and the picture.',
+      z.object({ series, episode, lang: z.enum(LANGS).default('hr'), t: z.number().min(0).describe('Seconds into the film'), width: z.number().int().positive().optional(), height: z.number().int().positive().optional(), samples: z.number().int().positive().optional() }),
+      async (a) => {
+        const r = await stillFrame({ dataDir: svc.dataDir, series: a.series, episode: a.episode, lang: a.lang, t: a.t, ...(a.width ? { width: a.width, height: a.height ?? Math.round((a.width * 9) / 16) } : {}), ...(a.samples ? { samples: a.samples } : {}) })
+        const buf = await fs.readFile(r.file)
+        const out = { file: r.file, frame: r.frame }
+        return buf.length > 4_000_000 ? out : new ToolOutput(out, [{ type: 'image', data: buf.toString('base64'), mimeType: 'image/png' }])
+      }
+    )
   ]
 }
 

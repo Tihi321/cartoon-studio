@@ -1,11 +1,12 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import type { CameraKey, EyeState, Facing, Lang, Lipsync, MouthShape, NumKey, Rig, SetFile, TextCatalog, Timeline, TimelineClip, VoiceLine, VoiceManifest } from '../../shared/contracts'
+import type { Beat, CameraKey, EyeState, Facing, Lang, Lipsync, MouthShape, NumKey, Rig, SetFile, TextCatalog, Timeline, TimelineClip, VoiceLine, VoiceManifest } from '../../shared/contracts'
 import { sampleNumber, sampleStep } from '../../shared/sample'
 import type { SeriesStore } from '../series/service'
 import { blinkTrack } from './blink'
 import { round3 } from './ease'
 import { LIPSYNC_FPS, restTrack, writeLineLipsync } from './lipsync'
+import { buildEpisodeTimelines3d } from './timeline3d'
 
 /**
  * The timeline builder: walks the beats of `script.json` with a clock and writes `timeline.<lang>.json` (the only input of the player and the
@@ -18,7 +19,8 @@ export const DEFAULT_SIZE: [number, number] = [1920, 1080]
 export const DEFAULT_SEED = 29
 export const DEFAULT_PAUSE_AFTER = 0.25
 export const WORDS_PER_SECOND = 2.5
-const DEFAULT_PAN_SECONDS = 1
+export const DEFAULT_PAN_SECONDS = 1
+export const DEFAULT_PUSH_SECONDS = 3
 /** The music `gain` is only a trim (1 = 0 dB, never above); the level under the voice comes from render.md `mix` (CTS-16). */
 const DEFAULT_MUSIC_GAIN = 1
 /** `duckTo` is this share of the music gain while a voice plays. The mix ignores it (it ducks by `mix.musicUnderVoiceDb`); 0.126 is the same 18 - 8 = 10 dB, kept so the timeline schema is unchanged. */
@@ -32,14 +34,41 @@ export interface TimelineOptions {
   onWarn?: (message: string) => void
 }
 
+/**
+ * The beat clock, shared by the canvas timeline and the 3D timeline (`timeline3d.ts`): where a beat starts and how long it takes. The clock
+ * is the same for both renderers, so a script runs on the same times whoever draws it. `lineSeconds` is the voice length of a line beat,
+ * `gestureSeconds` the length of a gesture (the rig's in canvas, the acting library's in 3D).
+ */
+export function beatStart(beat: Beat, cursor: number, prevStart: number): number {
+  return beat.with === 'prev' ? prevStart : cursor
+}
+
+export function beatDuration(beat: Beat, spans: { lineSeconds?: number; gestureSeconds?: number } = {}): number {
+  switch (beat.type) {
+    case 'line':
+      return (spans.lineSeconds ?? 0) + (beat.pauseAfter ?? DEFAULT_PAUSE_AFTER)
+    case 'gesture':
+      return spans.gestureSeconds ?? 0
+    case 'camera':
+      return beat.transition === 'cut' ? 0 : (beat.seconds ?? (beat.transition === 'push' ? DEFAULT_PUSH_SECONDS : DEFAULT_PAN_SECONDS))
+    case 'move':
+    case 'pause':
+    case 'title':
+    case 'clip':
+      return beat.seconds
+    default:
+      return 0
+  }
+}
+
 export const resolveSeed = (seed?: number): number => {
   if (seed !== undefined) return Math.trunc(seed)
   const env = Number(process.env.CTS_SEED)
   return Number.isFinite(env) && process.env.CTS_SEED ? Math.trunc(env) : DEFAULT_SEED
 }
 
-const posix = (...parts: string[]) => path.posix.join(...parts.map((p) => p.replace(/\\/g, '/')))
-const exists = (file: string) => fs.stat(file).then((s) => s.isFile(), () => false)
+export const posix = (...parts: string[]) => path.posix.join(...parts.map((p) => p.replace(/\\/g, '/')))
+export const exists = (file: string) => fs.stat(file).then((s) => s.isFile(), () => false)
 
 /** Inserts a key keeping time order; a key at the same time is replaced. */
 function put<T extends readonly [number, ...unknown[]]>(track: T[], key: T): void {
@@ -85,7 +114,7 @@ const POSE_TO = 0.8
 
 const wordCount = (s: string) => s.split(/\s+/).filter(Boolean).length
 
-function voiceSeconds(entry: VoiceLine | undefined, text: TextCatalog | null, lineId: string): number {
+export function voiceSeconds(entry: VoiceLine | undefined, text: TextCatalog | null, lineId: string): number {
   if (entry && entry.seconds > 0) return entry.seconds
   const words = wordCount(text?.lines[lineId]?.text ?? '')
   return Math.max(0.5, words / WORDS_PER_SECOND)
@@ -205,7 +234,7 @@ export async function buildTimeline(store: SeriesStore, series: string, episode:
 
     let prevStart = cursor
     for (const beat of scene.beats) {
-      const start = beat.with === 'prev' ? prevStart : cursor
+      const start = beatStart(beat, cursor, prevStart)
       let dur = 0
       switch (beat.type) {
         case 'line': {
@@ -236,7 +265,7 @@ export async function buildTimeline(store: SeriesStore, series: string, episode:
             })
             if (!a.mouth.some((k) => Math.abs(k[0] - round3(end)) < 1e-6)) put(a.mouth, [end, 'rest'])
           } else warn(`line "${beat.line}": speaker "${beat.speaker}" is not in the cast`)
-          dur = seconds + (beat.pauseAfter ?? DEFAULT_PAUSE_AFTER)
+          dur = beatDuration(beat, { lineSeconds: seconds })
           lines.push({ id: beat.line, speaker: beat.speaker, t0: round3(start), t1: round3(start + seconds) })
           if (entry && entry.status === 'ok') audio.push({ kind: 'voice', line: beat.line, file: posix('episodes', episode, entry.file), t: round3(start), gain: 1 })
           break
@@ -259,7 +288,7 @@ export async function buildTimeline(store: SeriesStore, series: string, episode:
             if (Math.abs(tx - fx) > 1e-6) put(a.facing, [start, tx > fx ? 'right' : 'left'])
             a.locked = false
           }
-          dur = beat.seconds
+          dur = beatDuration(beat)
           break
         }
         case 'turn': {
@@ -280,7 +309,7 @@ export async function buildTimeline(store: SeriesStore, series: string, episode:
         }
         case 'gesture': {
           const a = actor(beat.who)
-          if (a) dur = playGesture(a, beat.gesture, start)
+          if (a) dur = beatDuration(beat, { gestureSeconds: playGesture(a, beat.gesture, start) })
           break
         }
         case 'look': {
@@ -294,8 +323,8 @@ export async function buildTimeline(store: SeriesStore, series: string, episode:
         case 'camera': {
           const shot = shotKey(beat.shot)
           const target = { center: [shot.center[0], shot.center[1]] as [number, number], zoom: shot.zoom }
-          if (beat.transition === 'pan') {
-            const seconds = beat.seconds ?? DEFAULT_PAN_SECONDS
+          if (beat.transition !== 'cut') {
+            const seconds = beatDuration(beat)
             const last = camera[camera.length - 1]!
             if (Math.abs(last.t - start) < 1e-9) camera[camera.length - 1] = { ...last, ease: 'inOut' }
             else camera.push({ t: round3(start), center: [...last.center], zoom: last.zoom, ease: 'inOut' })
@@ -305,7 +334,7 @@ export async function buildTimeline(store: SeriesStore, series: string, episode:
           break
         }
         case 'pause':
-          dur = beat.seconds
+          dur = beatDuration(beat)
           break
         case 'sfx': {
           const file = script.sfx[beat.cue]
@@ -334,12 +363,12 @@ export async function buildTimeline(store: SeriesStore, series: string, episode:
           break
         }
         case 'title': {
-          dur = beat.seconds
+          dur = beatDuration(beat)
           titles.push({ id: beat.id, text: text?.strings[beat.key] ?? beat.key, t0: round3(start), t1: round3(start + dur) })
           break
         }
         case 'clip': {
-          dur = beat.seconds
+          dur = beatDuration(beat)
           clips.push(await resolveClip(store, series, episode, beat.clip, beat.audio, start, dur, episodeClips.clips, seriesClips.clips))
           break
         }
@@ -399,7 +428,7 @@ async function lipsyncOf(store: SeriesStore, series: string, episode: string, la
 }
 
 /** A clip beat -> the timeline entry: the episode's `clips/` first, then the series' `clips/`; a missing file (or a dropped clip) is a fallback. */
-async function resolveClip(
+export async function resolveClip(
   store: SeriesStore,
   series: string,
   episode: string,
@@ -455,6 +484,7 @@ export interface EpisodeBuildSummary {
  */
 export async function buildEpisodeTimelines(store: SeriesStore, series: string, episode: string, opts: TimelineOptions = {}): Promise<EpisodeBuildSummary> {
   const bible = await store.readBible(series)
+  if (bible.renderer === 'blender') return buildEpisodeTimelines3d(store, series, episode, opts)
   const script = await store.readScript(series, episode)
   const p = store.paths(series)
   const lineIds = [...new Set(script.scenes.flatMap((s) => s.beats.flatMap((b) => (b.type === 'line' ? [b.line] : []))))]

@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { buildEpisodeTimelines, buildTimeline } from '../src/engine/anim/timeline'
 import { lintSeries } from '../src/engine/series/lint'
 import { SeriesStore } from '../src/engine/series/service'
+import { loadActingLibrary } from '../src/engine/blender/library'
 import { installMini } from './fixtures/mini'
+import { installMini3d } from './fixtures/mini3d'
 
 let dir: string | undefined
 afterEach(async () => {
@@ -45,5 +47,44 @@ describe('timeline builder', () => {
     const over = await buildTimeline(store, 'mini', 'ep00-mini', 'hr')
     expect(over.lines[1]!.t0).toBe(over.lines[0]!.t0)
     expect(over.lines[2]!.t0).toBeCloseTo(over.lines[0]!.t0 + 1.2 + 0.3, 5)
+  })
+
+  it('a Blender series gets the same actions in the same order in both languages with different times, gestures within the manifest limits, and the mouth shut outside every line', async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'cts-timeline3d-'))
+    await installMini3d(dir)
+    const store = new SeriesStore(dir)
+    await buildEpisodeTimelines(store, 'mini3d', 'ep00-mini3d')
+    const hr = await store.readTimeline3d('mini3d', 'ep00-mini3d', 'hr')
+    const en = await store.readTimeline3d('mini3d', 'ep00-mini3d', 'en')
+    const order = (tl: typeof hr) => Object.entries(tl.actors).flatMap(([id, a]) => a.actions.map((x) => `${id}:${x.beat}:${x.action}`))
+    expect(order(hr)).toEqual(order(en))
+    expect(order(hr)).toEqual(['tilly:b01:wave', 'tilly:b03:point', 'tilly:b05:walk', 'tilly:b06:sit'])
+    expect(hr.beats!.map((b) => b.id)).toEqual(en.beats!.map((b) => b.id))
+    expect(hr.duration).toBeGreaterThan(en.duration)
+    expect(hr.actors.tilly!.actions[0]!.t1 - hr.actors.tilly!.actions[0]!.t0).not.toBe(en.actors.tilly!.actions[0]!.t1 - en.actors.tilly!.actions[0]!.t0)
+    const lib = loadActingLibrary()
+    for (const tl of [hr, en]) {
+      for (const a of Object.values(tl.actors)) {
+        for (const x of a.actions) {
+          const spec = lib.byName.get(x.action)!
+          expect(x.t1 - x.t0, `${x.action} in ${tl.lang}`).toBeGreaterThanOrEqual(spec.seconds.min - 1e-6)
+          if (spec.kind !== 'locomotion') expect(x.t1 - x.t0, `${x.action} in ${tl.lang}`).toBeLessThanOrEqual(spec.seconds.max + 1e-6)
+        }
+      }
+      expect(tl.shots.map((k) => k.shot)).toEqual(['wide', 'two', 'cu-tilly'])
+    }
+    const lint = await lintSeries(store, 'mini3d', { episode: 'ep00-mini3d', requireAudio: true })
+    expect(lint.errors).toEqual([])
+    // every non-rest mouth key lies inside a line of its own actor
+    for (const tl of [hr, en]) {
+      for (const [id, a] of Object.entries(tl.actors)) {
+        const own = tl.lines.filter((l) => l.speaker === id)
+        a.mouth.forEach(([t, v], i) => {
+          if (v === 'rest') return
+          const t1 = a.mouth[i + 1]?.[0] ?? tl.duration
+          expect(own.some((l) => t >= l.t0 - 1e-6 && t1 <= l.t1 + 1 / 24 + 1e-6), `${id} ${v} at ${t} in ${tl.lang}`).toBe(true)
+        })
+      }
+    }
   })
 })
