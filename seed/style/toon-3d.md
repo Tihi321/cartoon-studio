@@ -178,6 +178,48 @@ Bruno, a slow stocky hedgehog (waddle, spines on the back and the head, tempo 0.
 }
 ```
 
+## A set spec (`sets/<id>/set3d.json`, `cts.set3d/1`)
+
+A set is a ground, a sky, props from a small kit (round and cone trees, bush, bench with a seat, rock, flowers, fence, house, cloud), marks (ground points actors stand on or walk to) and named cameras. Far away is a larger y. The prompt `set-spec` has the kit table. The park of Pip and Bruno:
+
+```json
+{
+  "schema": "cts.set3d/1",
+  "id": "park",
+  "ground": {"size": [40, 30], "colour": "#7cc35a", "patches": [{"shape": "rect", "at": [0, 0.7], "size": [12, 1.8], "colour": "#efd9a4"}]},
+  "sky": {"top": "#86cdf0", "horizon": "#e4f6fb"},
+  "props": [
+    {"id": "oak", "kind": "tree_round", "at": [-4, 4.2], "scale": 1.4},
+    {"id": "bench", "kind": "bench", "at": [2.2, 2.6], "rot": -12, "seat": {"height": 0.45, "at": [0, -0.1]}},
+    {"id": "pine1", "kind": "tree_cone", "at": [5.5, 9]},
+    {"id": "pine2", "kind": "tree_cone", "at": [-4.5, 14]},
+    {"id": "pine3", "kind": "tree_cone", "at": [12, 10]},
+    {"id": "round1", "kind": "tree_round", "at": [-8, 11]},
+    {"id": "round2", "kind": "tree_round", "at": [9, 13]},
+    {"id": "bush1", "kind": "bush", "at": [4.6, 3.4], "scale": 0.9},
+    {"id": "bush2", "kind": "bush", "at": [-1.8, 5]},
+    {"id": "bush3", "kind": "bush", "at": [-6.5, 2.6], "scale": 1.1},
+    {"id": "flowers1", "kind": "flowers", "at": [-1.2, 3.4], "scale": 1.2},
+    {"id": "flowers2", "kind": "flowers", "at": [1.2, 5.2]},
+    {"id": "rock1", "kind": "rock", "at": [-2.4, 2.0], "scale": 0.8},
+    {"id": "cloud1", "kind": "cloud", "at": [-10, 30], "scale": 1.3},
+    {"id": "cloud2", "kind": "cloud", "at": [8, 34], "scale": 1.3},
+    {"id": "cloud3", "kind": "cloud", "at": [20, 28], "scale": 1.1}
+  ],
+  "marks": {
+    "left": [-2.5, 0],
+    "center": [0, 0],
+    "right": [2.5, 0],
+    "bench": [2.2, 1.8],
+    "oak": [-3.0, 2.8]
+  },
+  "cameras": {
+    "wide": {"loc": [0, -6, 1.4], "target": [0, 0, 0.8], "lens": 32},
+    "bench": {"loc": [2.2, -3.2, 1.1], "target": [2.2, 2.5, 0.55], "lens": 40}
+  }
+}
+```
+
 ## The sheet
 
-`cts_character_build` writes `cast/<id>/sheet.png` (2048 x 1024): row 1 front, three-quarter, side, back; row 2 the six mouths, blink, half lid; row 3 neutral, happy, sad, surprised, look left, look right. The pieces are in `cast/<id>/sheet/`. Read it with your eyes (vision) and check: the colours match the bible's `look`, the silhouette reads, the eyes and mouth sit on the face, every mouth shape differs, the lids cover the eyes, no part floats or pokes through another, the back and side look finished. Fix the spec and build again, **at most two revisions**; then the user decides.
+`cts_character_build` writes `cast/<id>/sheet.png` (2048 x 1024): row 1 front, three-quarter, side, back; row 2 the six mouths, blink, half lid; row 3 neutral, happy, sad, surprised, look left, look right. The pieces are in `cast/<id>/sheet/`. A set sheet (`sets/<id>/sheet.png`, 2048 x 1152) has four views: auto wide, two stand-ins on the first two marks, then the first two named cameras. Read it with your eyes (vision) and check: the colours match the bible's `look`, the silhouette reads, the eyes and mouth sit on the face, every mouth shape differs, the lids cover the eyes, no part floats or pokes through another, the back and side look finished. Fix the spec and build again, **at most two revisions**; then the user decides.

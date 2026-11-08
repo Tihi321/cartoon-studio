@@ -10,7 +10,8 @@ import { BlenderError } from '../src/engine/blender/runner'
 import type { BlenderRunner } from '../src/engine/blender/runner'
 import type { CtsService } from '../src/engine/service'
 import { SeriesStore } from '../src/engine/series/service'
-import { character3dSchema, style3dSchema } from '../src/shared/contracts'
+import { character3dSchema, PROP_KINDS, set3dSchema, style3dSchema } from '../src/shared/contracts'
+import { loadPropKit, propFootprint } from '../src/engine/blender/props'
 import { installMini3d } from './fixtures/mini3d'
 
 /** CTS-20/21: the asset tools and jobs against a fake Blender runner: spec in, job result out, spec mistakes come back as the result. */
@@ -44,10 +45,17 @@ describe('character tools and job', () => {
     expect(style3dSchema.parse(seed).toon.shade).toBe(0.74)
   })
 
-  it('the examples in seed/style/toon-3d.md (Pip and Bruno) are valid character specs', async () => {
+  it('the examples in seed/style/toon-3d.md (Pip, Bruno, the park) are valid specs', async () => {
     const md = await readFile(path.resolve(__dirname, '../seed/style/toon-3d.md'), 'utf8')
     const blocks = [...md.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => JSON.parse(m[1]!) as unknown)
-    expect(blocks.map((b) => character3dSchema.parse(b).id)).toEqual(['pip', 'bruno'])
+    expect(blocks.slice(0, 2).map((b) => character3dSchema.parse(b).id)).toEqual(['pip', 'bruno'])
+    expect(set3dSchema.parse(blocks[2]).id).toBe('park')
+  })
+
+  it('the prop kit lists exactly the kinds of the contract, with footprints a lint can read', () => {
+    expect(Object.keys(loadPropKit()).sort()).toEqual([...PROP_KINDS].sort())
+    expect(propFootprint('tree_round', 2)).toBeCloseTo(0.9)
+    expect(propFootprint('cloud')).toBe(0)
   })
 
   it('cts_character_set checks the spec and the id; the build passes spec, outDir and the series look to Blender', async () => {

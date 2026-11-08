@@ -1,0 +1,15 @@
+{
+  "schema": "cts.prop-kit/1",
+  "note": "The prop kit of the set builder. footprint: the radius in metres (at scale 1) of the ground the prop takes, so a mark or a walk should stay outside it (the lint of CTS-21 follow-ups and the builder's own warning read it). colours: the keys a set may override in a prop's `colours`. Heights are not listed: a cloud floats, a flower patch is flat.",
+  "kinds": {
+    "tree_round": { "footprint": 0.45, "colours": ["trunk", "leaves", "leaves2"] },
+    "tree_cone": { "footprint": 0.4, "colours": ["trunk", "leaves"] },
+    "bush": { "footprint": 0.8, "colours": ["leaves"] },
+    "bench": { "footprint": 0.7, "colours": ["wood", "legs"] },
+    "rock": { "footprint": 0.55, "colours": ["stone"] },
+    "flowers": { "footprint": 0.0, "colours": ["a", "b", "c"] },
+    "fence": { "footprint": 1.6, "colours": ["wood"] },
+    "house": { "footprint": 2.2, "colours": ["walls", "roof", "door"] },
+    "cloud": { "footprint": 0.0, "colours": ["cloud"] }
+  }
+}

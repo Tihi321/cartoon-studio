@@ -15,7 +15,7 @@ import math
 
 import bmesh
 import bpy
-from mathutils import Matrix, Vector
+from mathutils import Euler, Matrix, Vector
 
 from .io import CtsError
 
@@ -206,3 +206,27 @@ def empty(name, parent=None, loc=(0, 0, 0), rot_deg=(0, 0, 0), size=0.05, collec
     e.location = loc
     e.rotation_euler = tuple(math.radians(a) for a in rot_deg)
     return e
+
+
+def cylinder(size, seg=32):
+    """[rx, ry, height]: an upright cylinder (a disc patch of ground, a pillar), centred."""
+    rx, ry, h = size
+    bm = bmesh.new()
+    bmesh.ops.create_cone(bm, cap_ends=True, cap_tris=False, segments=seg, radius1=1.0, radius2=1.0, depth=h)
+    bmesh.ops.scale(bm, vec=Vector((rx, ry, 1.0)), verts=bm.verts)
+    return bm
+
+
+def add_box(bm, size, loc=(0, 0, 0), rot_deg=(0, 0, 0)):
+    """Adds a box to a bmesh (many boards in one mesh: a fence, a bench)."""
+    m = Matrix.LocRotScale(Vector(loc), Euler(tuple(math.radians(a) for a in rot_deg)), Vector(size))
+    bmesh.ops.create_cube(bm, size=1.0, matrix=m)
+
+
+def add_ellipsoid(bm, radii, loc=(0, 0, 0), seg=20):
+    m = Matrix.Translation(Vector(loc)) @ Matrix.Diagonal(Vector((*radii, 1.0)))
+    bmesh.ops.create_uvsphere(bm, u_segments=seg, v_segments=seg // 2, radius=1.0, matrix=m)
+
+
+def new_bm():
+    return bmesh.new()

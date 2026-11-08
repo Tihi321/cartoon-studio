@@ -9,7 +9,7 @@ import importlib
 COMMANDS = {}
 
 # modules that register commands; the later tickets append to this list
-COMMAND_MODULES = ["probe", "build_character", "sheets"]
+COMMAND_MODULES = ["probe", "build_character", "build_set", "sheets"]
 
 
 def command(name):

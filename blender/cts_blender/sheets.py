@@ -277,6 +277,86 @@ def character_sheet(rig, spec, style, out_dir):
     return {"file": sheet, "tiles": sorted(tiles), "seconds": round(time.perf_counter() - t0, 2)}
 
 
+def _aim_camera(cam, loc, target, lens):
+    cam.data.lens = lens
+    cam.location = tuple(loc)
+    cam.rotation_euler = (Vector(target) - Vector(loc)).to_track_quat("-Z", "Y").to_euler()
+
+
+def _dummy(name, at, yaw_deg):
+    """A stand-in figure (1 m tall) for the set sheet: red body and head, so a mark and the scale can be judged."""
+    from . import shapes as S
+
+    mat = M.flat("#d9503f")
+    root = S.empty(name, loc=(at[0], at[1], 0.0), rot_deg=(0, 0, yaw_deg))
+    S.make_object(name + "_b", S.ellipsoid([0.2, 0.17, 0.3]), mat, root, (0, 0, 0.32))
+    S.make_object(name + "_h", S.ellipsoid([0.2, 0.18, 0.18]), mat, root, (0, 0, 0.82))
+    return root
+
+
+def set_sheet(spec, style, out_dir):
+    """Four views of a set into `sheet.png` (2048 x 1152, pieces in `sheet/`): wide, two (stand-ins on the first two marks), and the first two
+    named cameras (a computed left and right view when the set has fewer). Returns {file, tiles, seconds}."""
+    import math
+
+    t0 = time.perf_counter()
+    sc = bpy.context.scene
+    st = dict(style)
+    st["post"] = "none"
+    M.apply_look(sc, st, "final", sky=spec["sky"])
+    sc.render.resolution_percentage = 100
+    sc.render.resolution_x, sc.render.resolution_y = 1024, 576
+    cd = bpy.data.cameras.new("sheet_cam_p")
+    cam = bpy.data.objects.new("sheet_cam_p", cd)
+    sc.collection.objects.link(cam)
+    sc.camera = cam
+    marks = list(spec["marks"].items())
+    pts = [m[1] for m in marks] or [[0, 0]]
+    cx, cy = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
+    spread = max(p[0] for p in pts) - min(p[0] for p in pts)
+    views = []
+    dist = max(5.6, spread * 1.5 + 3.0)
+    views.append(("AUTO WIDE", "wide", (cx, cy - dist, 1.5), (cx, cy, 0.8), 32))
+    if len(marks) >= 2:
+        a, b = marks[0][1], marks[1][1]
+        mx, my = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
+        d = max(3.4, math.hypot(a[0] - b[0], a[1] - b[1]) * 1.1 + 2.0)
+    else:
+        a = b = (cx, cy)
+        mx, my, d = cx, cy, 3.4
+    views.append(("AUTO TWO", "two", (mx, my - d, 1.25), (mx, my, 0.7), 40))
+    named = list(spec.get("cameras", {}).items())[:2]
+    for name, c in named:
+        views.append((name.upper(), f"cam_{name}", c["loc"], c["target"], c["lens"]))
+    fallback = [("LEFT", "view_left", (cx - dist * 0.7, cy - dist * 0.7, 1.4), (cx, cy, 0.8), 32), ("RIGHT", "view_right", (cx + dist * 0.7, cy - dist * 0.7, 1.4), (cx, cy, 0.8), 32)]
+    views += fallback[: 4 - len(views)]
+    parts_dir = os.path.join(out_dir, "sheet")
+    os.makedirs(parts_dir, exist_ok=True)
+    dummies = []
+    canvas = np.ones((1152, 2048, 4), dtype=np.float32)
+    tiles = []
+    for i, (label, name, loc, target, lens) in enumerate(views):
+        if name == "two" and len(marks) >= 2:
+            dummies = [_dummy("dummy_a", a, 0), _dummy("dummy_b", b, 0)]
+        _aim_camera(cam, loc, target, lens)
+        path = os.path.join(parts_dir, f"{name}.png")
+        sc.render.filepath = path
+        bpy.ops.render.render(write_still=True)
+        for d_ in dummies:
+            for ch in list(d_.children) + [d_]:
+                bpy.data.objects.remove(ch)
+        dummies = []
+        tile = load_pixels(path)
+        y0, x0 = (i // 2) * 576, (i % 2) * 1024
+        canvas[y0 : y0 + 576, x0 : x0 + 1024] = tile
+        draw_label(canvas, label, x0 + 10, y0 + 10)
+        tiles.append(name)
+        progress(i + 1, 4, f"sheet {name}")
+    sheet = os.path.join(out_dir, "sheet.png")
+    save_pixels(sheet, canvas)
+    return {"file": sheet, "tiles": tiles, "seconds": round(time.perf_counter() - t0, 2)}
+
+
 @command("sheet")
 def sheet_command(job):
     """job: {kind: "character", blend, spec, style?, outDir} re-renders a sheet from a built .blend."""

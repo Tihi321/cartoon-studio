@@ -7,6 +7,7 @@ import unittest
 import bpy
 
 from cts_blender import materials as M
+from cts_blender import build_set as bs
 from cts_blender.build_character import SLOTS, build_character, read_spec, reset_scene
 from cts_blender.fingerprint import fingerprint
 from cts_blender.io import CtsError
@@ -47,6 +48,27 @@ class Build(unittest.TestCase):
         a = fingerprint(build(spec)["rig"]["objects"])
         b = fingerprint(build(spec)["rig"]["objects"])
         self.assertEqual(a, b)
+
+
+class BuildSet(unittest.TestCase):
+    def test_park_has_props_marks_cameras_seat_and_builds_the_same_twice(self):
+        spec = bs.read_spec(os.path.join(ROOT, "tests", "fixtures", "mini3d", "sets", "park", "set3d.json"))
+        reset_scene()
+        a = bs.build_set(spec, M.load_style())
+        names = {o.name for o in a["objects"]}
+        for want in ("park_oak", "park_bench", "park_bench_seat", "park_mark_bench", "park_cam_bench", "park_ground"):
+            self.assertIn(want, names)
+        self.assertEqual(a["warnings"], [])
+        fa = fingerprint(a["objects"])
+        reset_scene()
+        b = bs.build_set(spec, M.load_style())
+        self.assertEqual(fa, fingerprint(b["objects"]))
+        bad = copy.deepcopy(spec)
+        bad["props"][0]["kind"] = "castle"
+        reset_scene()
+        with self.assertRaises(CtsError) as e:
+            bs.build_set(bad, M.load_style())
+        self.assertEqual(e.exception.code, "E_SET_INVALID")
 
 
 if __name__ == "__main__":

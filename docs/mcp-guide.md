@@ -66,7 +66,7 @@ Who speaks: the hub rule (`config/voice.md`). Gemini (`flow_narrate`, engine `ge
 
 The render serves the player and the series folders itself on a random 127.0.0.1 port (same routes as the MCP server's `/preview/` and `/files/`), so it does not need the MCP server or its token. `state/encoder.json` caches the encoder probe (delete it to probe again). Sizes, fps, encoder order, frame format and loudness are in `config/render.md`.
 
-## Blender (CTS-18, CTS-20)
+## Blender (CTS-18, CTS-20, CTS-21)
 
 | Tool | What it does |
 |---|---|
@@ -75,6 +75,9 @@ The render serves the player and the series folders itself on a random 127.0.0.1
 | `cts_character_set {series, cast, spec}` | Checks and writes the 3D spec `cast/<cast>/character.json` (`cts.character3d/1`, see `seed/style/toon-3d.md`); sets the cast member's `character` path in the bible. Returns `{ file, specHash }`. |
 | `cts_character_build {series, cast, sheet?}` | Builds the character with Blender: `character.blend`, `sheet.png` (turnaround, six mouths, blink, half lid, happy, sad, surprised, looks; pieces in `sheet/`) and `build.json` (spec hash, controls, determinism hashes, warnings). A queue job (`<series>--character_build--<cast>--r<n>`, `job.progress`); its result is JSON `{ ok: true, blend, sheet, warnings, buildSeconds }` or `{ ok: false, code, message }` for a spec Blender cannot build (`E_FACE_HIDDEN`, `E_SPEC_INVALID`). |
 | `cts_character_get {series, cast}` | The spec, `specHash`, the last `build.json`, `stale` (the spec changed since the build) and the `sheet.png` picture. |
+| `cts_set3d_set {series, set, spec}` | Checks and writes the 3D set spec `sets/<set>/set3d.json` (`cts.set3d/1`: ground and patches, sky, props from the kit, marks, named cameras). Returns `{ file, specHash }`. |
+| `cts_set3d_build {series, set, sheet?}` | Builds the set with Blender: `set.blend`, `sheet.png` (auto wide, two stand-ins on the first two marks, the first two named cameras) and `build.json`. A queue job (`<series>--set_build--<set>--r<n>`); the result is `{ ok: true, blend, sheet, warnings, buildSeconds }` or `{ ok: false, code: "E_SET_INVALID", message }`. Warnings: a mark inside a prop footprint (`blender/cts_blender/props.json`), a bench without a seat. |
+| `cts_set3d_get {series, set}` | The spec, `specHash`, the last `build.json`, `stale` and the `sheet.png` picture. |
 
 Every Blender run is `blender -b --factory-startup --python-exit-code 1 --python blender/run.py -- <job.json>` with `PYTHONNOUSERSITE=1`. The job is `{command, ...}`; `blender/run.py` prints `CTS {...}` lines (`progress`, `chunk`, `result`, `error`) that the runner (`src/engine/blender/runner.ts`) turns into progress events and the result. A non-zero exit without a result is `E_BLENDER_FAILED` with the last 40 log lines.
 

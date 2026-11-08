@@ -106,5 +106,45 @@ function assetTools(svc: CtsService, def: ToolDef): Tool[] {
         return withImage(`${p.castDir(a.cast)}/sheet.png`, data)
       }
     )
+    ,
+    def(
+      'cts_set3d_set',
+      'Write the 3D spec of a set (cts.set3d/1: ground and patches, sky, props from the kit, marks, named cameras; see the set-spec prompt) to series/<slug>/sets/<set>/set3d.json. Checked first (ids, kinds, colours). Nothing is built: call cts_set3d_build.',
+      z.object({ series, set: z.string().describe('The set id'), spec: z.record(z.string(), z.unknown()).describe('The set spec object') }),
+      async (a) => {
+        const st = store()
+        if (!(await st.seriesExists(a.series))) throw new Error(`no series "${a.series}"`)
+        if (a.spec.id !== a.set) throw new Error(`the spec id "${String(a.spec.id)}" must be the set id "${a.set}"`)
+        await st.writeSet3d(a.series, a.set, a.spec)
+        const file = st.paths(a.series).set3dFile(a.set)
+        return { file, specHash: sha1(await fs.readFile(file)), hint: 'cts_set3d_build {series, set} makes set.blend and the four-view sheet' }
+      }
+    ),
+    def(
+      'cts_set3d_build',
+      'Build a set from its spec with Blender: sets/<set>/set.blend, sheet.png (four views: wide, two stand-ins on the first two marks, and the first two named cameras) and build.json (spec hash, props, marks, cameras, warnings such as a mark inside a prop footprint or a bench without a seat). Returns a job id at once (cts_wait). The job result is JSON { ok: true, blend, sheet, warnings, buildSeconds } or { ok: false, code, message } (E_SET_INVALID).',
+      z.object({ series, set: z.string().describe('The set id'), sheet: z.boolean().default(true) }),
+      async (a) => {
+        const st = store()
+        if (!(await st.exists(st.paths(a.series).set3dFile(a.set)))) throw new Error(`no set spec for "${a.set}": cts_set3d_set first`)
+        const job = await enqueueBlenderJob(svc, { series: a.series, task: 'set_build', role: 'background-artist', unit: a.set, label: `build set ${a.set}`, body: { id: a.set, sheet: a.sheet } })
+        return { job, hint: 'cts_wait {series}; then read sets/<set>/sheet.png (cts_set3d_get)' }
+      }
+    ),
+    def(
+      'cts_set3d_get',
+      'The 3D spec of a set, its last build (build.json), whether the build is stale, and the sheet.png picture.',
+      z.object({ series, set: z.string().describe('The set id') }),
+      async (a) => {
+        const st = store()
+        const p = st.paths(a.series)
+        const specFile = p.set3dFile(a.set)
+        if (!(await st.exists(specFile))) throw new Error(`no set spec for "${a.set}"`)
+        const raw = await fs.readFile(specFile)
+        const build = await readBuildInfo(`${p.setDir(a.set)}/build.json`)
+        const specHash = sha1(raw)
+        return withImage(`${p.setDir(a.set)}/sheet.png`, { spec: JSON.parse(raw.toString('utf8')) as unknown, specHash, build, stale: !build || build.specHash !== specHash })
+      }
+    )
   ]
 }
