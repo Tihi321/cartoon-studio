@@ -66,3 +66,26 @@ def new_compositor_group(scene, name):
 
 def workbench_backface_culling(scene, on=True):
     scene.display.shading.show_backface_culling = on
+
+
+def material_culled(mat):
+    """Backface culling in EEVEE (the inverted-hull outline shows only the rim behind the body)."""
+    mat.use_backface_culling = True
+
+
+def material_blended(mat):
+    """Real alpha (the blob shadow): the 5.x name of the old blend_method."""
+    mat.surface_render_method = "BLENDED"
+    mat.use_transparency_overlap = False
+
+
+def light_no_shadow(light):
+    light.use_shadow = False
+
+
+def configure_eevee(scene, samples):
+    """EEVEE as the look wants it: no raytracing, no shadows, TAA with the given samples."""
+    scene.render.engine = "BLENDER_EEVEE"
+    scene.eevee.taa_render_samples = int(samples)
+    scene.eevee.use_raytracing = False
+    scene.eevee.use_shadows = False

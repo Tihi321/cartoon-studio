@@ -1,0 +1,10 @@
+{
+  "schema": "cts.style3d/1",
+  "toon": { "shade": 0.74, "threshold": 0.36 },
+  "outline": { "colour": "#2b2118", "scale": 1 },
+  "world": { "sky": { "top": "#86cdf0", "horizon": "#e4f6fb" } },
+  "sun": { "angle": [50, -10, -35], "energy": 3.2 },
+  "samples": { "final": 16, "preview": 4 },
+  "post": "none",
+  "stepped": false
+}
