@@ -26,6 +26,8 @@ if (failures.length) { console.error("\nverify-package FAILED: build the unpacke
 
 // What the app and the engine read from disk.
 check(fs.existsSync(path.join(resources, "icon.png")), "resources/icon.png (window and tray icon)");
+check(fs.existsSync(path.join(resources, "blender", "run.py")), "resources/blender/run.py (the Blender scripts the engine runs)");
+check(fs.existsSync(path.join(resources, "blender", "cts_blender", "api5.py")) && !fs.existsSync(path.join(resources, "blender", "tests")), "resources/blender has cts_blender and no tests");
 check(fs.existsSync(path.join(resources, "seed", "config", "settings.md")), "resources/seed/config/settings.md (main passes --seed)");
 // every folder of the seed (agents, prompts, style ...) is packaged, and so is every file in it
 const listFiles = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).length : 0);

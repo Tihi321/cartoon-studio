@@ -4,6 +4,7 @@ import { voiceTools } from '../voice/tools'
 import { imageTools } from '../images/tools'
 import { renderTools } from '../render/tools'
 import { pipelineTools } from '../pipeline/tools'
+import { blenderTools } from '../blender/tools'
 import type { McpOptions, Tool, ToolDef } from './tools'
 
 /**
@@ -19,4 +20,4 @@ import type { McpOptions, Tool, ToolDef } from './tools'
  */
 export type ToolModule = (svc: CtsService, def: ToolDef, opts: McpOptions) => Tool[]
 
-export const TOOL_MODULES: ToolModule[] = [seriesCheckTools, imageTools, voiceTools, renderTools, pipelineTools]
+export const TOOL_MODULES: ToolModule[] = [seriesCheckTools, imageTools, voiceTools, renderTools, pipelineTools, blenderTools]

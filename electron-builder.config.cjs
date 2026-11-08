@@ -11,9 +11,11 @@ module.exports = {
   npmRebuild: false,
   asar: true,
   files: ["out/**/*", "!out/**/*.map", "package.json"],
-  // Read from disk: the seed (main passes --seed) and the window/tray icon.
+  // Read from disk: the seed (main passes --seed), the Blender scripts and the window/tray icon.
   extraResources: [
     { from: "seed", to: "seed" },
+    // the Blender scripts (run by the user's own Blender 5.2; the tests are not shipped)
+    { from: "blender", to: "blender", filter: ["**/*", "!tests/**", "!**/__pycache__/**"] },
     { from: "build/icon.png", to: "icon.png" },
   ],
   asarUnpack: ["node_modules/sharp/**", "node_modules/@img/**", "node_modules/@napi-rs/**"],
