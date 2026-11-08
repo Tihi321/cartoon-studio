@@ -4,6 +4,7 @@ import sharp from 'sharp'
 import { BROW_STATES, EYE_STATES, MOUTH_SHAPES } from '../../shared/contracts'
 import { character3dSchema, style3dSchema } from '../../shared/contracts'
 import type { Bible, Character3d, Episode, Lang, Rig, RigVariant, Set3d, SetFile, TextCatalog, Timeline, Timeline3d, VoiceManifest } from '../../shared/contracts'
+import { SIX_VISEMES, textHasLabial } from '../anim/visemes'
 import { loadActingLibrary } from '../blender/library'
 import type { ActingLibrary } from '../blender/library'
 import { loadRenderConfig } from '../render/ffmpeg'
@@ -35,6 +36,7 @@ export const LINT_CODES = [
   'W_LINE_LONG',
   'W_OFF_FRAME',
   'W_GESTURE_OVER_LINE',
+  'W_VISEME_FLAT',
   'W_LANG_DRIFT',
   'W_PLACEHOLDER',
   'W_MIX_MUSIC_LOUD'
@@ -605,6 +607,7 @@ async function lintEpisode(
         lintMouth(issues, tl as Timeline, tlRel, lang)
         lintOffFrame(issues, tl as Timeline, tlRel, lang, setOf)
       }
+      if (b3d) await lintVisemes(issues, store, series, ep, lang, lines, texts.get(lang), manifests.get(lang))
       await lintMix(issues, p, ep, lang, store.dataDir)
     }
     stats.push(...(await lineStats(store, series, ep, lang, b3d ? null : ((tl as Timeline | undefined) ?? null), lines)))
@@ -673,6 +676,43 @@ function lintMouth(issues: Issues, tl: Timeline, file: string, lang: Lang): void
         break
       }
     }
+  }
+}
+
+/** Blender series: every spoken line has a six-viseme lip-sync file with a moving mouth (E_MOUTH_SILENT) that is not flat (W_VISEME_FLAT). */
+const MIN_NON_REST = 0.6
+const MIN_DISTINCT_VISEMES = 3
+async function lintVisemes(issues: Issues, store: SeriesStore, series: string, ep: string, lang: Lang, lines: { id: string }[], text?: TextCatalog, manifest?: VoiceManifest): Promise<void> {
+  const p = store.paths(series)
+  const seen = new Set<string>()
+  for (const l of lines) {
+    if (seen.has(l.id)) continue
+    seen.add(l.id)
+    if (manifest?.lines[l.id]?.status !== 'ok') continue // missing and placeholder audio have their own codes
+    const file = relTo(p, p.lipsyncFile(ep, lang, l.id))
+    const track = await store.readLipsync(series, ep, lang, l.id).catch(() => null)
+    const at = { file, where: l.id, lang }
+    if (!track) {
+      issues.add('E_MOUTH_SILENT', `line "${l.id}" (${lang}) has no lip-sync file: the mouth would stay shut`, at)
+      continue
+    }
+    if (track.method === 'amplitude') {
+      issues.add('E_MOUTH_SILENT', `line "${l.id}" (${lang}) has an amplitude lip-sync (canvas); a Blender series needs the six-viseme method (words-${lang} or text-${lang})`, at)
+      continue
+    }
+    const moving = track.shapes.filter((s) => s !== 'rest')
+    if (moving.length === 0) {
+      issues.add('E_MOUTH_SILENT', `line "${l.id}" (${lang}) has only rest frames in its lip-sync`, at)
+      continue
+    }
+    const stray = [...new Set(track.shapes.filter((s) => !SIX_VISEMES.includes(s)))]
+    if (stray.length) issues.add('E_MOUTH_SILENT', `line "${l.id}" (${lang}) uses mouth shapes the six-viseme set does not have: ${stray.join(', ')}`, at)
+    const said = text?.lines[l.id]?.text
+    if (said && textHasLabial(said, lang) && !track.shapes.includes('MBP')) issues.add('E_MOUTH_SILENT', `line "${l.id}" (${lang}) has a lip sound ("${said}") but no MBP closure in its lip-sync`, at)
+    const share = moving.length / track.shapes.length
+    const distinct = new Set(moving).size
+    if (share < MIN_NON_REST) issues.add('W_VISEME_FLAT', `line "${l.id}" (${lang}) has the mouth open in only ${Math.round(share * 100)} % of its frames (under ${MIN_NON_REST * 100} %)`, at)
+    if (distinct < MIN_DISTINCT_VISEMES) issues.add('W_VISEME_FLAT', `line "${l.id}" (${lang}) uses only ${distinct} distinct mouth shape(s) (under ${MIN_DISTINCT_VISEMES})`, at)
   }
 }
 

@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
 import { readMd } from '../store/atomic'
+import { alignWords } from '../anim/visemes'
 import type { Lang, VoiceLine, VoiceManifest } from '../../shared/contracts'
 import type { VoiceProvider } from '../../shared/media'
 import type { ComfyClient } from '../comfy/client'
@@ -304,7 +305,34 @@ export async function runVoice(inp: VoiceRunInput): Promise<VoiceRunReport> {
   const secondsOf = (): void => {
     for (const [lang, m] of manifests) report.seconds[lang] = Math.round(Object.values(m.lines).reduce((a, l) => a + l.seconds, 0) * 100) / 100
   }
+  /** Blender series: whisper word times of every spoken line without them, aligned to the script words (`words`, `wordsCoverage`). Never fails the run. */
+  const fillWords = async (): Promise<void> => {
+    const bible = await store.readBible(series)
+    if (bible.renderer !== 'blender' || !deps.flow.transcribe) return
+    for (const lang of langs) {
+      const m = manifests.get(lang)
+      if (!m) continue
+      const text = await store.readText(series, episode, lang).catch(() => null)
+      for (const [id, line] of Object.entries(m.lines)) {
+        const said = text?.lines[id]?.text
+        if (line.status !== 'ok' || line.words || !said) continue
+        try {
+          const heard = await deps.flow.transcribe(path.join(epDir, line.file), lang, inp.signal)
+          const al = alignWords(said, heard.words)
+          line.words = al.words
+          line.wordsCoverage = Math.round(al.coverage * 1000) / 1000
+          log(`voice ${lang} ${id}: whisper heard ${heard.words.length} word(s), ${al.words.length}/${al.total} aligned (${Math.round(al.coverage * 100)} %)`)
+          await save(lang)
+        } catch (e) {
+          inp.signal?.throwIfAborted()
+          report.warnings.push(`whisper words for ${lang} ${id}: ${(e as Error).message.split('\n')[0]!.slice(0, 160)}: the lip-sync uses the text method`)
+        }
+      }
+    }
+  }
+
   if (jobs.length === 0) {
+    await fillWords()
     secondsOf()
     return report
   }
@@ -434,6 +462,7 @@ export async function runVoice(inp: VoiceRunInput): Promise<VoiceRunReport> {
   } finally {
     await fs.rm(tmp, { recursive: true, force: true }).catch(() => undefined)
   }
+  await fillWords()
   secondsOf()
   return report
 }

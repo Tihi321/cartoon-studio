@@ -216,7 +216,7 @@ The script is language-independent: scenes of beats with line ids; the words liv
 ## Voice manifest `episodes/<ep>/voice/<lang>/manifest.json`
 
 One entry per line. `status`: `ok`, `placeholder` (silence of the estimated length, 2.5 words/s, so timing still builds; lint warns
-`W_PLACEHOLDER`) or `failed`. `words` is `[{ "w": "...", "t0": 0.1, "t1": 0.4 }]` when a provider or whisper gives them (phase 2), else `null`.
+`W_PLACEHOLDER`) or `failed`. `words` is `[{ "w": "...", "t0": 0.1, "t1": 0.4 }]` when a provider or whisper gives them, else `null`. A Blender series fills it after voicing from `flow_transcribe` (whisper.cpp, language always passed): the script words that whisper heard, in the script's spelling with whisper's times, and `wordsCoverage` (0..1, aligned words / script words; under 0.7 the lip-sync uses the text method).
 `file` is relative to the episode folder. A clip is re-made only when its `hash` changes.
 
 ```json
@@ -515,11 +515,12 @@ Errors fail a step; warnings are listed. Every issue has `code`, `message`, `fil
 | `E_LINE_NO_AUDIO` | a line has no audio in a language (checked when a voice manifest exists, or with `requireAudio`) |
 | `E_RIG_PART` | a rig file is missing, breaks the part rules, or lacks a mouth, eye or brow state |
 | `E_TIMELINE_STALE` | the timeline's `scriptHash` differs from `script.json` |
-| `E_MOUTH_SILENT` | an actor's mouth is not `rest` outside its own line intervals |
+| `E_MOUTH_SILENT` | canvas: an actor's mouth is not `rest` outside its own line intervals. Blender series: a spoken line has no six-viseme lip-sync file (or only `rest`, or no `MBP` where the text has a labial) |
 | `E_LANG_ORDER` | the languages' timelines run different beat sequences |
 | `E_CLIP_MISSING` | a `clip` beat's file is missing and the clip is not marked `fallback` |
 | `W_LINE_LONG` | more than 12 words or more than 5 s |
 | `W_GESTURE_OVER_LINE` | a gesture the acting library says may not overlap a line runs while that actor speaks |
+| `W_VISEME_FLAT` | a Blender series' lip-sync has fewer than 60 % non-`rest` frames or fewer than 3 distinct visemes |
 | `W_OFF_FRAME` | a speaking actor's feet point is outside the camera rectangle |
 | `W_LANG_DRIFT` | the languages' durations differ by more than 25 % |
 | `W_PLACEHOLDER` | a voice line is a silent placeholder |

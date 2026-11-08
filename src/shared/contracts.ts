@@ -346,8 +346,10 @@ export const voiceLineSchema = z.strictObject({
   speed: z.number().positive().optional(),
   /** `clipHash` of text + lang + voice + speed + style: a clip is re-made only when it changes. */
   hash: z.string(),
-  /** Word times, when a provider or whisper gives them (phase 2). */
+  /** Word times, when a provider or whisper gives them. For a Blender series: the script words that whisper heard (script spelling, whisper times). */
   words: z.array(z.strictObject({ w: z.string(), t0: z.number(), t1: z.number() })).nullable(),
+  /** Share of the script words in `words` (0..1), set with them; under 0.7 the lip-sync uses the text method. */
+  wordsCoverage: z.number().min(0).max(1).optional(),
   status: z.enum(VOICE_STATUSES)
 })
 export type VoiceLine = z.infer<typeof voiceLineSchema>

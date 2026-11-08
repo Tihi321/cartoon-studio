@@ -104,6 +104,13 @@ export interface FlowSong {
   creditsSpent?: number
 }
 
+/** What whisper.cpp heard in a file (`flow_transcribe`): the text and every word with its times in seconds. */
+export interface FlowTranscript {
+  text: string
+  language: string
+  words: { w: string; t0: number; t1: number }[]
+}
+
 export interface FlowLoop {
   /** The loop file: it starts at the loop point and its end is crossfaded into its start, so it repeats from its start. */
   file: string
@@ -122,6 +129,8 @@ export interface FlowClient {
   voices(signal?: AbortSignal): Promise<FlowVoices>
   narrate(args: NarrateArgs): Promise<{ file: string; durationSec?: number }>
   song(args: SongArgs): Promise<FlowSong>
+  /** Optional so older fakes still type-check: whisper word times of a local audio file (`flow_transcribe`, local and free). The language is always passed (auto misdetects Croatian). */
+  transcribe?(file: string, language: string, signal?: AbortSignal): Promise<FlowTranscript>
   loop(args: { input: string; out: string; name: string; minSeconds?: number; signal?: AbortSignal }): Promise<FlowLoop>
 }
 
@@ -309,6 +318,16 @@ export function createFlowClient(opts: FlowClientOptions): FlowClient {
       const file = song?.file ?? job.files?.[0]
       if (!song?.id || !file) throw new FlowError('Flow Music made no song file', 'tool')
       return { id: song.id, file, ...(typeof job.credits_spent === 'number' ? { creditsSpent: job.credits_spent } : {}) }
+    },
+
+    async transcribe(file, language, signal) {
+      // the first call may install whisper.cpp; a long line on the big model takes a while
+      const r = await call('flow_transcribe', { video: file, language, words: true }, 300_000, signal)
+      const words = ((r.words as { text?: string; start?: number; end?: number }[] | undefined) ?? [])
+        .filter((x) => typeof x.text === 'string' && typeof x.start === 'number' && typeof x.end === 'number')
+        .map((x) => ({ w: x.text!.trim(), t0: x.start!, t1: x.end! }))
+        .filter((x) => x.w.length > 0)
+      return { text: String(r.text ?? ''), language: String(r.language ?? language), words }
     },
 
     async loop(a) {
