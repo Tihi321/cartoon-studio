@@ -2,7 +2,7 @@
   "schema": "cts.character3d/1",
   "id": "tilly",
   "units": "m",
-  "height": 0.55,
+  "height": 0.76,
   "palette": {
     "fur": "#f6e7cf",
     "ear": "#e8a0a0",
@@ -14,8 +14,8 @@
     "bounce": 0.5,
     "walk": {
       "style": "walk",
-      "stride": 0.22,
-      "cadence": 2.2
+      "stride": 0.2,
+      "cadence": 2.6
     }
   },
   "controls": {
@@ -40,7 +40,7 @@
       "at": [
         0,
         0,
-        0.14
+        0.34
       ]
     },
     "head": {
@@ -128,7 +128,7 @@
       "at": [
         -0.05,
         0,
-        0.12
+        0.2
       ]
     },
     "leg_R": {
@@ -136,7 +136,7 @@
       "at": [
         0.05,
         0,
-        0.12
+        0.2
       ]
     }
   },
@@ -190,12 +190,12 @@
       "shape": "capsule",
       "size": [
         0.025,
-        0.08
+        0.15
       ],
       "at": [
         0,
         0,
-        -0.04
+        -0.075
       ],
       "colour": "fur",
       "control": "arm_L"
@@ -205,12 +205,12 @@
       "shape": "capsule",
       "size": [
         0.025,
-        0.08
+        0.15
       ],
       "at": [
         0,
         0,
-        -0.04
+        -0.075
       ],
       "colour": "fur",
       "control": "arm_R"
@@ -249,13 +249,13 @@
       "id": "leg_L",
       "shape": "capsule",
       "size": [
-        0.03,
-        0.1
+        0.032,
+        0.2
       ],
       "at": [
         0,
         0,
-        -0.05
+        -0.1
       ],
       "colour": "fur",
       "control": "leg_L"
@@ -264,13 +264,13 @@
       "id": "leg_R",
       "shape": "capsule",
       "size": [
-        0.03,
-        0.1
+        0.032,
+        0.2
       ],
       "at": [
         0,
         0,
-        -0.05
+        -0.1
       ],
       "colour": "fur",
       "control": "leg_R"
