@@ -2,7 +2,10 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import sharp from 'sharp'
 import { BROW_STATES, EYE_STATES, MOUTH_SHAPES } from '../../shared/contracts'
-import type { Bible, Episode, Lang, Rig, RigVariant, SetFile, TextCatalog, Timeline, VoiceManifest } from '../../shared/contracts'
+import { character3dSchema, style3dSchema } from '../../shared/contracts'
+import type { Bible, Character3d, Episode, Lang, Rig, RigVariant, Set3d, SetFile, TextCatalog, Timeline, Timeline3d, VoiceManifest } from '../../shared/contracts'
+import { loadActingLibrary } from '../blender/library'
+import type { ActingLibrary } from '../blender/library'
 import { loadRenderConfig } from '../render/ffmpeg'
 import { readMixCheck } from '../render/mixcheck'
 import { sampleCamera, sampleNumber, sampleStep } from '../../shared/sample'
@@ -21,6 +24,7 @@ export const LINT_CODES = [
   'E_MARK_UNKNOWN',
   'E_SHOT_UNKNOWN',
   'E_GESTURE_UNKNOWN',
+  'E_ACTION_UNKNOWN',
   'E_LINE_NO_TEXT',
   'E_LINE_NO_AUDIO',
   'E_RIG_PART',
@@ -30,6 +34,7 @@ export const LINT_CODES = [
   'E_CLIP_MISSING',
   'W_LINE_LONG',
   'W_OFF_FRAME',
+  'W_GESTURE_OVER_LINE',
   'W_LANG_DRIFT',
   'W_PLACEHOLDER',
   'W_MIX_MUSIC_LOUD'
@@ -262,9 +267,15 @@ export async function lintSeries(store: SeriesStore, series: string, opts: LintO
     }
     const castIds = script ? script.cast : bible.cast.map((c) => c.id)
     const rigOf = new Map<string, Rig>()
+    const blender = bible.renderer === 'blender'
+    if (blender) await lintStyle3d(issues, store, series, bible)
     for (const id of castIds) {
       if (!bible.cast.some((c) => c.id === id)) {
         issues.add('E_CAST_UNKNOWN', `cast id "${id}" is not in the bible`, { file: 'bible.json', where: id })
+        continue
+      }
+      if (blender) {
+        await lintCharacter3d(issues, store, series, bible, id)
         continue
       }
       const check = await checkRig(store, series, id)
@@ -275,11 +286,17 @@ export async function lintSeries(store: SeriesStore, series: string, opts: LintO
     }
     const setIds = script ? [...new Set(script.scenes.map((s) => s.set))] : bible.sets.map((s) => s.id)
     const setOf = new Map<string, SetFile>()
+    const set3dOf = new Map<string, Set3d>()
     for (const id of setIds) {
+      if (blender) {
+        const set = await lintSet3d(issues, store, series, bible, id)
+        if (set) set3dOf.set(id, set)
+        continue
+      }
       const set = await lintSet(issues, store, series, bible, id)
       if (set) setOf.set(id, set)
     }
-    if (script && opts.episode) await lintEpisode(issues, stats, store, series, opts, bible, script, rigOf, setOf)
+    if (script && opts.episode) await lintEpisode(issues, stats, store, series, opts, bible, script, rigOf, setOf, blender ? set3dOf : undefined)
   }
   const errors = issues.list.filter((i) => i.severity === 'error')
   const shares = stats.map((s) => s.share)
@@ -292,6 +309,66 @@ export async function lintSeries(store: SeriesStore, series: string, opts: LintO
     rigs,
     stats: { lines: stats, minShare: shares.length ? Math.min(...shares) : null }
   }
+}
+
+/** A Blender series: `style3d.json` (or the file the bible names) parses. */
+async function lintStyle3d(issues: Issues, store: SeriesStore, series: string, bible: Bible): Promise<void> {
+  const p = store.paths(series)
+  let file: string
+  try {
+    file = p.style3dFile(bible.style3d)
+  } catch (e) {
+    issues.add('E_SCHEMA', (e as Error).message, { file: 'bible.json', where: 'style3d' })
+    return
+  }
+  const rel = relTo(p, file)
+  await load(issues, rel, () => store.readJson(file, style3dSchema))
+}
+
+/** A Blender series: the character spec of a cast member parses and is the character of that cast id. */
+async function lintCharacter3d(issues: Issues, store: SeriesStore, series: string, bible: Bible, id: string): Promise<Character3d | null> {
+  const p = store.paths(series)
+  const member = bible.cast.find((c) => c.id === id)
+  let file: string
+  try {
+    file = member?.character ? p.resolve(member.character) : p.characterFile(id)
+  } catch (e) {
+    issues.add('E_SCHEMA', (e as Error).message, { file: 'bible.json', where: id })
+    return null
+  }
+  const rel = relTo(p, file)
+  const character = await load(issues, rel, () => store.readJson(file, character3dSchema))
+  if (character && character.id !== id) issues.add('E_SCHEMA', `character id "${character.id}" is not the cast id "${id}"`, { file: rel, where: 'id' })
+  return character
+}
+
+/** A Blender series: the set spec (`set3d.json`) parses, prop ids are unique, marks and props are not named twice. */
+async function lintSet3d(issues: Issues, store: SeriesStore, series: string, bible: Bible, id: string): Promise<Set3d | null> {
+  const p = store.paths(series)
+  if (!bible.sets.some((s) => s.id === id)) {
+    issues.add('E_SET_UNKNOWN', `set "${id}" is not in the bible`, { file: 'bible.json', where: id })
+    return null
+  }
+  const rel = relTo(p, p.set3dFile(id))
+  const set = await load(issues, rel, () => store.readSet3d(series, id), 'E_SET_UNKNOWN')
+  if (!set) return null
+  const seen = new Set<string>()
+  for (const prop of set.props) {
+    if (seen.has(prop.id)) issues.add('E_SCHEMA', `prop id "${prop.id}" appears twice`, { file: rel, where: prop.id })
+    seen.add(prop.id)
+  }
+  if (set.id !== id) issues.add('E_SCHEMA', `set id "${set.id}" is not "${id}"`, { file: rel, where: 'id' })
+  return set
+}
+
+/** The camera names a Blender script may use in a set: the set's own cameras and the computed shots (`wide`, `two`, `cu-<id>`, `ots-<a>-<b>`). */
+export function shotNames3d(set: Set3d, cast: readonly string[]): Set<string> {
+  const names = new Set<string>(['wide', 'two', ...Object.keys(set.cameras)])
+  for (const a of cast) {
+    names.add(`cu-${a}`)
+    for (const b of cast) if (a !== b) names.add(`ots-${a}-${b}`)
+  }
+  return names
 }
 
 async function lintSet(issues: Issues, store: SeriesStore, series: string, bible: Bible, id: string): Promise<SetFile | null> {
@@ -328,9 +405,20 @@ async function lintEpisode(
   bible: Bible,
   script: Episode,
   rigOf: Map<string, Rig>,
-  setOf: Map<string, SetFile>
+  setOf: Map<string, SetFile>,
+  /** Blender series (`renderer: "blender"`): the 3D sets by id. Absent for a canvas series. */
+  set3dOf?: Map<string, Set3d>
 ): Promise<void> {
   const ep = opts.episode!
+  const b3d = !!set3dOf
+  let library: ActingLibrary | null = null
+  if (b3d) {
+    try {
+      library = loadActingLibrary()
+    } catch (e) {
+      issues.add('E_SCHEMA', `the acting library could not be read: ${(e as Error).message}`, { where: 'blender/cts_blender/acting/library.json' })
+    }
+  }
   const p = store.paths(series)
   const scriptRel = relTo(p, p.scriptFile(ep))
   const inScript = new Set(script.cast)
@@ -344,17 +432,52 @@ async function lintEpisode(
   const titleKeys = new Set<string>([script.titleKey])
   for (const scene of script.scenes) {
     const set = setOf.get(scene.set)
+    const set3d = set3dOf?.get(scene.set)
     const sceneWhere = `scenes.${scene.id}`
     if (!set && !bible.sets.some((s) => s.id === scene.set)) issues.add('E_SET_UNKNOWN', `scene "${scene.id}" uses set "${scene.set}" which is not in the bible`, { file: scriptRel, where: sceneWhere })
     const mark = (name: string, where: string) => {
       if (set && !set.marks[name]) issues.add('E_MARK_UNKNOWN', `mark "${name}" is not in set "${scene.set}" (${Object.keys(set.marks).join(', ')})`, { file: scriptRel, where })
+      if (set3d && !set3d.marks[name]) issues.add('E_MARK_UNKNOWN', `mark "${name}" is not in set "${scene.set}" (${Object.keys(set3d.marks).join(', ')})`, { file: scriptRel, where })
     }
     const shot = (name: string, where: string) => {
       if (set && !set.shots[name]) issues.add('E_SHOT_UNKNOWN', `shot "${name}" is not in set "${scene.set}" (${Object.keys(set.shots).join(', ')})`, { file: scriptRel, where })
+      if (set3d) {
+        const names = shotNames3d(set3d, script.cast)
+        if (!names.has(name)) issues.add('E_SHOT_UNKNOWN', `shot "${name}" is not a camera of set "${scene.set}" or a computed shot (${[...names].join(', ')})`, { file: scriptRel, where })
+      }
     }
+    /** A gesture name: the actor's rig (canvas) or the acting library (Blender). Returns the library action when there is one. */
     const gesture = (actor: string, name: string, where: string) => {
+      if (b3d) {
+        const action = library?.byName.get(name)
+        if (library && !library.scriptable.has(name)) {
+          issues.add('E_ACTION_UNKNOWN', `action "${name}" is not a gesture of the acting library (${[...library.scriptable].join(', ')})`, { file: scriptRel, where })
+          return undefined
+        }
+        return action
+      }
       const rig = rigOf.get(actor)
       if (rig && !rig.gestures[name]) issues.add('E_GESTURE_UNKNOWN', `gesture "${name}" is not in the rig of "${actor}" (${Object.keys(rig.gestures).join(', ')})`, { file: scriptRel, where })
+      return undefined
+    }
+    /** The target of a gesture (Blender): a cast id of the episode, a prop of the set or a mark; `sit` needs a prop with a seat. */
+    const target = (name: string, target: string | undefined, where: string) => {
+      const action = library?.byName.get(name)
+      if (!action || !set3d) return
+      if (!target) {
+        if (action.needsTarget) issues.add('E_SCHEMA', `"${name}" needs a target (a cast id, a prop or a mark)`, { file: scriptRel, where })
+        return
+      }
+      const prop = set3d.props.find((x) => x.id === target)
+      if (!script.cast.includes(target) && !prop && !set3d.marks[target]) issues.add('E_MARK_UNKNOWN', `target "${target}" is not a cast id, a prop or a mark of set "${scene.set}"`, { file: scriptRel, where })
+      else if (name === 'sit' && !prop?.seat) issues.add('E_MARK_UNKNOWN', `"sit" needs a prop with a seat; "${target}" has none`, { file: scriptRel, where })
+    }
+    // beats that run together (a beat without `with: "prev"` starts a group): who speaks, and which gestures may not overlap a line
+    let groupSpeakers: string[] = []
+    let groupGestures: { who: string; name: string; where: string }[] = []
+    const overLine = (who: string, name: string, where: string) => {
+      const action = library?.byName.get(name)
+      if (action && !action.overLine) issues.add('W_GESTURE_OVER_LINE', `"${name}" of "${who}" runs while "${who}" speaks, and the acting library says it should not`, { file: scriptRel, where })
     }
     for (const [actor, s] of Object.entries(scene.start)) {
       checkActor(actor, `${sceneWhere}.start.${actor}`)
@@ -364,12 +487,21 @@ async function lintEpisode(
     let prev: (typeof scene.beats)[number] | undefined
     for (const b of scene.beats) {
       const where = `${sceneWhere}.${b.id}`
+      if (b.with !== 'prev') {
+        groupSpeakers = []
+        groupGestures = []
+      }
       switch (b.type) {
         case 'line':
           lines.push({ id: b.line, speaker: b.speaker })
           checkActor(b.speaker, where)
           if (b.look) checkActor(b.look, where)
-          if (b.gesture) gesture(b.speaker, b.gesture, where)
+          if (b.gesture) {
+            gesture(b.speaker, b.gesture, where)
+            overLine(b.speaker, b.gesture, where)
+          }
+          for (const g of groupGestures) if (g.who === b.speaker) overLine(g.who, g.name, g.where)
+          groupSpeakers.push(b.speaker)
           break
         case 'move':
           checkActor(b.who, where)
@@ -382,6 +514,9 @@ async function lintEpisode(
         case 'gesture':
           checkActor(b.who, where)
           gesture(b.who, b.gesture, where)
+          target(b.gesture, b.target, where)
+          if (groupSpeakers.includes(b.who)) overLine(b.who, b.gesture, where)
+          groupGestures.push({ who: b.who, name: b.gesture, where })
           break
         case 'look':
           checkActor(b.who, where)
@@ -408,7 +543,7 @@ async function lintEpisode(
   const langs = bible.languages
   const texts = new Map<Lang, TextCatalog>()
   const manifests = new Map<Lang, VoiceManifest>()
-  const timelines = new Map<Lang, Timeline>()
+  const timelines = new Map<Lang, Timeline | Timeline3d>()
   const hash = hashScript(await fs.readFile(p.scriptFile(ep)))
 
   for (const lang of langs) {
@@ -459,21 +594,24 @@ async function lintEpisode(
     const tlFile = p.timelineFile(ep, lang)
     const tlRel = relTo(p, tlFile)
     if (await exists(tlFile)) {
-      const tl = await load(issues, tlRel, () => store.readTimeline(series, ep, lang), 'E_SCHEMA', lang)
+      const tl = await load<Timeline | Timeline3d>(issues, tlRel, () => (b3d ? store.readTimeline3d(series, ep, lang) : store.readTimeline(series, ep, lang)), 'E_SCHEMA', lang)
       if (tl) timelines.set(lang, tl)
     }
     const tl = timelines.get(lang)
     if (tl) {
       if (tl.scriptHash !== hash) issues.add('E_TIMELINE_STALE', `timeline.${lang}.json was built from another script.json (rebuild it)`, { file: tlRel, lang })
-      lintMouth(issues, tl, tlRel, lang)
-      lintOffFrame(issues, tl, tlRel, lang, setOf)
+      // the mouth and framing checks read the canvas timeline; the 3D ones come with the viseme lint (CTS-24)
+      if (!b3d) {
+        lintMouth(issues, tl as Timeline, tlRel, lang)
+        lintOffFrame(issues, tl as Timeline, tlRel, lang, setOf)
+      }
       await lintMix(issues, p, ep, lang, store.dataDir)
     }
-    stats.push(...(await lineStats(store, series, ep, lang, tl ?? null, lines)))
+    stats.push(...(await lineStats(store, series, ep, lang, b3d ? null : ((tl as Timeline | undefined) ?? null), lines)))
   }
 
   // the languages share one script: same beat order, similar length
-  const tlList = langs.map((l) => [l, timelines.get(l)] as const).filter((x): x is readonly [Lang, Timeline] => !!x[1])
+  const tlList = langs.map((l) => [l, timelines.get(l)] as const).filter((x): x is readonly [Lang, Timeline | Timeline3d] => !!x[1])
   const base = tlList[0]
   for (const [lang, tl] of tlList.slice(1)) {
     const a = sequenceOf(base![1])
@@ -505,7 +643,7 @@ async function lintEpisode(
 }
 
 /** The order the beats ran in; when a timeline has no `beats`, the lines then the clips. */
-function sequenceOf(tl: Timeline): string[] {
+function sequenceOf(tl: Timeline | Timeline3d): string[] {
   return tl.beats ? tl.beats.map((b) => b.id) : [...tl.lines.map((l) => `line:${l.id}`), ...tl.clips.map((c) => `clip:${c.id}`)]
 }
 

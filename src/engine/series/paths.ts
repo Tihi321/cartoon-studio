@@ -61,11 +61,23 @@ export class SeriesPaths {
   rigFile(cast: string, variant?: RigVariant): string {
     return path.join(this.rigDir(cast, variant), 'rig.json')
   }
+  /** `cast/<id>/character.json` (`cts.character3d/1`, Blender series). */
+  characterFile(cast: string): string {
+    return path.join(this.castDir(cast), 'character.json')
+  }
+  /** The look file of a Blender series: `style3d.json` unless the bible names another path. */
+  style3dFile(rel = 'style3d.json'): string {
+    return this.resolve(rel)
+  }
   setDir(set: string): string {
     return path.join(this.root, 'sets', assertId(set, 'set id'))
   }
   setFile(set: string): string {
     return path.join(this.setDir(set), 'set.json')
+  }
+  /** `sets/<id>/set3d.json` (`cts.set3d/1`, Blender series). */
+  set3dFile(set: string): string {
+    return path.join(this.setDir(set), 'set3d.json')
   }
   get clipsDir(): string {
     return path.join(this.root, 'clips')

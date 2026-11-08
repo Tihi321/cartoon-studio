@@ -1,0 +1,101 @@
+{
+  "schema": "cts.set3d/1",
+  "id": "park",
+  "ground": {
+    "size": [
+      20,
+      14
+    ],
+    "colour": "#7cc576",
+    "patches": [
+      {
+        "shape": "rect",
+        "at": [
+          0,
+          1
+        ],
+        "size": [
+          10,
+          1.6
+        ],
+        "colour": "#e6d3a3"
+      }
+    ]
+  },
+  "sky": {
+    "top": "#86cdf0",
+    "horizon": "#e4f6fb"
+  },
+  "props": [
+    {
+      "id": "oak",
+      "kind": "tree_round",
+      "at": [
+        -4,
+        3
+      ],
+      "scale": 1.4
+    },
+    {
+      "id": "bench",
+      "kind": "bench",
+      "at": [
+        3,
+        2.2
+      ],
+      "rot": 180,
+      "seat": {
+        "height": 0.45,
+        "at": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "bush",
+      "kind": "bush",
+      "at": [
+        6,
+        3
+      ]
+    }
+  ],
+  "marks": {
+    "left": [
+      -2.5,
+      0
+    ],
+    "center": [
+      0,
+      0
+    ],
+    "right": [
+      2.5,
+      0
+    ],
+    "bench": [
+      3,
+      1.4
+    ],
+    "oak": [
+      -3.2,
+      2.2
+    ]
+  },
+  "cameras": {
+    "bench": {
+      "loc": [
+        3,
+        -2.5,
+        1.1
+      ],
+      "target": [
+        3,
+        2,
+        0.5
+      ],
+      "lens": 40
+    }
+  }
+}

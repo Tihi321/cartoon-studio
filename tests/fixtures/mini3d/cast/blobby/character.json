@@ -1,0 +1,258 @@
+{
+  "schema": "cts.character3d/1",
+  "id": "blobby",
+  "units": "m",
+  "height": 0.42,
+  "palette": {
+    "fur": "#4f7cc9",
+    "ear": "#2f4f8a",
+    "dark": "#2b2118"
+  },
+  "motion": {
+    "tempo": 0.75,
+    "energy": 0.8,
+    "bounce": 0.3,
+    "walk": {
+      "style": "hop",
+      "stride": 0.3,
+      "cadence": 1.4
+    }
+  },
+  "controls": {
+    "root": {
+      "parent": null,
+      "at": [
+        0,
+        0,
+        0
+      ]
+    },
+    "squash": {
+      "parent": "root",
+      "at": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body": {
+      "parent": "squash",
+      "at": [
+        0,
+        0,
+        0.14
+      ]
+    },
+    "head": {
+      "parent": "body",
+      "at": [
+        0,
+        0,
+        0.16
+      ]
+    },
+    "arm_L": {
+      "parent": "body",
+      "at": [
+        -0.09,
+        0,
+        0.1
+      ]
+    },
+    "arm_R": {
+      "parent": "body",
+      "at": [
+        0.09,
+        0,
+        0.1
+      ]
+    },
+    "ear_L1": {
+      "parent": "head",
+      "at": [
+        -0.05,
+        0,
+        0.12
+      ]
+    },
+    "ear_R1": {
+      "parent": "head",
+      "at": [
+        0.05,
+        0,
+        0.12
+      ]
+    },
+    "lid_L": {
+      "parent": "head",
+      "at": [
+        -0.04,
+        -0.085,
+        0.03
+      ]
+    },
+    "lid_R": {
+      "parent": "head",
+      "at": [
+        0.04,
+        -0.085,
+        0.03
+      ]
+    },
+    "pupil_L": {
+      "parent": "head",
+      "at": [
+        -0.04,
+        -0.09,
+        0.03
+      ]
+    },
+    "pupil_R": {
+      "parent": "head",
+      "at": [
+        0.04,
+        -0.09,
+        0.03
+      ]
+    },
+    "mouth": {
+      "parent": "head",
+      "at": [
+        0,
+        -0.095,
+        -0.03
+      ]
+    }
+  },
+  "springs": {
+    "ear_L": {
+      "stiffness": 60,
+      "damping": 6
+    },
+    "ear_R": {
+      "stiffness": 60,
+      "damping": 6
+    }
+  },
+  "parts": [
+    {
+      "id": "body",
+      "shape": "ellipsoid",
+      "size": [
+        0.11,
+        0.09,
+        0.14
+      ],
+      "at": [
+        0,
+        0,
+        0
+      ],
+      "colour": "fur",
+      "control": "body",
+      "outline": 0.006
+    },
+    {
+      "id": "head",
+      "shape": "ellipsoid",
+      "size": [
+        0.1,
+        0.09,
+        0.09
+      ],
+      "at": [
+        0,
+        0,
+        0.02
+      ],
+      "colour": "fur",
+      "control": "head",
+      "outline": 0.006
+    },
+    {
+      "id": "arm_L",
+      "shape": "capsule",
+      "size": [
+        0.025,
+        0.08
+      ],
+      "at": [
+        0,
+        0,
+        -0.04
+      ],
+      "colour": "fur",
+      "control": "arm_L"
+    },
+    {
+      "id": "arm_R",
+      "shape": "capsule",
+      "size": [
+        0.025,
+        0.08
+      ],
+      "at": [
+        0,
+        0,
+        -0.04
+      ],
+      "colour": "fur",
+      "control": "arm_R"
+    },
+    {
+      "id": "ear_L1",
+      "shape": "cone",
+      "size": [
+        0.03,
+        0.14
+      ],
+      "at": [
+        0,
+        0,
+        0.07
+      ],
+      "colour": "ear",
+      "control": "ear_L1"
+    },
+    {
+      "id": "ear_R1",
+      "shape": "cone",
+      "size": [
+        0.03,
+        0.14
+      ],
+      "at": [
+        0,
+        0,
+        0.07
+      ],
+      "colour": "ear",
+      "control": "ear_R1"
+    }
+  ],
+  "face": {
+    "control": "head",
+    "eyes": {
+      "x": 0.04,
+      "z": 0.03,
+      "r": 0.022,
+      "faceY": -0.085,
+      "pupil": {
+        "size": 0.012,
+        "lead": 0.003
+      }
+    },
+    "lids": {
+      "colour": "fur"
+    },
+    "mouth": {
+      "at": [
+        0,
+        -0.095,
+        -0.03
+      ],
+      "scale": 0.03,
+      "inner": "#7a2e2e"
+    }
+  }
+}

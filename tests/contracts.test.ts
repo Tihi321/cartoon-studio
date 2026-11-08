@@ -7,6 +7,7 @@ import { lintSeries } from '../src/engine/series/lint'
 import { rigVariantSchema } from '../src/shared/contracts'
 import { SeriesStore } from '../src/engine/series/service'
 import { installMini } from './fixtures/mini'
+import { installMini3d } from './fixtures/mini3d'
 
 let dir: string | undefined
 afterEach(async () => {
@@ -37,6 +38,24 @@ describe('contracts and lint', () => {
     expect(broken.ok).toBe(false)
     expect(broken.errors.map((e) => e.code)).toEqual(expect.arrayContaining(['E_RIG_PART', 'E_CAST_UNKNOWN']))
     expect(broken.errors.find((e) => e.code === 'E_RIG_PART')?.message).toMatch(/"O"/)
+  })
+
+  it('the fixture mini3d (renderer blender) lints clean; a script with an unknown gesture gives E_ACTION_UNKNOWN', async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'cts-contracts-'))
+    const root = await installMini3d(dir)
+    const store = new SeriesStore(dir)
+
+    expect((await store.readBible('mini3d')).renderer).toBe('blender')
+    const clean = await lintSeries(store, 'mini3d', { episode: 'ep00-mini3d', requireAudio: true })
+    expect(clean.errors).toEqual([])
+    expect(clean.warnings).toEqual([])
+
+    const scriptFile = path.join(root, 'episodes', 'ep00-mini3d', 'script.json')
+    const script = JSON.parse(await readFile(scriptFile, 'utf8'))
+    script.scenes[0].beats[2].gesture = 'moonwalk'
+    await writeFile(scriptFile, JSON.stringify(script))
+    const broken = await lintSeries(store, 'mini3d', { episode: 'ep00-mini3d' })
+    expect(broken.errors.map((e) => e.code)).toEqual(['E_ACTION_UNKNOWN'])
   })
 
   it('rig variant b and the recraft-svg path are gone; only a (claude-svg) and c (raster) remain', () => {

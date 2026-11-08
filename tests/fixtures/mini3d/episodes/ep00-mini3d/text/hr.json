@@ -1,0 +1,16 @@
+{
+  "schema": "cts.text/1",
+  "lang": "hr",
+  "strings": {
+    "title": "Mala 3D proba"
+  },
+  "lines": {
+    "l01": {
+      "text": "Bok! Ja sam Tilly.",
+      "delivery": "cheerful"
+    },
+    "l02": {
+      "text": "Vau, kakav veliki hrast!"
+    }
+  }
+}

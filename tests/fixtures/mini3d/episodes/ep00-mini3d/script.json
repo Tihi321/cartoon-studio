@@ -1,0 +1,57 @@
+{
+  "schema": "cts.episode/1",
+  "series": "mini3d",
+  "id": "ep00-mini3d",
+  "titleKey": "title",
+  "cast": [
+    "tilly",
+    "blobby"
+  ],
+  "scenes": [
+    {
+      "id": "s1",
+      "set": "park",
+      "start": {
+        "tilly": {
+          "mark": "left",
+          "facing": "right",
+          "emotion": "happy"
+        },
+        "blobby": {
+          "mark": "right",
+          "facing": "left"
+        }
+      },
+      "shot": "wide",
+      "beats": [
+        {
+          "id": "b01",
+          "type": "line",
+          "line": "l01",
+          "speaker": "tilly",
+          "emotion": "happy",
+          "gesture": "wave",
+          "look": "blobby",
+          "pauseAfter": 0.3
+        },
+        {
+          "id": "b02",
+          "type": "line",
+          "line": "l02",
+          "speaker": "blobby",
+          "emotion": "surprised"
+        },
+        {
+          "id": "b03",
+          "type": "gesture",
+          "who": "tilly",
+          "gesture": "point",
+          "target": "oak",
+          "with": "prev"
+        }
+      ]
+    }
+  ],
+  "music": {},
+  "sfx": {}
+}

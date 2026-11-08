@@ -5,21 +5,26 @@ import type { ZodType, z } from 'zod'
 import {
   bibleSchema,
   budgetFileSchema,
+  character3dSchema,
   clipsFileSchema,
   episodeSchema,
   lipsyncSchema,
   pipelineStateSchema,
   reviewSchema,
   rigSchema,
+  set3dSchema,
   setSchema,
   spendFileSchema,
+  style3dSchema,
   textSchema,
+  timeline3dSchema,
   timelineSchema,
   voiceManifestSchema
 } from '../../shared/contracts'
 import type {
   Bible,
   BudgetFile,
+  Character3d,
   ClipsFile,
   Episode,
   Lang,
@@ -28,10 +33,13 @@ import type {
   Review,
   Rig,
   RigVariant,
+  Set3d,
   SetFile,
   SpendFile,
+  Style3d,
   TextCatalog,
   Timeline,
+  Timeline3d,
   VoiceManifest
 } from '../../shared/contracts'
 import { atomicWrite } from '../store/atomic'
@@ -214,6 +222,22 @@ export class SeriesStore {
   writeSet(slug: string, set: string, value: unknown): Promise<SetFile> {
     return this.writeJson(this.paths(slug).setFile(set), setSchema, value)
   }
+  readCharacter3d(slug: string, cast: string): Promise<Character3d> {
+    return this.readJson(this.paths(slug).characterFile(cast), character3dSchema)
+  }
+  writeCharacter3d(slug: string, cast: string, value: unknown): Promise<Character3d> {
+    return this.writeJson(this.paths(slug).characterFile(cast), character3dSchema, value)
+  }
+  readSet3d(slug: string, set: string): Promise<Set3d> {
+    return this.readJson(this.paths(slug).set3dFile(set), set3dSchema)
+  }
+  writeSet3d(slug: string, set: string, value: unknown): Promise<Set3d> {
+    return this.writeJson(this.paths(slug).set3dFile(set), set3dSchema, value)
+  }
+  /** The look of a Blender series: the file the bible names (`style3d`), else `style3d.json`. */
+  readStyle3d(slug: string, rel?: string): Promise<Style3d> {
+    return this.readJson(this.paths(slug).style3dFile(rel), style3dSchema)
+  }
   async listSets(slug: string): Promise<string[]> {
     return this.subdirs(path.join(this.paths(slug).root, 'sets'))
   }
@@ -290,6 +314,13 @@ export class SeriesStore {
   }
   writeTimeline(slug: string, episode: string, lang: Lang, v: unknown): Promise<Timeline> {
     return this.writeJson(this.paths(slug).timelineFile(episode, lang), timelineSchema, v)
+  }
+  /** The timeline of a Blender series (same file name as the canvas timeline, another schema). */
+  readTimeline3d(slug: string, episode: string, lang: Lang): Promise<Timeline3d> {
+    return this.readJson(this.paths(slug).timelineFile(episode, lang), timeline3dSchema)
+  }
+  writeTimeline3d(slug: string, episode: string, lang: Lang, v: unknown): Promise<Timeline3d> {
+    return this.writeJson(this.paths(slug).timelineFile(episode, lang), timeline3dSchema, v)
   }
   readReview(slug: string, episode: string, name: string): Promise<Review> {
     return this.readJson(this.paths(slug).reviewFile(episode, name), reviewSchema)

@@ -1,0 +1,16 @@
+{
+  "schema": "cts.text/1",
+  "lang": "en",
+  "strings": {
+    "title": "A Small 3D Test"
+  },
+  "lines": {
+    "l01": {
+      "text": "Hi! I am Tilly.",
+      "delivery": "cheerful"
+    },
+    "l02": {
+      "text": "Wow, a big oak tree!"
+    }
+  }
+}

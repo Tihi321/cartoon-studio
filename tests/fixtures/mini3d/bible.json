@@ -1,0 +1,168 @@
+{
+  "schema": "cts.bible/1",
+  "slug": "mini3d",
+  "title": {
+    "hr": "Mala 3D proba",
+    "en": "Mini 3D Test"
+  },
+  "audience": {
+    "ageMin": 4,
+    "ageMax": 8
+  },
+  "logline": {
+    "hr": "Tilly i Blobby se igraju u parku.",
+    "en": "Tilly and Blobby play in the park."
+  },
+  "tone": [
+    "gentle humour",
+    "every episode ends warm"
+  ],
+  "style": {
+    "look": "toon-shaded primitives, dark outline",
+    "palette": [
+      "#f4d35e",
+      "#ee964b",
+      "#0d3b66",
+      "#faf0ca",
+      "#2b2118"
+    ],
+    "outlinePx": 2,
+    "refPrompt": "a small toon rabbit"
+  },
+  "languages": [
+    "hr",
+    "en"
+  ],
+  "cast": [
+    {
+      "id": "tilly",
+      "name": {
+        "hr": "Tilly",
+        "en": "Tilly"
+      },
+      "role": "lead",
+      "personality": "quick, curious",
+      "catchphrases": {
+        "hr": [
+          "Hajde!"
+        ],
+        "en": [
+          "Come on!"
+        ]
+      },
+      "voice": {
+        "hr": {
+          "provider": "auto",
+          "gemini": "Leda",
+          "comfy": {
+            "engine": "omnivoice",
+            "instruct": "female, child, high pitch",
+            "ref": null,
+            "refText": null,
+            "seed": 7
+          },
+          "vibetts": "supertonic:F3",
+          "speed": 1
+        },
+        "en": {
+          "provider": "auto",
+          "gemini": "Leda",
+          "vibetts": "af_bella",
+          "speed": 1
+        }
+      },
+      "character": "cast/tilly/character.json",
+      "look": "a small cream rabbit with a red scarf"
+    },
+    {
+      "id": "blobby",
+      "name": {
+        "hr": "Blobby",
+        "en": "Blobby"
+      },
+      "role": "lead",
+      "personality": "slow, kind",
+      "voice": {
+        "hr": {
+          "provider": "auto",
+          "gemini": "Leda",
+          "comfy": {
+            "engine": "omnivoice",
+            "instruct": "female, child, high pitch",
+            "ref": null,
+            "refText": null,
+            "seed": 7
+          },
+          "vibetts": "supertonic:M1",
+          "speed": 1
+        },
+        "en": {
+          "provider": "auto",
+          "gemini": "Leda",
+          "vibetts": "am_adam",
+          "speed": 1
+        }
+      },
+      "character": "cast/blobby/character.json",
+      "look": "a round blue blob without legs"
+    }
+  ],
+  "sets": [
+    {
+      "id": "park",
+      "name": {
+        "hr": "Park",
+        "en": "Park"
+      },
+      "description": "a small green park with a bench and an oak",
+      "file": "sets/park/set3d.json"
+    }
+  ],
+  "music": {
+    "stings": []
+  },
+  "rules": [
+    "lines of at most 12 words",
+    "no name-calling"
+  ],
+  "episodes": [
+    {
+      "id": "ep00-mini3d",
+      "title": {
+        "hr": "Mala 3D proba",
+        "en": "Mini 3D Test"
+      },
+      "status": "draft"
+    }
+  ],
+  "pitches": [
+    {
+      "id": "p1",
+      "title": {
+        "hr": "Mala 3D proba",
+        "en": "Mini 3D Test"
+      },
+      "logline": {
+        "hr": "Dvoje prijatelja u parku.",
+        "en": "Two friends in a park."
+      },
+      "leads": [
+        {
+          "name": "Tilly",
+          "what": "quick"
+        },
+        {
+          "name": "Blobby",
+          "what": "slow"
+        }
+      ],
+      "sets": [
+        "park"
+      ],
+      "why": "the smallest series that exercises everything"
+    }
+  ],
+  "chosenPitch": "p1",
+  "renderer": "blender",
+  "style3d": "style3d.json"
+}

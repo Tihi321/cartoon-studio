@@ -1,0 +1,34 @@
+{
+  "schema": "cts.acting-library/1",
+  "note": "The single source for action names. The engine reads it for lint (E_ACTION_UNKNOWN, W_GESTURE_OVER_LINE), the writer prompt and the timeline; the Python registry in this folder must list the same names (test B2). kind: gesture | locomotion | react | camera. seconds: the shortest, the usual and the longest time one run takes (the timeline never stretches a gesture past max; inside a long line the speaker fills the time with accents). overLine: may run while the actor speaks. needsTarget: the script beat must give a target (cast id, prop id or mark). auto: made by the assembler, not written in a script.",
+  "actions": [
+    { "name": "idle", "kind": "gesture", "auto": true, "parts": ["root", "body", "head", "arm_L", "arm_R"], "seconds": { "min": 1, "default": 4, "max": 30 }, "overLine": true, "needsTarget": false, "params": {} },
+    { "name": "blink", "kind": "gesture", "auto": true, "parts": ["lid_L", "lid_R"], "seconds": { "min": 0.12, "default": 0.16, "max": 0.3 }, "overLine": true, "needsTarget": false, "params": {} },
+    { "name": "look_at", "kind": "gesture", "parts": ["pupil_L", "pupil_R", "head", "body"], "seconds": { "min": 0.2, "default": 0.5, "max": 2 }, "overLine": true, "needsTarget": true, "params": { "bodyPastDeg": 60 } },
+
+    { "name": "walk", "kind": "locomotion", "parts": ["root", "body", "leg_L", "leg_R", "arm_L", "arm_R", "head"], "seconds": { "min": 0.5, "default": 3, "max": 12 }, "overLine": false, "needsTarget": true, "params": { "style": "walk" } },
+    { "name": "hop", "kind": "locomotion", "parts": ["root", "squash", "body", "head", "ear_L1", "ear_R1"], "seconds": { "min": 0.4, "default": 2, "max": 10 }, "overLine": false, "needsTarget": true, "params": { "style": "hop" } },
+    { "name": "run", "kind": "locomotion", "parts": ["root", "body", "leg_L", "leg_R", "arm_L", "arm_R", "head"], "seconds": { "min": 0.4, "default": 2, "max": 8 }, "overLine": false, "needsTarget": true, "params": { "style": "run" } },
+    { "name": "turn", "kind": "locomotion", "parts": ["root", "body", "head"], "seconds": { "min": 0.25, "default": 0.5, "max": 1.5 }, "overLine": true, "needsTarget": false, "params": { "facing": "left|right" } },
+
+    { "name": "point", "kind": "gesture", "parts": ["arm_R", "hand_R", "body", "head"], "seconds": { "min": 0.8, "default": 1.4, "max": 3 }, "overLine": true, "needsTarget": true, "params": { "arm": "L|R" } },
+    { "name": "wave", "kind": "gesture", "parts": ["arm_R", "hand_R", "head"], "seconds": { "min": 0.8, "default": 1.6, "max": 3 }, "overLine": true, "needsTarget": false, "params": { "arm": "L|R" } },
+    { "name": "nod", "kind": "gesture", "parts": ["head", "body"], "seconds": { "min": 0.4, "default": 0.8, "max": 1.6 }, "overLine": true, "needsTarget": false, "params": { "count": 2 } },
+    { "name": "shake_head", "kind": "gesture", "parts": ["head", "body"], "seconds": { "min": 0.5, "default": 1, "max": 2 }, "overLine": true, "needsTarget": false, "params": { "count": 2 } },
+    { "name": "shrug", "kind": "gesture", "parts": ["body", "head", "arm_L", "arm_R"], "seconds": { "min": 0.6, "default": 1, "max": 2 }, "overLine": true, "needsTarget": false, "params": {} },
+    { "name": "think", "kind": "gesture", "parts": ["arm_R", "hand_R", "head", "brow_L", "brow_R"], "seconds": { "min": 1, "default": 2, "max": 5 }, "overLine": true, "needsTarget": false, "params": {} },
+    { "name": "sit", "kind": "gesture", "parts": ["root", "body", "leg_L", "leg_R", "arm_L", "arm_R", "head"], "seconds": { "min": 0.8, "default": 1.2, "max": 2.5 }, "overLine": false, "needsTarget": true, "params": {} },
+    { "name": "stand_up", "kind": "gesture", "parts": ["root", "body", "leg_L", "leg_R", "arm_L", "arm_R", "head"], "seconds": { "min": 0.7, "default": 1, "max": 2.5 }, "overLine": false, "needsTarget": false, "params": {} },
+    { "name": "cheer", "kind": "gesture", "parts": ["arm_L", "arm_R", "body", "head", "squash"], "seconds": { "min": 0.8, "default": 1.6, "max": 3 }, "overLine": false, "needsTarget": false, "params": {} },
+
+    { "name": "react_surprised", "kind": "react", "parts": ["squash", "root", "body", "head", "ear_L1", "ear_R1", "lid_L", "lid_R", "brow_L", "brow_R"], "seconds": { "min": 0.6, "default": 1, "max": 2 }, "overLine": false, "needsTarget": false, "params": {} },
+    { "name": "laugh", "kind": "react", "parts": ["body", "head", "squash", "lid_L", "lid_R", "mouth"], "seconds": { "min": 1, "default": 2, "max": 4 }, "overLine": false, "needsTarget": false, "params": {} },
+    { "name": "droop", "kind": "react", "parts": ["body", "head", "arm_L", "arm_R", "ear_L1", "ear_R1", "brow_L", "brow_R"], "seconds": { "min": 0.8, "default": 1.6, "max": 4 }, "overLine": true, "needsTarget": false, "params": {} },
+
+    { "name": "cut", "kind": "camera", "parts": ["camera"], "seconds": { "min": 0.04, "default": 0.04, "max": 0.04 }, "overLine": true, "needsTarget": false, "params": {} },
+    { "name": "pan", "kind": "camera", "parts": ["camera"], "seconds": { "min": 0.5, "default": 1.2, "max": 4 }, "overLine": true, "needsTarget": false, "params": { "ease": "inOut" } },
+    { "name": "push", "kind": "camera", "parts": ["camera"], "seconds": { "min": 1, "default": 3, "max": 10 }, "overLine": true, "needsTarget": false, "params": { "to": "closer shot" } },
+    { "name": "follow", "kind": "camera", "parts": ["camera"], "seconds": { "min": 1, "default": 3, "max": 12 }, "overLine": true, "needsTarget": true, "params": {} },
+    { "name": "shake_small", "kind": "camera", "parts": ["camera"], "seconds": { "min": 0.2, "default": 0.5, "max": 1.5 }, "overLine": true, "needsTarget": false, "params": {} }
+  ]
+}

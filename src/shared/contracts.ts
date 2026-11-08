@@ -30,6 +30,8 @@ export type Localized = z.infer<typeof localizedSchema>
 
 const point = z.tuple([z.number(), z.number()])
 export type Point = z.infer<typeof point>
+const vec3 = z.tuple([z.number(), z.number(), z.number()])
+const hexColour = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'a colour is #rrggbb')
 /** A relative file path (no drive, no `..`; the path guard checks the rest). */
 const relPath = z.string().min(1)
 const schemaTag = <K extends string>(kind: K) => z.literal(`cts.${kind}/1`)
@@ -50,6 +52,10 @@ export const facingSchema = z.enum(['left', 'right'])
 export type Facing = z.infer<typeof facingSchema>
 
 // ---- series bible: series/<slug>/bible.json ----
+
+export const RENDERERS = ['canvas', 'blender'] as const
+export const rendererSchema = z.enum(RENDERERS)
+export type Renderer = z.infer<typeof rendererSchema>
 
 /** OmniVoice through ComfyUI: `instruct` is attribute tags only; `ref` is an optional reference WAV under `cast/<id>/voice/`. */
 export const comfyVoiceSchema = z.strictObject({
@@ -79,11 +85,22 @@ export const castMemberSchema = z.strictObject({
   /** What the character looks like, in a few concrete words (colours, shape, one telling detail): the reference prompt and the Flow clip prompts start from it. */
   look: z.string().optional(),
   catchphrases: z.strictObject({ hr: z.array(z.string()), en: z.array(z.string()) }).optional(),
-  /** The default rig, relative to the series folder (`cast/<id>/rig.json`). */
-  rig: relPath,
+  /** The default rig, relative to the series folder (`cast/<id>/rig.json`). Canvas series only: a `blender` series has `character` instead. */
+  rig: relPath.optional(),
+  /** The 3D character spec (`cts.character3d/1`), relative to the series folder (`cast/<id>/character.json`). Blender series only. */
+  character: relPath.optional(),
   voice: z.partialRecord(langSchema, voiceSpecSchema),
   /** CTS-12: set by `cts_sheet_approve` when the user approved the character sheet (`cast/<id>/sheet.png`): when, and the seed, denoise and image model the master was made with. Absent before the approval (and for characters made before the sheet step). */
-  sheet: z.strictObject({ approvedAt: z.string(), seed: z.number().int(), denoise: z.number(), model: z.string() }).optional()
+  sheet: z
+    .strictObject({
+      approvedAt: z.string(),
+      /** Cutout sheets: the seed, denoise and image model of the master. A 3D sheet holds `specHash` (sha1 of `character.json` when it was approved) instead. */
+      seed: z.number().int().optional(),
+      denoise: z.number().optional(),
+      model: z.string().optional(),
+      specHash: z.string().optional()
+    })
+    .optional()
 })
 export type CastMember = z.infer<typeof castMemberSchema>
 
@@ -122,7 +139,11 @@ export const bibleSchema = z.strictObject({
   pitches: z.array(pitchSchema).default([]),
   chosenPitch: idSchema.nullable().default(null),
   /** When the pitch was chosen (local ISO time); set by `cts_pitch_choose` (CTS-07). */
-  chosenAt: z.string().optional()
+  chosenAt: z.string().optional(),
+  /** HUB-30: who draws the episodes. `canvas` is the frozen cutout player (pilots 1 and 2, the `mini` fixture); `blender` builds 3D characters and sets and renders in Blender. */
+  renderer: z.enum(RENDERERS).default('canvas'),
+  /** The look file of a `blender` series (`cts.style3d/1`), relative to the series folder. Default `style3d.json`. */
+  style3d: relPath.optional()
 })
 export type Bible = z.infer<typeof bibleSchema>
 
@@ -221,6 +242,9 @@ export type SetFile = z.infer<typeof setSchema>
 
 const beatBase = { id: idSchema, with: z.literal('prev').optional() }
 
+export const MOVE_STYLES = ['walk', 'hop', 'run', 'tiptoe'] as const
+export type MoveStyle = (typeof MOVE_STYLES)[number]
+
 export const BEAT_TYPES = ['line', 'move', 'turn', 'emote', 'gesture', 'look', 'camera', 'pause', 'sfx', 'music', 'title', 'clip'] as const
 
 export const beatSchema = z.discriminatedUnion('type', [
@@ -234,10 +258,25 @@ export const beatSchema = z.discriminatedUnion('type', [
     look: idSchema.optional(),
     pauseAfter: z.number().nonnegative().optional()
   }),
-  z.strictObject({ ...beatBase, type: z.literal('move'), who: idSchema, to: nameSchema, seconds: z.number().positive() }),
+  z.strictObject({
+    ...beatBase,
+    type: z.literal('move'),
+    who: idSchema,
+    to: nameSchema,
+    seconds: z.number().positive(),
+    /** Blender series: how the actor travels (default: the character's motion profile). */
+    style: z.enum(MOVE_STYLES).optional()
+  }),
   z.strictObject({ ...beatBase, type: z.literal('turn'), who: idSchema, facing: facingSchema }),
   z.strictObject({ ...beatBase, type: z.literal('emote'), who: idSchema, emotion: nameSchema }),
-  z.strictObject({ ...beatBase, type: z.literal('gesture'), who: idSchema, gesture: nameSchema }),
+  z.strictObject({
+    ...beatBase,
+    type: z.literal('gesture'),
+    who: idSchema,
+    gesture: nameSchema,
+    /** Blender series: what the gesture is aimed at (point at, sit on, look at): a cast id, a prop id of the set or a mark. */
+    target: nameSchema.optional()
+  }),
   z.strictObject({ ...beatBase, type: z.literal('look'), who: idSchema, target: idSchema }),
   z.strictObject({ ...beatBase, type: z.literal('camera'), shot: nameSchema, transition: z.enum(['cut', 'pan']), seconds: z.number().positive().optional() }),
   z.strictObject({ ...beatBase, type: z.literal('pause'), seconds: z.number().positive() }),
@@ -325,9 +364,11 @@ export type VoiceManifest = z.infer<typeof voiceManifestSchema>
 
 // ---- lip-sync track: episodes/<ep>/lipsync/<lang>/<lineId>.json ----
 
+export const LIPSYNC_METHODS = ['amplitude', 'words-hr', 'words-en', 'text-hr', 'text-en'] as const
 export const lipsyncSchema = z.strictObject({
   schema: schemaTag('lipsync'),
-  method: z.enum(['amplitude', 'words-hr', 'words-en']),
+  /** `amplitude`: 12 fps, A/E/rest (canvas). The others are the six-viseme methods of a Blender series at 24 fps: `words-<lang>` (whisper word times), `text-<lang>` (text + voiced segments). */
+  method: z.enum(LIPSYNC_METHODS),
   fps: z.number().positive(),
   /** One shape per animation frame from the clip start. */
   shapes: z.array(mouthSchema)
@@ -396,6 +437,10 @@ export const timelineClipSchema = z.strictObject({
 })
 export type TimelineClip = z.infer<typeof timelineClipSchema>
 
+export const timelineLineSchema = z.strictObject({ id: idSchema, speaker: idSchema, t0: z.number(), t1: z.number() })
+export const timelineBeatSchema = z.strictObject({ id: idSchema, t0: z.number(), t1: z.number() })
+export const timelineTitleSchema = z.strictObject({ id: idSchema, text: z.string(), t0: z.number(), t1: z.number() })
+
 export const timelineSchema = z.strictObject({
   schema: schemaTag('timeline'),
   series: idSchema,
@@ -411,14 +456,192 @@ export const timelineSchema = z.strictObject({
   camera: z.array(cameraKeySchema).min(1),
   actors: z.record(idSchema, timelineActorSchema),
   audio: z.array(timelineAudioSchema),
-  lines: z.array(z.strictObject({ id: idSchema, speaker: idSchema, t0: z.number(), t1: z.number() })),
+  lines: z.array(timelineLineSchema),
   clips: z.array(timelineClipSchema).default([]),
   /** The beats in the order they ran with their start and end. Optional in the example; the builder writes it so the languages' order can be compared (E_LANG_ORDER). */
-  beats: z.array(z.strictObject({ id: idSchema, t0: z.number(), t1: z.number() })).optional(),
+  beats: z.array(timelineBeatSchema).optional(),
   /** The `title` beats: a static card with the (already translated) text, shown from t0 to t1. Added by T4; absent in timelines without a title beat. */
-  titles: z.array(z.strictObject({ id: idSchema, text: z.string(), t0: z.number(), t1: z.number() })).optional()
+  titles: z.array(timelineTitleSchema).optional()
 })
 export type Timeline = z.infer<typeof timelineSchema>
+
+// ---- 3D (renderer "blender", HUB-30): characters, sets, the look, the timeline ----
+// Units are metres, z is up, a rotation is degrees (x, y, z). A character faces -y at yaw 0 (the camera looks along +y).
+
+/** The controls every character has (parented empties, HUB-30 decision 6). Legs, ears, tails, brows, hands and accessory chains are optional. */
+export const REQUIRED_CONTROLS = ['root', 'squash', 'body', 'head', 'arm_L', 'arm_R', 'lid_L', 'lid_R', 'pupil_L', 'pupil_R', 'mouth'] as const
+export const OPTIONAL_CONTROL_RE = /^(hand_[LR]|leg_[LR]|brow_[LR]|ear_[LR]\d+|tail\d+|acc_[A-Za-z0-9-]+\d+)$/
+export const PART_SHAPES = ['ellipsoid', 'cone', 'box', 'capsule', 'torus', 'arc', 'spines'] as const
+export const WALK_STYLES = ['walk', 'hop', 'waddle'] as const
+
+const size3 = z.array(z.number().positive()).min(1).max(3)
+const controlName = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/)
+
+export const character3dPartSchema = z.strictObject({
+  id: nameSchema,
+  shape: z.enum(PART_SHAPES),
+  /** Radii or extents, one to three numbers (an ellipsoid has three radii, a cone a radius and a height ...). */
+  size: size3,
+  at: vec3,
+  rot: vec3.optional(),
+  /** A key of `palette`. */
+  colour: controlName,
+  /** The control (empty) the part hangs on. */
+  control: controlName,
+  /** Outline width in metres; default from the style. */
+  outline: z.number().nonnegative().optional(),
+  spines: z.strictObject({ count: z.number().int().positive(), length: z.number().positive(), radius: z.number().positive(), keep: z.enum(['back', 'top', 'all']), lean: z.number() }).optional()
+})
+export type Character3dPart = z.infer<typeof character3dPartSchema>
+
+/** `cast/<id>/character.json`: a character as primitives (no AI image is an input). The builder (`blender/`) makes `character.blend` from it. */
+export const character3dSchema = z
+  .strictObject({
+    schema: schemaTag('character3d'),
+    id: idSchema,
+    units: z.literal('m'),
+    /** Standing height in metres. */
+    height: z.number().positive(),
+    palette: z.record(controlName, hexColour),
+    motion: z.strictObject({
+      /** Gesture speed factor (Pip 1.4, Bruno 0.75). */
+      tempo: z.number().positive(),
+      /** Amplitude of gestures and idle motion. */
+      energy: z.number().positive(),
+      /** Hop and idle bob. */
+      bounce: z.number().nonnegative(),
+      walk: z.strictObject({ style: z.enum(WALK_STYLES), stride: z.number().positive(), cadence: z.number().positive() })
+    }),
+    controls: z.record(controlName, z.strictObject({ parent: controlName.nullable(), at: vec3, rot: vec3.optional() })),
+    /** Spring of a secondary chain (`ear_L`, `tail`, `acc_scarf`): stiffness and damping. A chain without an entry uses the library default. */
+    springs: z.record(controlName, z.strictObject({ stiffness: z.number().positive(), damping: z.number().nonnegative() })).optional(),
+    parts: z.array(character3dPartSchema).min(1),
+    face: z.strictObject({
+      control: z.literal('head'),
+      eyes: z.strictObject({ x: z.number(), z: z.number(), r: z.number().positive(), faceY: z.number(), pupil: z.strictObject({ size: z.number().positive(), lead: z.number().nonnegative() }) }),
+      lids: z.strictObject({ colour: controlName }),
+      brows: z.strictObject({ colour: controlName, at: vec3, length: z.number().positive() }).optional(),
+      mouth: z.strictObject({ at: vec3, scale: z.number().positive(), inner: hexColour, tongue: hexColour.optional() })
+    }),
+    accessories: z.array(character3dPartSchema).optional()
+  })
+  .superRefine((c, ctx) => {
+    const bad = (path: (string | number)[], message: string) => ctx.addIssue({ code: 'custom', path, message })
+    for (const name of REQUIRED_CONTROLS) if (!c.controls[name]) bad(['controls', name], `a character has the control "${name}"`)
+    for (const [name, ctl] of Object.entries(c.controls)) {
+      if (!(REQUIRED_CONTROLS as readonly string[]).includes(name) && !OPTIONAL_CONTROL_RE.test(name)) bad(['controls', name], `"${name}" is not a standard control (hand_L/R, leg_L/R, brow_L/R, ear_L1.., ear_R1.., tail1.., acc_<name>1..)`)
+      if (ctl.parent !== null && !c.controls[ctl.parent]) bad(['controls', name, 'parent'], `parent "${ctl.parent}" is not a control`)
+      if (ctl.parent === null && name !== 'root') bad(['controls', name, 'parent'], 'only root has no parent')
+    }
+    if (c.controls.root && c.controls.root.parent !== null) bad(['controls', 'root', 'parent'], 'root has no parent (null)')
+    const lists = [['parts', c.parts], ['accessories', c.accessories ?? []]] as const
+    for (const [label, list] of lists) {
+      list.forEach((part, i) => {
+        if (!c.palette[part.colour]) bad([label, i, 'colour'], `colour "${part.colour}" is not in the palette`)
+        if (!c.controls[part.control]) bad([label, i, 'control'], `control "${part.control}" is not a control of this character`)
+      })
+    }
+    if (!c.palette[c.face.lids.colour]) bad(['face', 'lids', 'colour'], `colour "${c.face.lids.colour}" is not in the palette`)
+    if (c.face.brows && !c.palette[c.face.brows.colour]) bad(['face', 'brows', 'colour'], `colour "${c.face.brows.colour}" is not in the palette`)
+  })
+export type Character3d = z.infer<typeof character3dSchema>
+
+export const PROP_KINDS = ['tree_round', 'tree_cone', 'bush', 'bench', 'rock', 'flowers', 'fence', 'house', 'cloud'] as const
+
+/** `sets/<id>/set3d.json`: ground, sky, props from the kit, marks (ground points actors walk to) and named cameras. The builder makes `set.blend`. */
+export const set3dSchema = z.strictObject({
+  schema: schemaTag('set3d'),
+  id: idSchema,
+  ground: z.strictObject({
+    /** Width and depth in metres. */
+    size: point,
+    colour: hexColour,
+    patches: z.array(z.strictObject({ shape: z.enum(['disc', 'rect']), at: point, size: point, colour: hexColour })).default([])
+  }),
+  sky: z.strictObject({ top: hexColour, horizon: hexColour }),
+  props: z.array(
+    z.strictObject({
+      id: idSchema,
+      kind: z.enum(PROP_KINDS),
+      /** Ground position (x, y) in metres. */
+      at: point,
+      rot: z.number().optional(),
+      scale: z.number().positive().optional(),
+      colours: z.record(controlName, hexColour).optional(),
+      /** Where an actor sits (`sit`): the seat height and the seat point relative to the prop. */
+      seat: z.strictObject({ height: z.number().positive(), at: point }).optional()
+    })
+  ),
+  /** Ground points (x, y): `walk` goes to them, actors start on them. */
+  marks: z.record(nameSchema, point),
+  cameras: z.record(nameSchema, z.strictObject({ loc: vec3, target: vec3, lens: z.number().positive() })).default({})
+})
+export type Set3d = z.infer<typeof set3dSchema>
+
+const skyColours = z.strictObject({ top: hexColour, horizon: hexColour })
+
+/** `style3d.json`: the look of a series. The defaults are the probe's clean look, so `{ "schema": "cts.style3d/1" }` is a valid file. */
+export const style3dSchema = z.strictObject({
+  schema: schemaTag('style3d'),
+  toon: z.strictObject({ shade: z.number().min(0).max(1).default(0.74), threshold: z.number().min(0).max(1).default(0.36) }).default({ shade: 0.74, threshold: 0.36 }),
+  outline: z.strictObject({ colour: hexColour.default('#2b2118'), scale: z.number().positive().default(1) }).default({ colour: '#2b2118', scale: 1 }),
+  world: z.strictObject({ sky: skyColours.default({ top: '#86cdf0', horizon: '#e4f6fb' }) }).default({ sky: { top: '#86cdf0', horizon: '#e4f6fb' } }),
+  /** The sun (no shadows): rotation in degrees (x, y, z) and strength. */
+  sun: z.strictObject({ angle: vec3.default([50, -10, -35]), energy: z.number().positive().default(3.2) }).default({ angle: [50, -10, -35], energy: 3.2 }),
+  samples: z.strictObject({ final: z.number().int().positive().default(16), preview: z.number().int().positive().default(4) }).default({ final: 16, preview: 4 }),
+  post: z.enum(['none', 'paper', 'posterize']).default('none'),
+  /** Hold poses on twos for a stop-motion feel. */
+  stepped: z.boolean().default(false)
+})
+export type Style3d = z.infer<typeof style3dSchema>
+
+/** The viseme a 3D mouth shows: the six of the Blender methods (`rest A E O U MBP`). */
+export const VISEMES = ['rest', 'A', 'E', 'O', 'U', 'MBP'] as const
+export const visemeSchema = z.enum(VISEMES)
+export type Viseme = z.infer<typeof visemeSchema>
+
+export const SHOT_TRANSITIONS = ['cut', 'pan', 'push'] as const
+
+/**
+ * `episodes/<ep>/timeline.<lang>.json` of a `blender` series: the beats as semantic actions with times (the Python assembler turns them into a scene).
+ * `audio`, `lines`, `clips`, `titles` and `beats` have the shapes of `cts.timeline/1`, so the mix, the clip splice and E_LANG_ORDER are shared.
+ */
+export const timeline3dSchema = z.strictObject({
+  schema: schemaTag('timeline3d'),
+  series: idSchema,
+  episode: idSchema,
+  lang: langSchema,
+  /** sha1 of the bytes of script.json the timeline was built from. */
+  scriptHash: z.string(),
+  fps: z.literal(24),
+  size: point,
+  duration: z.number().nonnegative(),
+  seed: z.number().int(),
+  scenes: z.array(z.strictObject({ id: idSchema, set: idSchema, t0: z.number(), t1: z.number() })),
+  actors: z.record(
+    idSchema,
+    z.strictObject({
+      start: z.strictObject({ mark: nameSchema, facing: z.union([facingSchema, z.number()]) }),
+      actions: z.array(z.strictObject({ beat: idSchema, action: nameSchema, t0: z.number(), t1: z.number(), params: z.record(z.string(), z.unknown()).default({}) })),
+      /** `[t, target]`: from t the actor looks at a cast id, a prop id or a mark; null looks ahead. */
+      look: z.array(z.tuple([z.number(), nameSchema.nullable()])).default([]),
+      emotion: z.array(z.tuple([z.number(), nameSchema])).default([]),
+      mouth: z.array(z.tuple([z.number(), visemeSchema])).default([]),
+      blinks: z.array(z.number()).default([]),
+      /** The intervals of the actor's own lines. */
+      speaking: z.array(z.tuple([z.number(), z.number()])).default([]),
+      /** Word onsets inside the actor's lines: small head and hand accents. */
+      accents: z.array(z.number()).default([])
+    })
+  ),
+  shots: z.array(z.strictObject({ t: z.number(), shot: nameSchema, transition: z.enum(SHOT_TRANSITIONS), seconds: z.number().positive().optional() })).min(1),
+  audio: z.array(timelineAudioSchema),
+  lines: z.array(timelineLineSchema),
+  clips: z.array(timelineClipSchema).default([]),
+  beats: z.array(timelineBeatSchema).optional(),
+  titles: z.array(timelineTitleSchema).optional()
+})
+export type Timeline3d = z.infer<typeof timeline3dSchema>
 
 // ---- series and episode records ----
 
@@ -514,6 +737,10 @@ export const SCHEMAS_BY_TAG = {
   'cts.voice/1': voiceManifestSchema,
   'cts.lipsync/1': lipsyncSchema,
   'cts.timeline/1': timelineSchema,
+  'cts.character3d/1': character3dSchema,
+  'cts.set3d/1': set3dSchema,
+  'cts.style3d/1': style3dSchema,
+  'cts.timeline3d/1': timeline3dSchema,
   'cts.clips/1': clipsFileSchema,
   'cts.budget/1': budgetFileSchema,
   'cts.spend/1': spendFileSchema,

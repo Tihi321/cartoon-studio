@@ -22,6 +22,7 @@ series/<slug>/
   bible.json
   cast/<id>/            sketch.png (the app's rough sketch)  ref.png (master)  sheet/<pose>.png  sheet.png (character sheet)  parts/*.svg|*.png  rig.json  rig-sheet.png (rig pose sheet)   (variants/<a|c>/{parts/, rig.json, rig-sheet.png})
   sets/<id>/            layers/*.png  set.json
+  (Blender series)      style3d.json  cast/<id>/character.json  sets/<id>/set3d.json  -- see "3D series"
   music/                theme.ogg  sfx-<cue>.ogg (ComfyUI)
   clips/                intro.mp4  outro.mp4  clips.json  keyframes/<id>.png
   episodes/<ep>/        budget.json  spend.json  pipeline.json  script.json  text/<lang>.json
@@ -36,7 +37,9 @@ member's `voice` has one entry per language: `provider` (`auto` follows the allo
 the local OmniVoice engine `comfy`: `engine`, `instruct` (attribute tags such as "female, child, high pitch", not free style words),
 an optional reference clip `ref` with its transcript `refText`, and a `seed`. A cast member's optional `sheet` (CTS-12) is set by `cts_sheet_approve` when the user approved
 the character sheet `cast/<id>/sheet.png`: `approvedAt` (local ISO time) and the `seed`, `denoise` and image `model` the master `cast/<id>/ref.png` was made with. It is absent until the approval
-(and for characters made before the sheet step); the pipeline stops at the gate `sheet_review` until every cast member has one.
+(and for characters made before the sheet step); the pipeline stops at the gate `sheet_review` until every cast member has one. For a 3D character the approval holds `approvedAt` and `specHash` (see below) instead.
+
+`renderer` (HUB-30) is `canvas` (default: the frozen cutout player; a cast member has `rig`) or `blender` (3D: a cast member has `character`, the bible's optional `style3d` names the look file); see "3D series" below.
 
 ```json
 {
@@ -156,10 +159,10 @@ The script is language-independent: scenes of beats with line ids; the words liv
 | Beat | Fields |
 |---|---|
 | `line` | `line` (id in the text catalog), `speaker`, `emotion?`, `gesture?`, `look?` (cast id), `pauseAfter?` |
-| `move` | `who`, `to` (a mark; `offL`/`offR` for enter and exit), `seconds` |
+| `move` | `who`, `to` (a mark; `offL`/`offR` for enter and exit), `seconds`, `style?` (Blender series: `walk`, `hop`, `run` or `tiptoe`; default from the character's motion profile) |
 | `turn` | `who`, `facing` |
 | `emote` | `who`, `emotion` |
-| `gesture` | `who`, `gesture` (one of the rig's gestures) |
+| `gesture` | `who`, `gesture` (one of the rig's gestures; in a Blender series an action of the acting library), `target?` (Blender series: a cast id, a prop id of the set or a mark: point at, sit on, look at) |
 | `look` | `who`, `target` |
 | `camera` | `shot` (a set shot), `transition` (`cut` or `pan`), `seconds?` (pan) |
 | `pause` | `seconds` |
@@ -231,7 +234,8 @@ One entry per line. `status`: `ok`, `placeholder` (silence of the estimated leng
 ## Lip-sync track `episodes/<ep>/lipsync/<lang>/<lineId>.json`
 
 One mouth shape per animation frame from the clip start. Phase 1 uses `rest`, `E` (half open) and `A` (open) from the amplitude; phase 2 adds
-`method: "words-hr"` or `"words-en"` with the same output.
+`method: "words-hr"` or `"words-en"` with the same output. A Blender series uses the six visemes `rest A E O U MBP` at 24 fps with
+`method` `words-<lang>` (whisper word times) or `text-<lang>` (text and voiced segments).
 
 ```json
 { "schema": "cts.lipsync/1", "method": "amplitude", "fps": 12, "shapes": ["rest", "E", "A", "A", "E", "rest"] }
@@ -280,6 +284,165 @@ key at B. `clips` are the `clip` beats: the cutout segments between them are ren
 ```
 
 The mix is not in the timeline: `music` `gain` is only a trim (at most 0 dB, never a boost) and `duckTo` is kept for the schema. The levels come from `config/render.md` `mix` (voices to `voiceLufs` -20 LUFS, music `musicUnderVoiceDb` 18 dB under the voice while someone speaks and `musicGapUnderVoiceDb` 8 dB under in the gaps, sfx and clip audio at their own offsets, then `loudness` -16 LUFS on the sum). A final render measures each input once (`render/<lang>/levels.json`, cached by file hash) and writes `render/<lang>/mix-check.json` `{ lines: [{ id, voice, music, underDb }], minUnderDb, medianUnderDb, gapMusicUnderVoiceDb }`; lint gives `W_MIX_MUSIC_LOUD` when `minUnderDb` is below `mix.minUnderVoiceDb` (15).
+
+## 3D series (`renderer: "blender"`)
+
+A series whose bible says `"renderer": "blender"` (default `canvas`, so older series parse and render as before) is drawn in Blender: characters and sets are data built by code, there is no AI image in them. The script and the text catalog are shared with canvas series (with the optional fields in the beat table above). Units are metres, z is up, rotations are degrees. The bible's `style3d` names the look file (default `style3d.json`); a cast member has `character` (default `cast/<id>/character.json`) instead of `rig`; a set file is `sets/<id>/set3d.json`.
+
+```
+series/<slug>/
+  style3d.json                       cts.style3d/1
+  cast/<id>/character.json           cts.character3d/1 (the spec)    character.blend  sheet.png  build.json (built)
+  sets/<id>/set3d.json               cts.set3d/1                     set.blend  sheet.png (built)
+  episodes/<ep>/timeline.<lang>.json cts.timeline3d/1                lipsync/<lang>/<line>.json  render/<lang>/  out/
+```
+
+A cast member's `sheet` (the approval of the 3D sheet) holds `approvedAt` and `specHash`, the sha1 of `character.json` when the user approved it; a changed spec is then no longer approved.
+
+### Character `cast/<id>/character.json`
+
+A character is parts (primitives) hung on **controls**, named empties. Standard controls: `root`, `squash`, `body`, `head`, `arm_L`, `arm_R`, `lid_L`, `lid_R`, `pupil_L`, `pupil_R` and `mouth` are required; `hand_L/R`, `leg_L/R` (a character without legs hops or slides), `brow_L/R`, `ear_L1..`, `ear_R1..`, `tail1..` and `acc_<name>1..` (chains such as a scarf) are optional. `root` has no parent; every other control names one. Every part names a control and a palette colour. `motion` is the profile the acting library scales with (`tempo` is the gesture speed factor, `energy` the amplitude, `bounce` the hop and idle bob, `walk.style` is `walk`, `hop` or `waddle`). `springs` sets the damped spring of a secondary chain. `face` puts eyes, lids, optional brows and the mouth (six slots `rest A E O U MBP`) on the head; the builder refuses a face that is buried in the head (`E_FACE_HIDDEN`).
+
+```json
+{
+  "schema": "cts.character3d/1",
+  "id": "tilly",
+  "units": "m",
+  "height": 0.55,
+  "palette": { "fur": "#f6e7cf", "ear": "#e8a0a0", "dark": "#2b2118" },
+  "motion": { "tempo": 1.4, "energy": 1, "bounce": 0.5, "walk": { "style": "walk", "stride": 0.22, "cadence": 2.2 } },
+  "controls": {
+    "root": { "parent": null, "at": [0, 0, 0] },
+    "squash": { "parent": "root", "at": [0, 0, 0] },
+    "body": { "parent": "squash", "at": [0, 0, 0.14] },
+    "head": { "parent": "body", "at": [0, 0, 0.16] },
+    "arm_L": { "parent": "body", "at": [-0.09, 0, 0.1] },
+    "arm_R": { "parent": "body", "at": [0.09, 0, 0.1] },
+    "leg_L": { "parent": "squash", "at": [-0.05, 0, 0.12] },
+    "leg_R": { "parent": "squash", "at": [0.05, 0, 0.12] },
+    "ear_L1": { "parent": "head", "at": [-0.05, 0, 0.12] },
+    "ear_R1": { "parent": "head", "at": [0.05, 0, 0.12] },
+    "lid_L": { "parent": "head", "at": [-0.04, -0.085, 0.03] },
+    "lid_R": { "parent": "head", "at": [0.04, -0.085, 0.03] },
+    "pupil_L": { "parent": "head", "at": [-0.04, -0.09, 0.03] },
+    "pupil_R": { "parent": "head", "at": [0.04, -0.09, 0.03] },
+    "mouth": { "parent": "head", "at": [0, -0.095, -0.03] }
+  },
+  "springs": { "ear_L": { "stiffness": 60, "damping": 6 }, "ear_R": { "stiffness": 60, "damping": 6 } },
+  "parts": [
+    { "id": "body", "shape": "ellipsoid", "size": [0.11, 0.09, 0.14], "at": [0, 0, 0], "colour": "fur", "control": "body", "outline": 0.006 },
+    { "id": "head", "shape": "ellipsoid", "size": [0.1, 0.09, 0.09], "at": [0, 0, 0.02], "colour": "fur", "control": "head", "outline": 0.006 },
+    { "id": "arm_L", "shape": "capsule", "size": [0.025, 0.08], "at": [0, 0, -0.04], "colour": "fur", "control": "arm_L" },
+    { "id": "arm_R", "shape": "capsule", "size": [0.025, 0.08], "at": [0, 0, -0.04], "colour": "fur", "control": "arm_R" },
+    { "id": "leg_L", "shape": "capsule", "size": [0.03, 0.1], "at": [0, 0, -0.05], "colour": "fur", "control": "leg_L" },
+    { "id": "leg_R", "shape": "capsule", "size": [0.03, 0.1], "at": [0, 0, -0.05], "colour": "fur", "control": "leg_R" },
+    { "id": "ear_L1", "shape": "cone", "size": [0.03, 0.14], "at": [0, 0, 0.07], "colour": "ear", "control": "ear_L1" },
+    { "id": "ear_R1", "shape": "cone", "size": [0.03, 0.14], "at": [0, 0, 0.07], "colour": "ear", "control": "ear_R1" }
+  ],
+  "face": {
+    "control": "head",
+    "eyes": { "x": 0.04, "z": 0.03, "r": 0.022, "faceY": -0.085, "pupil": { "size": 0.012, "lead": 0.003 } },
+    "lids": { "colour": "fur" },
+    "mouth": { "at": [0, -0.095, -0.03], "scale": 0.03, "inner": "#7a2e2e" }
+  }
+}
+```
+
+A part's `shape` is `ellipsoid`, `cone`, `box`, `capsule`, `torus`, `arc` or `spines` (a part with a `spines` block: `count`, `length`, `radius`, `keep` `back|top|all`, `lean`). `accessories` (optional) is a list of parts with the same shape.
+
+### Set `sets/<id>/set3d.json`
+
+Ground, sky, props from the kit (`tree_round`, `tree_cone`, `bush`, `bench`, `rock`, `flowers`, `fence`, `house`, `cloud`), **marks** (ground points `[x, y]` that actors start on and walk to) and named **cameras** (`loc`, `target`, `lens`). A prop that can be sat on has a `seat`. Besides the set's cameras a script may use the computed shots `wide`, `two`, `cu-<cast id>` and `ots-<a>-<b>`.
+
+```json
+{
+  "schema": "cts.set3d/1",
+  "id": "park",
+  "ground": { "size": [20, 14], "colour": "#7cc576", "patches": [{ "shape": "rect", "at": [0, 1], "size": [10, 1.6], "colour": "#e6d3a3" }] },
+  "sky": { "top": "#86cdf0", "horizon": "#e4f6fb" },
+  "props": [
+    { "id": "oak", "kind": "tree_round", "at": [-4, 3], "scale": 1.4 },
+    { "id": "bench", "kind": "bench", "at": [3, 2.2], "rot": 180, "seat": { "height": 0.45, "at": [0, 0] } }
+  ],
+  "marks": { "left": [-2.5, 0], "center": [0, 0], "right": [2.5, 0], "bench": [3, 1.4] },
+  "cameras": { "bench": { "loc": [3, -2.5, 1.1], "target": [3, 2, 0.5], "lens": 40 } }
+}
+```
+
+### Look `style3d.json`
+
+The look of a series. Every field has a default (the clean toon look: a two-tone ramp at `shade` 0.74 and `threshold` 0.36, dark inverted-hull outlines, a sun without shadows, EEVEE with 16 final and 4 preview samples), so `{ "schema": "cts.style3d/1" }` is a complete file. `post` is `none`, `paper` or `posterize`; `stepped: true` holds poses on twos.
+
+```json
+{
+  "schema": "cts.style3d/1",
+  "toon": { "shade": 0.74, "threshold": 0.36 },
+  "outline": { "colour": "#2b2118", "scale": 1 },
+  "world": { "sky": { "top": "#86cdf0", "horizon": "#e4f6fb" } },
+  "sun": { "angle": [50, -10, -35], "energy": 3.2 },
+  "samples": { "final": 16, "preview": 4 },
+  "post": "none",
+  "stepped": false
+}
+```
+
+### Timeline `episodes/<ep>/timeline.<lang>.json` (3D)
+
+Built by code. Node owns the timing (from each language's audio lengths); the Python assembler turns it into a Blender scene. It holds the beats as semantic actions with times, so the two languages have the same actions in the same order, stretched to their own line lengths. `audio`, `lines`, `clips`, `titles` and `beats` have exactly the shapes of the canvas timeline, so the mix, the clip splice and `E_LANG_ORDER` are shared. Per actor: `start` (mark and facing, `left`, `right` or a yaw in degrees), `actions` (`action` is a name of the acting library, `params` its options), `look` (`[t, target]`, null looks ahead), `emotion`, `mouth` (`[t, viseme]`, the six visemes `rest A E O U MBP` at 24 fps), `blinks`, `speaking` (the intervals of the actor's own lines) and `accents` (word onsets: small head and hand beats). `shots` are the camera cuts and moves (`transition` is `cut`, `pan` or `push`).
+
+```json
+{
+  "schema": "cts.timeline3d/1",
+  "series": "mini3d",
+  "episode": "ep00-mini3d",
+  "lang": "en",
+  "scriptHash": "0000000000000000000000000000000000000000",
+  "fps": 24,
+  "size": [1920, 1080],
+  "duration": 2.5,
+  "seed": 7,
+  "scenes": [{ "id": "s1", "set": "park", "t0": 0, "t1": 2.5 }],
+  "actors": {
+    "tilly": {
+      "start": { "mark": "left", "facing": "right" },
+      "actions": [
+        { "beat": "b01", "action": "wave", "t0": 0, "t1": 1.2, "params": { "arm": "R" } },
+        { "beat": "b03", "action": "point", "t0": 1.3, "t1": 2.5, "params": {} }
+      ],
+      "look": [[0, "blobby"], [1.3, "oak"]],
+      "emotion": [[0, "happy"]],
+      "mouth": [[0, "rest"], [0.1, "A"], [0.3, "E"], [0.5, "MBP"], [0.7, "rest"]],
+      "blinks": [2.1],
+      "speaking": [[0, 1]],
+      "accents": [0.1, 0.5]
+    },
+    "blobby": {
+      "start": { "mark": "right", "facing": "left" },
+      "actions": [],
+      "look": [[0, "tilly"]],
+      "emotion": [],
+      "mouth": [],
+      "blinks": [],
+      "speaking": [[1.3, 2.1]],
+      "accents": []
+    }
+  },
+  "shots": [{ "t": 0, "shot": "wide", "transition": "cut" }, { "t": 1.3, "shot": "cu-blobby", "transition": "pan", "seconds": 0.8 }],
+  "audio": [{ "kind": "voice", "line": "l01", "file": "episodes/ep00-mini3d/voice/en/l01.wav", "t": 0, "gain": 1 }],
+  "lines": [{ "id": "l01", "speaker": "tilly", "t0": 0, "t1": 1 }, { "id": "l02", "speaker": "blobby", "t0": 1.3, "t1": 2.1 }],
+  "clips": [],
+  "beats": [{ "id": "b01", "t0": 0, "t1": 1.3 }, { "id": "b02", "t0": 1.3, "t1": 2.5 }, { "id": "b03", "t0": 1.3, "t1": 2.5 }]
+}
+```
+
+### Acting library `blender/cts_blender/acting/library.json`
+
+Not a series file: the single source for the action names (`src/engine/blender/library.ts` reads it; the Python registry must list the same names). Per action: `name`, `kind` (`gesture`, `locomotion`, `react`, `camera`), `parts` (the controls it moves), `seconds` (`min`, `default`, `max`: the timeline never stretches a gesture past `max`), `overLine` (may run while the actor speaks; `W_GESTURE_OVER_LINE` when not), `needsTarget`, `params`, and `auto: true` for what the assembler makes by itself (`idle`, `blink`). A `gesture` beat or a line's `gesture` must name a non-automatic gesture or reaction.
+
+```text
+{ "name": "point", "kind": "gesture", "parts": ["arm_R", "hand_R", "body", "head"],
+  "seconds": { "min": 0.8, "default": 1.4, "max": 3 }, "overLine": true, "needsTarget": true, "params": { "arm": "L|R" } }
+```
 
 ## Clips `clips/clips.json` (series) and `episodes/<ep>/clips/clips.json`
 
@@ -345,8 +508,9 @@ Errors fail a step; warnings are listed. Every issue has `code`, `message`, `fil
 | `E_SCHEMA` | a file is missing, not JSON, or fails its schema |
 | `E_CAST_UNKNOWN` | a cast id in the script is not in the bible or the episode's cast |
 | `E_SET_UNKNOWN` | a scene's set is not in the bible, or a set file or layer is missing |
-| `E_MARK_UNKNOWN` / `E_SHOT_UNKNOWN` | a mark or shot is not in the set |
-| `E_GESTURE_UNKNOWN` | a gesture is not in the actor's rig |
+| `E_MARK_UNKNOWN` / `E_SHOT_UNKNOWN` | a mark or shot is not in the set (Blender series: a shot is a camera of the set or a computed shot; a gesture `target` is a cast id, a prop or a mark, and `sit` needs a prop with a `seat`) |
+| `E_GESTURE_UNKNOWN` | a gesture is not in the actor's rig (canvas series) |
+| `E_ACTION_UNKNOWN` | a gesture is not an action of the acting library (Blender series) |
 | `E_LINE_NO_TEXT` | a line (or title string) has no text in a language |
 | `E_LINE_NO_AUDIO` | a line has no audio in a language (checked when a voice manifest exists, or with `requireAudio`) |
 | `E_RIG_PART` | a rig file is missing, breaks the part rules, or lacks a mouth, eye or brow state |
@@ -355,6 +519,7 @@ Errors fail a step; warnings are listed. Every issue has `code`, `message`, `fil
 | `E_LANG_ORDER` | the languages' timelines run different beat sequences |
 | `E_CLIP_MISSING` | a `clip` beat's file is missing and the clip is not marked `fallback` |
 | `W_LINE_LONG` | more than 12 words or more than 5 s |
+| `W_GESTURE_OVER_LINE` | a gesture the acting library says may not overlap a line runs while that actor speaks |
 | `W_OFF_FRAME` | a speaking actor's feet point is outside the camera rectangle |
 | `W_LANG_DRIFT` | the languages' durations differ by more than 25 % |
 | `W_PLACEHOLDER` | a voice line is a silent placeholder |
