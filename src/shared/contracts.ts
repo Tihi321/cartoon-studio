@@ -150,11 +150,26 @@ const mouthPlate = z.strictObject({ at: point, z: z.number(), shapes: z.partialR
 /** The face is a plate on the head part. The states are optional in the schema so that `cts_lint` can report which one is missing (E_RIG_PART). */
 export const rigFaceSchema = z.strictObject({ parent: z.string(), eyes: eyesPlate, brows: browsPlate, mouth: mouthPlate })
 
+/**
+ * A pose image (CTS-14): a full-body PNG of the character at a gesture's peak, made from the rig by image-to-image. `pivot` is the feet point in the
+ * image's pixels (the actor's stage position, like the root part's pivot). `face` (optional) says where the face plates go: `at` is where the head
+ * part's image top-left sits in the pose image, `scale` the head's scale there (1 = the rig's); without it the painted face shows and the mouth does
+ * not move.
+ */
+export const rigPoseSchema = z.strictObject({
+  src: relPath.regex(/.png$/i, 'a pose image is a .png file'),
+  pivot: point,
+  face: z.strictObject({ at: point, scale: z.number().positive() }).optional()
+})
+export type RigPose = z.infer<typeof rigPoseSchema>
+
 export const rigGestureSchema = z.strictObject({
   part: z.string(),
   seconds: z.number().positive(),
   /** `[fraction of seconds 0..1, degrees]`, in time order. */
-  keys: z.array(z.tuple([z.number().min(0).max(1), z.number()])).min(2)
+  keys: z.array(z.tuple([z.number().min(0).max(1), z.number()])).min(2),
+  /** A pose image (a key of the rig's `poses`) drawn instead of the parts for the middle 60 % of the gesture. */
+  pose: nameSchema.optional()
 })
 
 export const rigSchema = z.strictObject({
@@ -168,6 +183,8 @@ export const rigSchema = z.strictObject({
   face: rigFaceSchema,
   emotions: z.record(nameSchema, z.strictObject({ brows: browSchema, eyes: eyeSchema })),
   gestures: z.record(nameSchema, rigGestureSchema),
+  /** Optional pose images by name; a gesture names one with `pose`. A rig without poses works as before. */
+  poses: z.record(nameSchema, rigPoseSchema).optional(),
   move: z.strictObject({ bobPx: z.number().nonnegative(), stepSeconds: z.number().positive() })
 })
 export type Rig = z.infer<typeof rigSchema>
@@ -339,7 +356,9 @@ export const timelineActorSchema = z.strictObject({
   eyes: discTrack(eyeSchema),
   mouth: discTrack(mouthSchema),
   rot: z.record(z.string(), numTrack),
-  bob: numTrack
+  bob: numTrack,
+  /** The pose image drawn instead of the parts (a key of the rig's `poses`), `null` for the parts; absent when the actor never uses one. */
+  pose: discTrack(nameSchema.nullable()).optional()
 })
 export type TimelineActor = z.infer<typeof timelineActorSchema>
 

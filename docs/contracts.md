@@ -88,6 +88,7 @@ pivot sits in the parent part's pixel coordinates; the root part (`parent: null`
 point: the actor's stage position. `rot` is the rotation limit in degrees. `z` orders parts (higher is in front). The face is a plate on
 `face.parent` (the head): `eyes` (3 states), `brows` (4), `mouth` (8 shapes), each file placed at `at` in the head's coordinates. A face state file may be an SVG or a PNG with alpha (at most 512 KB), drawn centred on `at`; several keys may name the same file (the raster rig points `U` at `O`, `FV` and `L` at `E`).
 `emotions` pick a brows state and an eyes state. A gesture rotates one part: `keys` are `[fraction of seconds from 0 to 1, degrees]`.
+Pose images (optional, CTS-14): `poses: { <name>: { src, pivot, face?: { at, scale } } }` holds full-body PNGs (with alpha) of the character at a gesture's peak, made from the rig by image-to-image (`cts_pose_make`, `cast/<id>/poses/<gesture>.png`); `pivot` is the feet point in the image's pixels, `face.at` is where the head part's image top-left sits in the pose image and `face.scale` the head's scale there (1 = the rig's). A gesture with `pose: "<name>"` shows that image instead of the parts for the middle 60 % of its `seconds` (the timeline's `pose` track); the face plates are drawn on it only when `face` is given, otherwise the painted face shows and the mouth does not move, so the timeline never puts such a pose over a line of that actor (the gesture stays a part rotation there). A rig without `poses` works as before.
 `move.bobPx` is the bounce while walking. Facing the other way is a horizontal flip of the whole actor. `kind: "vector"` rigs have SVG parts.
 
 Part rules (checked by `cts_rig_check`, code `E_RIG_PART`): SVG has a px `viewBox`, only flat fills and strokes (no gradients, no `<text>`, no
@@ -116,10 +117,11 @@ states refer to things that exist.
     "sad": { "brows": "sad", "eyes": "half" }, "surprised": { "brows": "surprised", "eyes": "open" }
   },
   "gestures": {
-    "wave":  { "part": "arm_r", "seconds": 1.0, "keys": [[0, -10], [0.25, -150], [0.5, -120], [0.75, -150], [1, -10]] },
+    "wave":  { "part": "arm_r", "seconds": 1.0, "keys": [[0, -10], [0.25, -150], [0.5, -120], [0.75, -150], [1, -10]], "pose": "wave" },
     "point": { "part": "arm_r", "seconds": 0.8, "keys": [[0, -10], [0.3, -85], [1, -85]] },
     "shrug": { "part": "arm_l", "seconds": 0.8, "keys": [[0, -10], [0.4, -40], [1, -10]] }
   },
+  "poses": { "wave": { "src": "poses/wave.png", "pivot": [412, 1186], "face": { "at": [236, 8], "scale": 1 } } },
   "move": { "bobPx": 8, "stepSeconds": 0.33 }
 }
 ```
@@ -246,7 +248,7 @@ the player draws from t0 to t1.
 Numeric tracks are `[t, value, ease?]` and are sampled by `sampleNumber` in `src/shared/sample.ts`: before the first key the first value
 holds, after the last the last; between two keys the ease of the first decides: `step` holds until the next key's time and then jumps,
 `linear` (default) interpolates, `inOut` is a smoothstep. Actors are sampled on the 12 fps grid (`gridFps`), the camera at 24 fps.
-Discrete tracks (`facing`, `eyes`, `mouth`, `emotion`, `visible`) are `[t, value]` and hold until the next key (`sampleStep`). A camera key's
+Discrete tracks (`facing`, `eyes`, `mouth`, `emotion`, `visible`, and the optional `pose`: a pose image name, or `null` for the parts) are `[t, value]` and hold until the next key (`sampleStep`). A camera key's
 `ease` is how the camera leaves that key: `cut` holds and then jumps, `linear`, `inOut`. A pan from A to B is a key at A with `inOut` and a
 key at B. `clips` are the `clip` beats: the cutout segments between them are rendered separately and the clip file is spliced in; with
 `fallback: true` the title card and a bounce of the leads are rendered there instead.

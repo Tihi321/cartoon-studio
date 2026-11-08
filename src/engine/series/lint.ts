@@ -192,6 +192,7 @@ async function checkRigContent(issues: Issues, p: SeriesPaths, rig: Rig, cast: s
   for (const [name, g] of Object.entries(rig.gestures)) {
     if (!ids.has(g.part)) bad(`gestures.${name}`, `gesture part "${g.part}" is not a part`)
     if (g.keys.some((k, i) => i > 0 && k[0] < g.keys[i - 1]![0])) bad(`gestures.${name}`, 'gesture keys are not in time order')
+    if (g.pose && !rig.poses?.[g.pose]) bad(`gestures.${name}`, `gesture uses pose "${g.pose}" which the rig does not have`)
   }
 
   const need = (label: string, have: Record<string, string | undefined>, names: readonly string[]) => {
@@ -206,11 +207,12 @@ async function checkRigContent(issues: Issues, p: SeriesPaths, rig: Rig, cast: s
     if (!rig.face.eyes.states[e.eyes]) bad(`emotions.${name}`, `emotion uses eyes "${e.eyes}" which the rig does not have`)
   }
 
-  const files: { where: string; src: string; face: boolean }[] = [
+  const files: { where: string; src: string; face: boolean; pose?: boolean }[] = [
     ...rig.parts.map((x) => ({ where: x.id, src: x.src, face: false })),
     ...Object.entries(rig.face.eyes.states).map(([k, v]) => ({ where: `face.eyes.${k}`, src: v as string, face: true })),
     ...Object.entries(rig.face.brows.states).map(([k, v]) => ({ where: `face.brows.${k}`, src: v as string, face: true })),
-    ...Object.entries(rig.face.mouth.shapes).map(([k, v]) => ({ where: `face.mouth.${k}`, src: v as string, face: true }))
+    ...Object.entries(rig.face.mouth.shapes).map(([k, v]) => ({ where: `face.mouth.${k}`, src: v as string, face: true })),
+    ...Object.entries(rig.poses ?? {}).map(([k, v]) => ({ where: `poses.${k}`, src: v.src, face: false, pose: true }))
   ]
   for (const f of files) {
     let abs: string
@@ -228,7 +230,7 @@ async function checkRigContent(issues: Issues, p: SeriesPaths, rig: Rig, cast: s
     if (/\.svg$/i.test(f.src)) {
       for (const problem of svgProblems(await fs.readFile(abs, 'utf8'), st.size)) bad(f.where, `${f.src}: ${problem}`)
     } else {
-      if (rig.kind === 'vector' && !f.face) bad(f.where, `${f.src}: a vector rig has SVG parts`)
+      if (rig.kind === 'vector' && !f.face && !f.pose) bad(f.where, `${f.src}: a vector rig has SVG parts`)
       try {
         const meta = await sharp(abs).metadata()
         if (meta.format !== 'png') bad(f.where, `${f.src}: not a PNG`)

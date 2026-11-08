@@ -58,4 +58,10 @@ time, and plays one `<audio>` per timeline audio entry (best effort sync; the MP
 Draws `cast/<castId>/rig.json` (or `cast/<castId>/variants/<variant>/rig.json`) in a labelled grid, 6 columns of 260 x 340 px: neutral,
 every emotion, every gesture at its peak, all 8 mouths and the 3 eye states (the face cells are head close-ups). The canvas is resized to the
 sheet (1560 x 1416 for 19 cells). Wait with `await window.cts.ready`, then read `window.cts.canvas`. The same sheet can be drawn from a page that is
-already open with `await window.cts.loadSheet(baseUrl, castId, variant?)`.
+already open with `await window.cts.loadSheet(baseUrl, castId, variant?)`. A rig with `poses` adds one cell per pose image (`pose image: <name>`).
+
+### Pose render (CTS-14)
+
+`/preview/?series=<slug>&sheet=<castId>&pose=<gesture>[&variant=a|c]`
+
+Draws the rig at the peak of one gesture (neutral face) on flat `#808080`, centred on a 1024 x 1536 canvas, at scale 1 (smaller only when the figure does not fit). `window.cts.poseInfo` then holds `{ gesture, k, pivot, head }`: `k` is canvas px per rig px, `pivot` the feet point and `head` the head part's image top-left, in canvas px. This picture is the input of the pose image (`cts_pose_make`, `engine/render/sheet.ts` `poseRender`). A timeline actor's optional `pose` track names the pose image drawn instead of the parts (`null` = the parts); the pose image is placed with its `pivot` on the actor's feet point, flipped like the parts, and the face plates are drawn on it only when the rig's pose has `face`.

@@ -172,6 +172,16 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
       }
     ),
     def(
+      'cts_pose_make',
+      'Make the optional pose image of one gesture (CTS-14): the player renders the rig at the peak of the gesture (flat grey, 1024x1536), Z-Image image-to-image at denoise 0.55 cleans up the joints and hands, the grey is keyed away -> cast/<id>/poses/<gesture>.png, and the rig gets poses.<gesture> and gesture.pose. The frame-critic compares it with the character sheet (answer its task with cts_get_task / cts_submit_task); revise = one retry at denoise 0.45, a second revise leaves the gesture a part rotation. The pose image shows the painted face and has no lip-sync, so the timeline never puts it over a line of that actor; facePlates: true draws the face plates of the rig on it instead. Needs ComfyUI and the rig of the character at cast/<id>/rig.json. Returns a job id at once.',
+      z.object({ series, episode, cast, gesture: z.string().min(1), facePlates: z.boolean().default(false) }),
+      async (a) => {
+        if (!(await svc.seriesExists(a.series))) throw new Error(`no series "${a.series}"`)
+        const job = await enqueueJob(svc, { series: a.series, task: 'pose_make', role: 'frame-critic', unit: `${a.cast}-${a.gesture}`, label: `pose image ${a.cast}/${a.gesture}`, body: { episode: a.episode, cast: a.cast, gesture: a.gesture, facePlates: a.facePlates }, vision: true })
+        return { job, hint: 'cts_wait {series}; answer the frame-critic task; then cts_cast_get {series, cast} (the rig lists poses) and cts_pose_sheet' }
+      }
+    ),
+    def(
       'cts_rig_compare',
       'Render one comparison sheet of the built variants of a character side by side (the pose sheets: neutral, every emotion, the gesture peaks, the A/E/O/MBP mouths and the eye states), each under a label with its path, wall time and spend. Written to cast/<id>/variants/compare.png and returned as a picture. Variants that are not built are listed in `missing`.',
       z.object({ series, cast }),

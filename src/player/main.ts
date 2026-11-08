@@ -3,7 +3,7 @@ import './preview.css'
 import { LANGS, type Lang, type Timeline } from '../shared/contracts'
 import { loadRigAssets } from './assets'
 import { mountPreview, fetchTimeline } from './preview'
-import { drawSheet, sheetSize } from './sheet'
+import { POSE_CANVAS, drawPoseRender, drawSheet, sheetSize, type PoseInfo } from './sheet'
 import { Stage, frameAt, frameTime, type LoadOptions } from './stage'
 
 export interface CtsApi {
@@ -18,6 +18,10 @@ export interface CtsApi {
   frameAt(t: number): number
   /** Pose sheet of a rig: `cast/<castId>/rig.json` (or `variants/<variant>/`) under `baseUrl`; resizes the canvas to the sheet. */
   loadSheet(baseUrl: string, castId: string, variant?: string): Promise<void>
+  /** Pose render of a rig (CTS-14): the rig at the peak of a gesture on flat grey (1024x1536); sets `poseInfo`. */
+  loadPose(baseUrl: string, castId: string, gesture: string, variant?: string): Promise<void>
+  /** Where the feet and the head are in the pose render; null until `loadPose` has run. */
+  poseInfo: PoseInfo | null
   canvas: HTMLCanvasElement
   /** Resolves when the url-driven start (preview or sheet mode) has finished loading; resolves at once when the url asks for none. */
   ready: Promise<void>
@@ -61,6 +65,14 @@ const cts: CtsApi = {
     sizeCanvas(width, height)
     drawSheet(ctx, rig, `${castId}${variant ? ` (variant ${variant})` : ''}`)
   },
+  async loadPose(baseUrl, castId, gesture, variant) {
+    const base = new URL(baseUrl, document.baseURI).href.replace(/\/?$/, '/')
+    const dir = variant ? `cast/${castId}/variants/${variant}/` : `cast/${castId}/`
+    const rig = await loadRigAssets(`${base}${dir}rig.json`, 1)
+    sizeCanvas(POSE_CANVAS.width, POSE_CANVAS.height)
+    cts.poseInfo = drawPoseRender(ctx, rig, gesture)
+  },
+  poseInfo: null,
   canvas,
   ready: Promise.resolve(),
   error: null
@@ -89,7 +101,9 @@ async function start(): Promise<void> {
   const sheet = params.get('sheet')
   if (sheet) {
     if (!series) throw new Error('sheet mode needs ?series=<slug>&sheet=<castId>')
-    await cts.loadSheet(seriesUrl(series), sheet, params.get('variant') ?? undefined)
+    const gesture = params.get('pose')
+    if (gesture) await cts.loadPose(seriesUrl(series), sheet, gesture, params.get('variant') ?? undefined)
+    else await cts.loadSheet(seriesUrl(series), sheet, params.get('variant') ?? undefined)
     document.body.dataset.ready = 'sheet'
     return
   }

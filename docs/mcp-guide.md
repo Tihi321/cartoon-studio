@@ -82,6 +82,7 @@ The model work of the pipeline is done through the client task tools above; `doc
 | `cts_rig_check {series, cast, variant?}` | (CTS-02) The part rules, all 8 mouths, 3 eye states and 4 brows. |
 | `cts_rig_build {series, episode, cast, path?}` | Job: builds one rig path (`claude-svg` = a, `raster` = c) as a variant, with the pose sheet and the time and spend in `variants.json`. |
 | `cts_rig_compare {series, cast}` | One sheet with the pose sheets of the built variants side by side, each under its path, time and spend: `cast/<id>/variants/compare.png`. Returns the picture. |
+| `cts_pose_make {series, episode, cast, gesture, facePlates?}` | Job (optional pose image of one gesture): renders the rig at the gesture's peak, Z-Image image-to-image at denoise 0.55, keys the grey away -> `cast/<id>/poses/<gesture>.png`, sets the rig's `poses.<gesture>` and the gesture's `pose`. The frame-critic compares it with the character sheet (a task to answer); revise = one retry at denoise 0.45, then the gesture stays a part rotation. |
 | `cts_rig_choose {series, cast, variant}` | Copies the variant's rig, parts and sheet up to `cast/<id>/` and runs `cts_rig_check`. |
 | `cts_set_get {series, set?}` / `cts_set_update {series, set, groundY?, actorScale?, layers?, marks?, shots?}` | Read a set (or list them); change it (marks and shots merge by name, `null` removes one). Validated. |
 | `cts_episode_create {series, episode, title?, cast, set, shot?, mark?}` | A hand-made episode: a one-scene stub script, registered in the bible. |
@@ -102,7 +103,7 @@ UNTESTED against the real services (checked with fakes): ComfyUI image jobs (`ca
 |---|---|
 | Queue and client provider | `cts_status`, `cts_wait`, `cts_pause_all`, `cts_resume_all`, `cts_stop_now`, `cts_client_tasks`, `cts_get_task`, `cts_submit_task`, `cts_release_task`, `cts_studios_status` |
 | Series, cast, sets, episodes | `cts_series_create`, `cts_series_get`, `cts_series_update`, `cts_pitch_choose`, `cts_sheet_approve`, `cts_cast_get`, `cts_set_get`, `cts_set_update`, `cts_episode_create`, `cts_episode_get`, `cts_script_set`, `cts_text_set` |
-| Rigs | `cts_rig_set`, `cts_rig_check`, `cts_rig_build`, `cts_rig_compare`, `cts_rig_choose`, `cts_pose_sheet` |
+| Rigs | `cts_rig_set`, `cts_rig_check`, `cts_rig_build`, `cts_rig_compare`, `cts_rig_choose`, `cts_pose_make`, `cts_pose_sheet` |
 | Pipeline and clips | `cts_run_pipeline`, `cts_timeline_build`, `cts_lint`, `cts_clip_plan`, `cts_clip_generate`, `cts_clip_review` |
 | Voices and music | `cts_voice_plan`, `cts_voice_generate`, `cts_voice_status`, `cts_voice_quota`, `cts_music_generate` |
 | Budget and images | `cts_budget_set`, `cts_budget_get`, `cts_image_generate` |

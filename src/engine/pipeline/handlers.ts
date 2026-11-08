@@ -20,6 +20,7 @@ import { lintSeries } from '../series/lint'
 import { ask, castView, makeEnv, relTo, requireChosen } from './env'
 import type { Env } from './env'
 import { buildRig, clipsStep, finalRenderStep, castSheetStep, makeClip, previewRenderStep, reviewClip, rigStep, setStep, timelineStep, voiceStep, frameReviews } from './media'
+import { poseJob } from './poses'
 import { RIG_PATHS } from './rig'
 import type { RigPath } from './rig'
 import { Pipeline } from './run'
@@ -540,6 +541,17 @@ export function registerPipeline(engine: Engine): void {
       if (!(RIG_PATHS as readonly string[]).includes(rp)) throw new Error(`unknown rig path "${rp}" (${RIG_PATHS.join(', ')})`)
       const r = await buildRig(e, bible, String(req.cast), rp)
       return { result: `${req.cast} variant ${r.variant} (${rp}): ${r.status} in ${r.wallSeconds} s${r.note ? ` - ${r.note}` : ''}` }
+    },
+    {}
+  )
+  engine.queue.register(
+    'pose_make',
+    async (ctx) => {
+      const series = ctx.job.book as string
+      const req = requestOf(ctx.jobBody)
+      const episode = String(req.episode)
+      const e = makeEnv({ svc, pipe, ctx, series, episode, stepId: 'rig', state: (await pipe.read(series, episode)) ?? (await emptyFor(svc, series, episode)) })
+      return { result: await poseJob(e, String(req.cast), String(req.gesture), req.facePlates === true) }
     },
     {}
   )

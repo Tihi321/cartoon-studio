@@ -16,6 +16,8 @@ export interface RigAssets {
   eyes: Map<string, Sprite>
   brows: Map<string, Sprite>
   mouths: Map<string, Sprite>
+  /** The rig's pose images by name (CTS-14); empty for a rig without `poses`. */
+  poses: Map<string, Sprite>
 }
 
 export interface SetAssets {
@@ -109,6 +111,7 @@ export async function loadRigAssets(rigUrl: string, scale: number): Promise<RigA
   const eyes = new Map<string, Sprite>()
   const brows = new Map<string, Sprite>()
   const mouths = new Map<string, Sprite>()
+  const poses = new Map<string, Sprite>()
   const jobs: Promise<void>[] = []
   const add = (map: Map<string, Sprite>, id: string, rel: string | undefined) => {
     if (rel) jobs.push(get(rel).then((s) => void map.set(id, s)))
@@ -117,8 +120,9 @@ export async function loadRigAssets(rigUrl: string, scale: number): Promise<RigA
   for (const [id, rel] of Object.entries(rig.face.eyes.states)) add(eyes, id, rel)
   for (const [id, rel] of Object.entries(rig.face.brows.states)) add(brows, id, rel)
   for (const [id, rel] of Object.entries(rig.face.mouth.shapes)) add(mouths, id, rel)
+  for (const [id, p] of Object.entries(rig.poses ?? {})) add(poses, id, p.src)
   await Promise.all(jobs)
-  return { rig, parts, eyes, brows, mouths }
+  return { rig, parts, eyes, brows, mouths, poses }
 }
 
 export async function loadSetAssets(setUrl: string): Promise<SetAssets> {

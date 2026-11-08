@@ -18,6 +18,8 @@ export interface Pose {
   brows: BrowState
   eyes: EyeState
   mouth: MouthShape
+  /** A pose image (a key of the rig's `poses`) drawn instead of the parts; absent or null for the parts. */
+  poseImage?: string | null
 }
 
 export interface DrawItem {
@@ -44,8 +46,7 @@ export function partMatrices(a: RigAssets, pose: Pose, k: number): Map<string, D
     if (!part || depth > 64) return null
     let m: DOMMatrix
     if (part.parent === null) {
-      const flip = pose.facing === a.rig.drawnFacing ? 1 : -1
-      m = new DOMMatrix().translate(pose.x, pose.y - pose.bobPx * k).scale(flip * k, k)
+      m = rootMatrix(a, pose, k)
     } else {
       const parent = resolve(part.parent, depth + 1)
       if (!parent) return null
@@ -59,7 +60,38 @@ export function partMatrices(a: RigAssets, pose: Pose, k: number): Map<string, D
   return out
 }
 
+/** The root matrix of an actor: the feet point at the stage position, bobbed, flipped when facing the other way, scaled by `k`. */
+function rootMatrix(a: RigAssets, pose: Pose, k: number): DOMMatrix {
+  const flip = pose.facing === a.rig.drawnFacing ? 1 : -1
+  return new DOMMatrix().translate(pose.x, pose.y - pose.bobPx * k).scale(flip * k, k)
+}
+
+/** A pose image replaces the parts: the image with its pivot on the feet point, then (if the pose has `face`) the face plates on the head origin `face.at`. */
+function poseDrawList(a: RigAssets, pose: Pose, k: number, name: string): DrawItem[] | null {
+  const def = a.rig.poses?.[name]
+  const sprite = a.poses.get(name)
+  if (!def || !sprite) return null
+  const root = rootMatrix(a, pose, k)
+  const items: DrawItem[] = [{ z: -1e9, order: 0, sprite, matrix: root.translate(-def.pivot[0], -def.pivot[1]) }]
+  if (def.face) {
+    const head = root.translate(-def.pivot[0] + def.face.at[0], -def.pivot[1] + def.face.at[1]).scale(def.face.scale, def.face.scale)
+    const f = a.rig.face
+    const plate = (at: readonly [number, number], z: number, s: Sprite | undefined) => {
+      if (s) items.push({ z, order: items.length, sprite: s, matrix: head.translate(at[0] - s.w / 2, at[1] - s.h / 2) })
+    }
+    plate(f.eyes.at, f.eyes.z, a.eyes.get(pose.eyes) ?? a.eyes.get('open'))
+    plate(f.brows.at, f.brows.z, a.brows.get(pose.brows) ?? a.brows.get('neutral'))
+    plate(f.mouth.at, f.mouth.z, a.mouths.get(pose.mouth) ?? a.mouths.get('rest'))
+    items.sort((p, q) => p.z - q.z || p.order - q.order)
+  }
+  return items
+}
+
 export function drawList(a: RigAssets, pose: Pose, k: number): DrawItem[] {
+  if (pose.poseImage) {
+    const posed = poseDrawList(a, pose, k, pose.poseImage)
+    if (posed) return posed
+  }
   const mats = partMatrices(a, pose, k)
   const items: DrawItem[] = []
   let order = 0

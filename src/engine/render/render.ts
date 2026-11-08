@@ -104,6 +104,7 @@ export function stateKey(tl: Timeline, i: number): string {
         sampleStep(a.emotion, tg) ?? '',
         sampleStep(a.eyes, tg) ?? '',
         sampleStep(a.mouth, tg) ?? '',
+        sampleStep(a.pose ?? [], tg) ?? '',
         a.bob.length ? r(sampleNumber(a.bob, t, tl.fps.anim)) : '0',
         r(tg),
         rot

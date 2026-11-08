@@ -73,9 +73,15 @@ interface ActorState {
   rot: Record<string, NumKey[]>
   bob: NumKey[]
   gestureSpans: [number, number][]
+  /** The stretches where a gesture's pose image replaces the parts (the middle 60 % of the gesture); `face`: the pose draws the face plates, so a line may run over it. */
+  poseSpans: { t0: number; t1: number; name: string; face: boolean }[]
   /** True after an explicit turn or look: the actor stops turning to face each speaker until it moves or speaks. */
   locked: boolean
 }
+
+/** The share of a gesture (its `seconds`) in which its pose image is shown: the middle 60 %. */
+const POSE_FROM = 0.2
+const POSE_TO = 0.8
 
 const wordCount = (s: string) => s.split(/\s+/).filter(Boolean).length
 
@@ -101,7 +107,7 @@ export async function buildTimeline(store: SeriesStore, series: string, episode:
 
   const actors = new Map<string, ActorState>()
   for (const id of script.cast) {
-    actors.set(id, { id, rig: rigs.get(id) ?? null, x: [], y: [], facing: [], visible: [], emotion: [], eyesBase: [], mouth: [[0, 'rest']], rot: {}, bob: [[0, 0, 'step']], gestureSpans: [], locked: false })
+    actors.set(id, { id, rig: rigs.get(id) ?? null, x: [], y: [], facing: [], visible: [], emotion: [], eyesBase: [], mouth: [[0, 'rest']], rot: {}, bob: [[0, 0, 'step']], gestureSpans: [], poseSpans: [], locked: false })
   }
   const actor = (id: string): ActorState | undefined => actors.get(id)
 
@@ -188,6 +194,12 @@ export async function buildTimeline(store: SeriesStore, series: string, episode:
       const lastKey = track[track.length - 1]!
       track[track.length - 1] = [lastKey[0], lastKey[1], 'step']
       a.gestureSpans.push([t, t + g.seconds])
+      const poseDef = g.pose ? a.rig?.poses?.[g.pose] : undefined
+      if (g.pose && poseDef) {
+        // a later gesture cuts the earlier pose image off
+        for (const sp of a.poseSpans) if (sp.t1 > t) sp.t1 = Math.max(sp.t0, t)
+        a.poseSpans.push({ t0: t + POSE_FROM * g.seconds, t1: t + POSE_TO * g.seconds, name: g.pose, face: !!poseDef.face })
+      } else if (g.pose) warn(`gesture "${name}" of "${a.id}" names pose "${g.pose}" which the rig does not have`)
       return g.seconds
     }
 
@@ -349,7 +361,10 @@ export async function buildTimeline(store: SeriesStore, series: string, episode:
   const timelineActors: Timeline['actors'] = {}
   for (const a of actors.values()) {
     const eyes = blinkTrack({ seed, actor: a.id, duration, fps: ANIM_FPS, base: a.eyesBase, avoid: a.gestureSpans })
-    timelineActors[a.id] = { x: a.x, y: a.y, facing: dedupe(a.facing), visible: dedupe(a.visible), emotion: dedupe(a.emotion), eyes: dedupe(eyes), mouth: dedupe(a.mouth), rot: a.rot, bob: a.bob }
+    // a pose image without face plates has no lip-sync: it never covers a line of its actor (the gesture stays a part rotation there)
+    const spans = a.poseSpans.filter((sp) => sp.t1 > sp.t0 && (sp.face || !lines.some((l) => l.speaker === a.id && l.t0 < sp.t1 - 1e-9 && l.t1 > sp.t0 + 1e-9))).sort((p, q) => p.t0 - q.t0)
+    const pose: [number, string | null][] = spans.flatMap((sp): [number, string | null][] => [[round3(sp.t0), sp.name], [round3(sp.t1), null]])
+    timelineActors[a.id] = { x: a.x, y: a.y, facing: dedupe(a.facing), visible: dedupe(a.visible), emotion: dedupe(a.emotion), eyes: dedupe(eyes), mouth: dedupe(a.mouth), rot: a.rot, bob: a.bob, ...(pose.length ? { pose } : {}) }
   }
 
   const timeline: Timeline = {

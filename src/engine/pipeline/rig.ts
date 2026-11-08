@@ -59,10 +59,11 @@ export async function recordVariant(store: SeriesStore, series: string, cast: st
 
 const partKey = (rel: string): string[] => [rel, path.posix.basename(rel), path.posix.basename(rel).replace(/\.[a-z]+$/i, '')]
 
-/** Every file a rig names: the parts and the face states, relative to the rig folder. */
+/** Every file a rig names: the parts, the face states and the pose images, relative to the rig folder. */
 export function rigFiles(rig: Rig): string[] {
   const out = rig.parts.map((p) => p.src)
   for (const plate of [rig.face.eyes.states, rig.face.brows.states, rig.face.mouth.shapes]) for (const f of Object.values(plate)) if (f) out.push(f)
+  for (const pose of Object.values(rig.poses ?? {})) out.push(pose.src)
   return [...new Set(out)]
 }
 

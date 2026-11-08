@@ -8,6 +8,7 @@ import { withPlayer } from './browser'
 /**
  * Sheets drawn by the player in the headless browser (so the labels use the browser's fonts):
  *   `contactSheet`  N frames of an episode, evenly spread or at given times, each with its time -> `episodes/<ep>/render/<lang>/sheet-<n>.png`
+ *   `poseRender`    one rig at the peak of a gesture on flat grey, 1024x1536 (the input of a pose image, CTS-14), with where its feet and head are
  *   `poseSheet`     the labelled pose grid of a rig -> `cast/<id>/rig-sheet.png` (or `cast/<id>/variants/<v>/rig-sheet.png`; `cast/<id>/sheet.png` is the character sheet the user approves)
  */
 
@@ -18,6 +19,7 @@ interface SheetWindow {
     canvas: HTMLCanvasElement
     ready: Promise<void>
     error: string | null
+    poseInfo: { gesture: string; k: number; pivot: [number, number]; head: [number, number] } | null
   }
   __frames?: ImageBitmap[]
 }
@@ -141,6 +143,45 @@ export async function poseSheet(req: PoseSheetRequest): Promise<string> {
   const file = path.join(paths.rigDir(req.cast, req.variant), RIG_SHEET)
   await fs.writeFile(file, Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64'))
   return file
+}
+
+export interface PoseRenderRequest {
+  dataDir: string
+  series: string
+  cast: string
+  gesture: string
+  variant?: RigVariant
+  /** Absolute output path (a PNG). */
+  out: string
+  playerDir?: string
+}
+
+export interface PoseRender {
+  file: string
+  /** Canvas pixels per rig pixel (1, or less when the figure does not fit 1024x1536). */
+  k: number
+  /** The feet point in the picture, in px. */
+  pivot: [number, number]
+  /** The head part's image top-left in the picture, in px. */
+  head: [number, number]
+}
+
+/** The rig at the peak of one gesture, neutral face, on flat #808080 (player `?sheet=<cast>&pose=<gesture>`). */
+export async function poseRender(req: PoseRenderRequest): Promise<PoseRender> {
+  const query = `?series=${encodeURIComponent(req.series)}&sheet=${encodeURIComponent(req.cast)}&pose=${encodeURIComponent(req.gesture)}${req.variant ? `&variant=${req.variant}` : ''}`
+  const got = await withPlayer({ dataDir: req.dataDir, query, ...(req.playerDir ? { playerDir: req.playerDir } : {}) }, async ({ page }) => {
+    await page.evaluate(() => (window as unknown as SheetWindow).cts.ready).catch(() => undefined)
+    const err = await page.evaluate(() => (window as unknown as SheetWindow).cts.error)
+    if (err) throw new Error(`pose render of ${req.cast}/${req.gesture}: ${err}`)
+    return page.evaluate(() => {
+      const c = (window as unknown as SheetWindow).cts
+      return { url: c.canvas.toDataURL('image/png'), info: c.poseInfo }
+    })
+  })
+  if (!got.info) throw new Error(`pose render of ${req.cast}/${req.gesture}: the player gave no pose info`)
+  await fs.mkdir(path.dirname(req.out), { recursive: true })
+  await fs.writeFile(req.out, Buffer.from(got.url.slice(got.url.indexOf(',') + 1), 'base64'))
+  return { file: req.out, k: got.info.k, pivot: got.info.pivot, head: got.info.head }
 }
 
 export interface StillFrameRequest {

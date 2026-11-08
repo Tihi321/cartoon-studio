@@ -176,7 +176,8 @@ export class Stage {
       rot,
       brows: face.brows,
       eyes,
-      mouth
+      mouth,
+      poseImage: sampleStep(a.pose ?? [], tg) ?? null
     }
   }
 
