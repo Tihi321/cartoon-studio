@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { SetFile } from '../../shared/contracts'
-import { normalizeSet, seriesFile, useTool } from '../lib/studio'
+import { normalizeSet, normalizeSet3d, seconds, seriesFile, useTool } from '../lib/studio'
 import { useCts } from '../store/hooks'
 import { ctsStore } from '../store/store'
-import { NeedSeries, ToolGate, useSeries } from './studio'
+import { NeedSeries, Picture, ToolGate, useSeries } from './studio'
 
 /** The camera shapes of the player: a shot's visible height is the set's height over its zoom, the width follows the 16:9 frame. */
 const FRAME_ASPECT = 16 / 9
@@ -46,12 +46,82 @@ export function SetsPage() {
                   </li>
                 ))}
               </ul>
-              {setId && <SetView key={`${slug}/${setId}`} slug={slug} setId={setId} description={sets.find((s) => s.id === setId)?.description ?? ''} />}
+              {setId && info.data?.bible.renderer === 'blender' && <SetView3d key={`${slug}/${setId}`} slug={slug} setId={setId} description={sets.find((s) => s.id === setId)?.description ?? ''} />}
+              {setId && info.data?.bible.renderer !== 'blender' && <SetView key={`${slug}/${setId}`} slug={slug} setId={setId} description={sets.find((s) => s.id === setId)?.description ?? ''} />}
             </>
           )}
         </ToolGate>
       )}
     </div>
+  )
+}
+
+/** A set of a Blender series: the four-view sheet Blender rendered from the spec, with the spec hash, the build and the marks and cameras the script may use. */
+function SetView3d({ slug, setId, description }: { slug: string; setId: string; description: string }) {
+  const t = useTool('cts_set3d_get', { series: slug, set: setId }, normalizeSet3d)
+  return (
+    <ToolGate state={t} tool="cts_set3d_get" testId="set3d-detail">
+      {t.data && (
+        <div className="set-grid">
+          <section className="sheet panel stage-panel" aria-labelledby="set3d-sheet-title" data-testid="set3d-panel">
+            <h2 className="panel-title" id="set3d-sheet-title">
+              {setId} <span className="dim title-alt">3D set sheet: wide, two stand-ins on the first marks, the first named cameras</span>
+            </h2>
+            {description && <p className="dim">{description}</p>}
+            <Picture src={seriesFile(slug, `sets/${setId}/sheet.png`)} alt={`Set sheet of ${setId}`} testId="set3d-sheet" />
+          </section>
+          <aside className="set-side">
+            <section className="sheet panel" aria-labelledby="set3d-facts" data-testid="set3d-facts">
+              <h2 className="panel-title" id="set3d-facts">
+                Build
+              </h2>
+              <dl className="variant-facts">
+                <dt>Spec hash</dt>
+                <dd data-testid="set3d-spec-hash" title={t.data.specHash}>
+                  {t.data.specHash.slice(0, 12)}
+                </dd>
+                <dt>Build</dt>
+                <dd data-testid="set3d-build-time">{t.data.build?.buildSeconds != null ? `built in ${seconds(t.data.build.buildSeconds)}` : 'not built yet'}</dd>
+                <dt>Up to date</dt>
+                <dd data-testid="set3d-stale">{t.data.stale ? 'no: the spec changed after the last build' : 'yes'}</dd>
+                <dt>Props</dt>
+                <dd>{t.data.spec.props.length}</dd>
+              </dl>
+              {(t.data.build?.warnings?.length ?? 0) > 0 && (
+                <p className="inline-warn" data-testid="set3d-warnings">
+                  {t.data.build!.warnings!.join('; ')}
+                </p>
+              )}
+            </section>
+            <section className="sheet panel" aria-labelledby="set3d-marks-title" data-testid="set3d-marks">
+              <h2 className="panel-title" id="set3d-marks-title">
+                Marks
+              </h2>
+              <ul className="plain marks">
+                {Object.entries(t.data.spec.marks).map(([name, p]) => (
+                  <li key={name} data-testid={`set3d-mark-${name}`}>
+                    <b>{name}</b> <span className="dim">{p.join(', ')} m</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+            <section className="sheet panel" aria-labelledby="set3d-cams-title" data-testid="set3d-cameras">
+              <h2 className="panel-title" id="set3d-cams-title">
+                Cameras
+              </h2>
+              <ul className="plain marks">
+                {Object.entries(t.data.spec.cameras).map(([name, c]) => (
+                  <li key={name} data-testid={`set3d-camera-${name}`}>
+                    <b>{name}</b> <span className="dim">lens {c.lens} mm</span>
+                  </li>
+                ))}
+                <li className="dim">and the computed shots: wide, two, cu-&lt;cast&gt;, ots-&lt;a&gt;-&lt;b&gt;</li>
+              </ul>
+            </section>
+          </aside>
+        </div>
+      )}
+    </ToolGate>
   )
 }
 

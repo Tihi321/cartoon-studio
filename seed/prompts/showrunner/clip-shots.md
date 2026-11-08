@@ -15,3 +15,6 @@ For each missing clip, in the JSON object {"clips": [...]}:
 - `seconds`: 8.
 
 The clip must look like the rest of the series: flat colours, thick outlines, the same characters and set colours. Say "flat 2D paper cutout" in the action, and never ask for 3D, shading, realistic lighting or camera shake.
+
+## A 3D series (the input has `emotions` and `gestures`)
+The clip must sit next to our Blender render, so it keeps the stylised toon 3D look of the first frame instead of flat 2D: write the action as gentle character motion (a wave, a hop, a nod) and do not say "flat 2D paper cutout". The keyframe is a still that Blender renders from `staging` with our own characters and set: `shot` is one of the set's `shots`, `mark` one of its `marks`, `emotion` one of `emotions`, `gesture` one of `gestures` (they need no target). `facing` is "left" or "right".

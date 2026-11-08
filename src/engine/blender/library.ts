@@ -11,6 +11,9 @@ import { findBlenderScripts } from './runner'
 
 export const ACTION_KINDS = ['gesture', 'locomotion', 'react', 'camera'] as const
 
+/** The face states a script `emotion` may name for a 3D character: the keys of `EMOTIONS` in `blender/cts_blender/assemble.py` (the assembler shows an unknown one as neutral and warns). */
+export const EMOTIONS_3D: readonly string[] = ['neutral', 'happy', 'excited', 'surprised', 'sad', 'worried', 'angry', 'sleepy', 'proud']
+
 const seconds = z.strictObject({ min: z.number().positive(), default: z.number().positive(), max: z.number().positive() })
 
 export const actionSchema = z.strictObject({

@@ -5,6 +5,7 @@ import type { Lang } from '../../shared/contracts'
 import type { Engine } from '../engine'
 import type { CtsService } from '../service'
 import { SeriesStore } from '../series/service'
+import { endBlenderStage, noteBlenderStage } from './stage'
 import { BlenderError, blenderRunnerFor } from './runner'
 import type { BlenderRunner } from './runner'
 
@@ -59,11 +60,20 @@ async function runBuild(kind: 'character' | 'set', o: BuildOptions): Promise<Bui
   if (!(await store.exists(specFile))) throw new Error(`no ${kind} spec at ${path.relative(p.root, specFile)} (cts_${kind === 'character' ? 'character' : 'set3d'}_set first)`)
   const runner = o.runner ?? (await blenderRunnerFor(o.dataDir))
   const style = await styleFileOf(store, o.series)
+  const task = kind === 'character' ? 'character_build' : 'set_build'
+  noteBlenderStage(o.series, { task, unit: o.id, stage: 'starting', fraction: null })
   try {
     const r = await runner.run(
       kind === 'character' ? 'build-character' : 'build-set',
       { spec: specFile, outDir, sheet: o.sheet !== false, ...(style ? { style } : {}) },
-      { signal: o.signal, onLog: o.onLog, onProgress: (e) => o.onProgress?.(e.total ? e.done / e.total : 0, e.stage) }
+      {
+        signal: o.signal,
+        onLog: o.onLog,
+        onProgress: (e) => {
+          noteBlenderStage(o.series, { task, unit: o.id, stage: e.stage ?? 'working', fraction: e.total ? e.done / e.total : null })
+          o.onProgress?.(e.total ? e.done / e.total : 0, e.stage)
+        }
+      }
     )
     return {
       ok: true,
@@ -80,6 +90,8 @@ async function runBuild(kind: 'character' | 'set', o: BuildOptions): Promise<Bui
   } catch (e) {
     if (e instanceof BlenderError && SPEC_CODES.has(e.code)) return { ok: false, kind, id: o.id, code: e.code, message: e.detail }
     throw e
+  } finally {
+    endBlenderStage(o.series, task, o.id)
   }
 }
 
@@ -131,12 +143,23 @@ export async function assembleScene(o: { dataDir: string; series: string; episod
   const store = new SeriesStore(o.dataDir)
   const { job } = await assembleInputs(store, o.series, o.episode, o.lang)
   const runner = o.runner ?? (await blenderRunnerFor(o.dataDir))
+  const unit = `${o.episode}-${o.lang}`
+  noteBlenderStage(o.series, { task: 'scene_assemble', unit, stage: 'starting', fraction: null })
   try {
-    const r = await runner.run('assemble', job, { signal: o.signal, onLog: o.onLog, onProgress: (e) => o.onProgress?.(e.total ? e.done / e.total : 0, e.stage) })
+    const r = await runner.run('assemble', job, {
+      signal: o.signal,
+      onLog: o.onLog,
+      onProgress: (e) => {
+        noteBlenderStage(o.series, { task: 'scene_assemble', unit, stage: e.stage ?? 'working', fraction: e.total ? e.done / e.total : null })
+        o.onProgress?.(e.total ? e.done / e.total : 0, e.stage)
+      }
+    })
     return { ok: true, blend: String(r.blend), assembly: String(r.assembly), frames: Number(r.frames), actions: (r.actions as string[] | undefined) ?? [], shots: Number(r.shots ?? 0), warnings: (r.warnings as string[] | undefined) ?? [], assembleSeconds: Number(r.assembleSeconds ?? 0) }
   } catch (e) {
     if (e instanceof BlenderError && ASSEMBLE_CODES.has(e.code)) return { ok: false, code: e.code, message: e.detail }
     throw e
+  } finally {
+    endBlenderStage(o.series, 'scene_assemble', unit)
   }
 }
 

@@ -1,4 +1,4 @@
-import type { PipelineState } from '../../shared/contracts'
+import type { PipelineState, Renderer } from '../../shared/contracts'
 
 /**
  * The steps of the pipeline, in order (CTS-07). State lives in `episodes/<ep>/pipeline.json`; `run.ts` advances it, `handlers.ts` does the work.
@@ -43,26 +43,68 @@ export const STEPS: readonly StepDef[] = [
   { id: 'final_render', no: '13', label: 'Final renders and the summary', role: 'showrunner', kind: 'code' }
 ]
 
+/** The canvas step list (pilots 1 and 2, the `mini` fixture; frozen since HUB-30). */
+export const CANVAS_STEPS: readonly StepDef[] = STEPS
+
+const byId = (id: string): StepDef => STEPS.find((s) => s.id === id)!
+
+/**
+ * The step list of a `blender` series (HUB-30, CTS-27): characters and sets are specs that Blender builds, the pause is on the character sheets,
+ * the timeline is the 3D one, and `assemble` makes the scenes the render reads. The steps the two renderers share are the same objects as above.
+ */
+export const BLENDER_STEPS: readonly StepDef[] = [
+  byId('pitch'),
+  byId('pitch_choice'),
+  byId('bible'),
+  { id: 'character', no: '2', label: 'Characters: designer spec, Blender build, sheet.png self-review (character-designer, Blender)', role: 'character-designer', kind: 'role', vision: true },
+  { ...byId('sheet_review'), label: 'The user approves every character sheet (turnaround and expressions)' },
+  { id: 'set3d', no: '4', label: 'Sets: designer spec, Blender build, sheet self-review (background-artist, Blender)', role: 'background-artist', kind: 'role', vision: true },
+  byId('script'),
+  byId('safety'),
+  byId('voice_cast'),
+  byId('voice'),
+  byId('music'),
+  byId('clip_shots'),
+  byId('clips'),
+  { ...byId('timeline'), label: 'Six-viseme lip-sync, 3D timelines and lint' },
+  { id: 'assemble', no: '10b', label: 'Assemble the Blender scene of every language', role: 'showrunner', kind: 'code' },
+  { ...byId('preview_render'), label: 'Preview renders in Blender and contact sheets' },
+  byId('frame_review'),
+  byId('final_render')
+]
+
+/** Every step of either list, once by id (the job handlers are registered for these). */
+export const ALL_STEPS: readonly StepDef[] = [...new Map([...CANVAS_STEPS, ...BLENDER_STEPS].map((s) => [s.id, s])).values()]
+
+export const stepsFor = (renderer: Renderer): readonly StepDef[] => (renderer === 'blender' ? BLENDER_STEPS : CANVAS_STEPS)
+
+/** Which list a state follows: a state that has the step `character` or `assemble` is a Blender run; any other one is a canvas run and is never changed. */
+export const rendererOfState = (state: Pick<PipelineState, 'steps'>): Renderer => ('character' in state.steps || 'assemble' in state.steps ? 'blender' : 'canvas')
+
+/** The steps of this state's run, in order. */
+export const stepsOf = (state: Pick<PipelineState, 'steps'>): readonly StepDef[] => stepsFor(rendererOfState(state))
+
 export const STEP_IDS: readonly string[] = STEPS.map((s) => s.id)
 
 export function stepDef(id: string): StepDef {
-  const s = STEPS.find((x) => x.id === id)
-  if (!s) throw new Error(`unknown pipeline step "${id}" (${STEP_IDS.join(', ')})`)
+  const s = ALL_STEPS.find((x) => x.id === id)
+  if (!s) throw new Error(`unknown pipeline step "${id}" (${ALL_STEPS.map((x) => x.id).join(', ')})`)
   return s
 }
 
 export const taskOf = (s: StepDef): string => s.task ?? s.id
 
-/** A new, empty state: every step pending. */
-export function emptyState(series: string, episode: string, now: string): PipelineState {
-  return { schema: 'cts.pipeline/1', series, episode, state: 'idle', steps: Object.fromEntries(STEP_IDS.map((id) => [id, { state: 'pending' as const }])), updatedAt: now, run: 0 }
+/** A new, empty state: every step of the renderer's list pending. */
+export function emptyState(series: string, episode: string, now: string, renderer: Renderer = 'canvas'): PipelineState {
+  return { schema: 'cts.pipeline/1', series, episode, state: 'idle', steps: Object.fromEntries(stepsFor(renderer).map((s) => [s.id, { state: 'pending' as const }])), updatedAt: now, run: 0 }
 }
 
 /** Every step from `id` on goes back to pending, marked `redo` so its handler makes its files again instead of keeping them. */
 export function resetFrom(state: PipelineState, id: string): void {
-  stepDef(id)
-  const at = STEP_IDS.indexOf(id)
-  for (const [i, sid] of STEP_IDS.entries()) {
+  const ids = stepsOf(state).map((s) => s.id)
+  const at = ids.indexOf(id)
+  if (at < 0) throw new Error(`unknown pipeline step "${id}" for this run (${ids.join(', ')})`)
+  for (const [i, sid] of ids.entries()) {
     if (i < at) continue
     state.steps[sid] = { state: 'pending', detail: 'redo' }
   }
@@ -70,6 +112,11 @@ export function resetFrom(state: PipelineState, id: string): void {
 
 /** The steps that exist in the state, in order, with a pending step for any the file does not know yet (a state written by an older version). */
 export function normalise(state: PipelineState): PipelineState {
+  // a Blender run only gets the steps of its own list; the canvas migrations below never touch it
+  if (rendererOfState(state) === 'blender') {
+    for (const step of BLENDER_STEPS) state.steps[step.id] ??= { state: 'pending' }
+    return state
+  }
   // CTS-12: `cast_ref` (pilot 1) became `cast_sheet` + the gate `sheet_review`. A finished `cast_ref` finishes both (that run made its
   // references before the sheet step existed and its characters were never reviewed as sheets); anything else starts again at `cast_sheet`.
   const old = state.steps.cast_ref

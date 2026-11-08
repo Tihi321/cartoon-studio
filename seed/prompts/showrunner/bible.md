@@ -13,3 +13,6 @@ The user chose one pitch. Turn it into the series bible. Reply with one JSON obj
 - `sets`: the sets of the pitch, each `{id, name (hr, en), description}`; the description says what is in the picture and which colours, in a way a painter can use.
 
 Keep the cast small. Voices are chosen later.
+
+## A 3D series (the input says `renderer: "blender"`)
+The characters and sets are built in Blender from simple rounded shapes (spheres, cones, capsules) with flat cel shading and a thin dark outline; the character-designer turns each `look` into a spec. So: `style.look` describes that (toon 3D, soft shapes, a bright simple world), `palette` is the 4 to 6 colours the specs will use (with a near-black for the outline and the nose), `outlinePx` stays 2, `refPrompt` is one line of the same look. Each cast `look` names the body shape, the two or three main colours and one accessory or detail (a scarf, spines, a tail) in plain words; the leads differ in silhouette and in colour, and one is quick and one is slow (that becomes their motion profile). If the brief or the pitch already says what the leads look like, keep it. The sets are places a camera can walk around: say which props (trees, a bench, a path) they hold.

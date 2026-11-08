@@ -121,8 +121,20 @@ export interface SheetApproval {
   /** The user's last verdict (`cts_sheet_approve`): ok false = asked to make the sheet again, with the note. */
   review: { ok: boolean; note: string | null; at: string } | null
 }
+/** A Blender series: where the 3D character stands (`cts_cast_get` `character`): the spec hash, the last build, and whether the user's approval still holds for the spec. */
+export interface Character3dInfo {
+  specHash: string
+  build: { specHash: string | null; buildSeconds: number | null; blender: string | null; warnings: string[] } | null
+  stale: boolean
+  approvedSpecHash: string | null
+  approvalHolds: boolean
+}
 export interface CastInfo {
   id: string
+  /** Set for a character of a `blender` series. */
+  character: Character3dInfo | null
+  /** The optional concept picture (`concept.png`, never an input), relative to the series folder. */
+  concept: string | null
   rig: { height: number; kind: string; parts: string[]; gestures: string[]; emotions: string[] } | null
   /** The master image (`ref.png`), the rough sketch it was drawn from, the character sheet (`sheet.png`: the master and the poses side by side) and the rig pose sheet (`rig-sheet.png`), relative to the series folder; null when the file does not exist. */
   ref: string | null
@@ -141,7 +153,7 @@ export function normalizeCast(r: Record<string, unknown>): CastInfo {
   const member = (r.member ?? {}) as { id?: string }
   const file = (r.variants ?? {}) as { chosen?: RigVariant | null; variants?: Partial<Record<RigVariant, { status: string; wallSeconds: number; spendUsd: number; spendCredits?: number; note: string }>> }
   const checks = (r.checks ?? {}) as Record<string, RigCheckView | undefined>
-  const files = (r.files ?? {}) as { sketch?: string | null; ref?: string | null; sheet?: string | null; rigSheet?: string | null }
+  const files = (r.files ?? {}) as { sketch?: string | null; ref?: string | null; sheet?: string | null; rigSheet?: string | null; concept?: string | null }
   const sh = (r.sheet ?? {}) as { approved?: boolean; approvedAt?: string | null; review?: SheetApproval['review']; poses?: string[] }
   const id = member.id ?? ''
   const variants: VariantInfo[] = (['a', 'c'] as const).map((v) => {
@@ -159,8 +171,40 @@ export function normalizeCast(r: Record<string, unknown>): CastInfo {
       check: checks[v]
     }
   })
-  return { id, rig: (r.rig as CastInfo['rig']) ?? null, ref: files.ref ?? null, sketch: files.sketch ?? null, charSheet: files.sheet ?? null, sheet: files.rigSheet ?? null, sheetPoses: sh.poses ?? [], approval: { approved: !!sh.approved, approvedAt: sh.approvedAt ?? null, review: sh.review ?? null }, variants, check: checks.chosen ?? null }
+  return { id, character: (r.character as Character3dInfo | null | undefined) ?? null, concept: files.concept ?? null, rig: (r.rig as CastInfo['rig']) ?? null, ref: files.ref ?? null, sketch: files.sketch ?? null, charSheet: files.sheet ?? null, sheet: files.rigSheet ?? null, sheetPoses: sh.poses ?? [], approval: { approved: !!sh.approved, approvedAt: sh.approvedAt ?? null, review: sh.review ?? null }, variants, check: checks.chosen ?? null }
 }
+
+/** `cts_set3d_get { series, set }` (a Blender series): the spec, its hash, the last build and whether it is stale. The sheet is `sets/<id>/sheet.png`. */
+export interface Set3dInfo {
+  spec: { id: string; props: { id: string; kind: string }[]; marks: Record<string, [number, number]>; cameras: Record<string, { lens: number }> }
+  specHash: string
+  build: { buildSeconds?: number; warnings?: string[]; blender?: string } | null
+  stale: boolean
+}
+export function normalizeSet3d(r: Record<string, unknown>): Set3dInfo {
+  const spec = (r.spec ?? {}) as Partial<Set3dInfo['spec']>
+  return { spec: { id: spec.id ?? '', props: spec.props ?? [], marks: spec.marks ?? {}, cameras: spec.cameras ?? {} }, specHash: String(r.specHash ?? ''), build: (r.build as Set3dInfo['build']) ?? null, stale: r.stale === true }
+}
+
+/** `cts_blender_status` -> `{ ok: true, path, version, gpu, ... }` or `{ ok: false, code, message, path }`. */
+export interface BlenderStatusView {
+  ok: boolean
+  path: string
+  version?: string
+  gpu?: { renderer: string; vendor: string; backend: string } | null
+  code?: string
+  message?: string
+}
+/** `cts_blender_config` -> `{ changed, config }`. */
+export interface BlenderConfigView {
+  path: string
+  version: string
+  allowUntestedVersion: boolean
+  chunkFrames: number
+  preview: { width: number; height: number; samples: number }
+  final: { width: number; height: number; samples: number }
+}
+export const normalizeBlenderConfig = (r: Record<string, unknown>): BlenderConfigView => (r.config ?? r) as BlenderConfigView
 
 /** `cts_set_get { series, set }` -> `{ set, layerFiles }`. */
 export function normalizeSet(r: Record<string, unknown>): SetFile {

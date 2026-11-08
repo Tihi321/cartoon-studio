@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { LANGS, VOICE_PROVIDERS } from '../../shared/contracts'
 import type { Lang, VoiceSpec } from '../../shared/contracts'
 import { getStartWithWindows, sendCommand, setStartWithWindows } from '../api'
-import { callTool, normalizeBudget, normalizeMediaConfig, useTool } from '../lib/studio'
-import type { BudgetInfo } from '../lib/studio'
+import { callTool, normalizeBlenderConfig, normalizeBudget, normalizeMediaConfig, useTool } from '../lib/studio'
+import type { BlenderStatusView, BudgetInfo } from '../lib/studio'
 import { useCts } from '../store/hooks'
 import { SCHEMES, type Scheme } from '../lib/scheme'
 import { ctsStore } from '../store/store'
@@ -29,6 +29,7 @@ export function SettingsPage() {
 
       <Studios />
       <MediaEngines />
+      <BlenderSettings />
       <VoiceProviders />
       <Budget />
 
@@ -116,6 +117,100 @@ function MediaEngines() {
               ))}
             </ol>
             <p className="dim">Read-only: change the engines in config/providers.md (comfy.imageModel, comfy.musicModel).</p>
+          </>
+        )}
+      </ToolGate>
+    </section>
+  )
+}
+
+/**
+ * Blender (CTS-27): where the 3D render finds it, the version it found against the pinned one, the GPU EEVEE would use and the frame settings of the
+ * preview and the final. The path is saved to config/blender.md with cts_blender_config and checked again with cts_blender_status.
+ */
+function BlenderSettings() {
+  const status = useTool('cts_blender_status', {}, (r) => r as unknown as BlenderStatusView)
+  const config = useTool('cts_blender_config', {}, normalizeBlenderConfig)
+  const [path, setPath] = useState<string | null>(null)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const shown = path ?? config.data?.path ?? ''
+  const save = async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      await callTool('cts_blender_config', { path: shown.trim() })
+      setMsg({ ok: true, text: 'Saved to config/blender.md.' })
+      setPath(null)
+      config.reload()
+      status.reload()
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message })
+    } finally {
+      setBusy(false)
+    }
+  }
+  const st = status.data
+  return (
+    <section className="sheet panel" aria-labelledby="set-blender" data-testid="set-blender">
+      <div className="row spread">
+        <h2 className="panel-title" id="set-blender">
+          Blender
+        </h2>
+        <button onClick={() => status.reload()} disabled={status.loading} data-testid="blender-check">
+          Check now
+        </button>
+      </div>
+      <p className="dim">Blender draws the 3D series (characters, sets, the render). Cartoon Studio never installs or bundles it: install the pinned version and set where it is.</p>
+      <ToolGate state={config} tool="cts_blender_config" testId="blender-config">
+        {config.data && (
+          <>
+            <Field label="Blender executable" hint={`Accepted version: ${config.data.version}.x${config.data.allowUntestedVersion ? ' (other versions allowed)' : ''}`}>
+              {(id, described) => <input id={id} aria-describedby={described} value={shown} onChange={(e) => setPath(e.target.value)} data-testid="blender-path" />}
+            </Field>
+            <div className="row">
+              <button onClick={() => void save()} disabled={busy || path === null || !shown.trim()} data-testid="blender-save">
+                {busy ? 'Saving...' : 'Save the path'}
+              </button>
+              {msg && (
+                <span className={msg.ok ? 'inline-ok' : 'inline-error'} role="status" data-testid="blender-msg">
+                  {msg.text}
+                </span>
+              )}
+            </div>
+            <dl className="variant-facts">
+              <dt>Status</dt>
+              <dd>
+                {status.loading && !st ? (
+                  <span className="dim" data-testid="blender-status">
+                    checking...
+                  </span>
+                ) : st?.ok ? (
+                  <Pill tone="good" testId="blender-status" title={st.path}>
+                    usable
+                  </Pill>
+                ) : (
+                  <Pill tone="bad" testId="blender-status" title={st?.message}>
+                    {st?.code ?? 'not checked'}
+                  </Pill>
+                )}
+              </dd>
+              <dt>Version found</dt>
+              <dd data-testid="blender-version">{st?.ok ? st.version : st?.message ? <span className="dim">{st.message}</span> : 'unknown'}</dd>
+              <dt>GPU for EEVEE</dt>
+              <dd data-testid="blender-gpu">{st?.ok ? (st.gpu ? `${st.gpu.renderer} (${st.gpu.backend})` : 'not reported') : 'unknown'}</dd>
+              <dt>Preview</dt>
+              <dd data-testid="blender-samples-preview">
+                {config.data.preview.width} x {config.data.preview.height}, {config.data.preview.samples} samples
+              </dd>
+              <dt>Final</dt>
+              <dd data-testid="blender-samples-final">
+                {config.data.final.width} x {config.data.final.height}, {config.data.final.samples} samples
+              </dd>
+              <dt>Chunk</dt>
+              <dd>{config.data.chunkFrames} frames</dd>
+            </dl>
+            <p className="dim">Sizes and samples are read from config/blender.md (cts_blender_config changes them).</p>
           </>
         )}
       </ToolGate>

@@ -15,7 +15,8 @@ import type { CtsService } from '../service'
 import { readManifest } from '../voice/manifest'
 import { CLIP_IDS, clipLocation, missingClips, videoDir } from './clips'
 import { RIG_PATHS, chooseVariant, compareVariants, readVariants, writeRigSet } from './rig'
-import { Pipeline } from './run'
+import { blenderStageOf } from '../blender/stage'
+import { Pipeline, specHashOf } from './run'
 
 /**
  * The series, rig, set, episode, pipeline and clip tools (CTS-07). The model work of the pipeline is done through the `client` tools of the core
@@ -61,7 +62,9 @@ export async function pipelineSummaries(svc: CtsService, slug: string): Promise<
   const out: unknown[] = []
   for (const ep of await pipe.episodesWithPipeline(slug)) {
     const r = await pipe.status(slug, ep)
-    if (r) out.push({ episode: ep, state: r.state, step: r.step, waitingOn: r.waitingOn, hint: r.hint, steps: r.steps.map((s) => `${s.id}:${s.state}`).join(' '), ...(r.summary ? { summary: r.summary } : {}) })
+    // a Blender series: where the Blender job stands right now (a build, the assembly, a render), from its progress lines
+    const stage = blenderStageOf(slug)
+    if (r) out.push({ episode: ep, state: r.state, step: r.step, waitingOn: r.waitingOn, hint: r.hint, steps: r.steps.map((s) => `${s.id}:${s.state}`).join(' '), ...(stage ? { blender: stage } : {}), ...(r.summary ? { summary: r.summary } : {}) })
   }
   return out
 }
@@ -133,7 +136,7 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
     ),
     def(
       'cts_cast_get',
-      'Read one cast member (or all): the bible entry, the rig at cast/<id>/rig.json (parts, gestures, emotions), the variants (path, wall time, spend), the cts_rig_check result of the rig and of each variant, the reference, sketch, sheet and pose sheet paths, and the sheet approval (approved, approvedAt, the last verdict of the user, the sheet poses).',
+      'Read one cast member (or all): the bible entry (a Blender series also gets `character`: the spec hash, the last build, whether it is stale, and whether the user\'s approval still holds for the current spec), the rig at cast/<id>/rig.json (parts, gestures, emotions), the variants (path, wall time, spend), the cts_rig_check result of the rig and of each variant, the reference, sketch, sheet and pose sheet paths, and the sheet approval (approved, approvedAt, the last verdict of the user, the sheet poses).',
       z.object({ series, cast: cast.optional() }),
       async (a) => {
         const st = store()
@@ -149,7 +152,19 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
           const checks: Record<string, unknown> = {}
           if (rig) checks.chosen = await checkRig(st, a.series, id)
           for (const v of RIG_VARIANTS) if (variants.variants[v]?.status === 'built') checks[v] = await checkRig(st, a.series, id, v)
-          out.push({ member, sheet: await sheetState(st, a.series, id, member.sheet?.approvedAt), rig: rig ? { height: rig.height, kind: rig.kind, parts: rig.parts.map((x) => x.id), gestures: Object.keys(rig.gestures), emotions: Object.keys(rig.emotions) } : null, variants, checks, files: { sketch: (await st.exists(path.join(p.castDir(id), 'sketch.png'))) ? `cast/${id}/sketch.png` : null, ref: (await st.exists(path.join(p.castDir(id), 'ref.png'))) ? `cast/${id}/ref.png` : null, sheet: (await st.exists(path.join(p.castDir(id), 'sheet.png'))) ? `cast/${id}/sheet.png` : null, rigSheet: await rigSheetName(p.castDir(id), p.castDir(id)).then((n) => (n ? `cast/${id}/${n}` : null)) } })
+          // a Blender series: the spec hash, the last build and whether the approval still holds for the current spec (CTS-27)
+          const specHash = bible.renderer === 'blender' ? await specHashOf(st, a.series, id) : null
+          const build = specHash ? await fs.readFile(path.join(p.castDir(id), 'build.json'), 'utf8').then((x) => JSON.parse(x) as Record<string, unknown>, () => null) : null
+          const character = specHash
+            ? {
+                specHash,
+                build: build ? { specHash: build.specHash ?? null, buildSeconds: build.buildSeconds ?? null, blender: build.blender ?? null, warnings: build.warnings ?? [] } : null,
+                stale: !build || build.specHash !== specHash,
+                approvedSpecHash: member.sheet?.specHash ?? null,
+                approvalHolds: !!member.sheet?.approvedAt && member.sheet.specHash === specHash
+              }
+            : null
+          out.push({ member, character, sheet: await sheetState(st, a.series, id, member.sheet?.approvedAt), rig: rig ? { height: rig.height, kind: rig.kind, parts: rig.parts.map((x) => x.id), gestures: Object.keys(rig.gestures), emotions: Object.keys(rig.emotions) } : null, variants, checks, files: { sketch: (await st.exists(path.join(p.castDir(id), 'sketch.png'))) ? `cast/${id}/sketch.png` : null, ref: (await st.exists(path.join(p.castDir(id), 'ref.png'))) ? `cast/${id}/ref.png` : null, sheet: (await st.exists(path.join(p.castDir(id), 'sheet.png'))) ? `cast/${id}/sheet.png` : null, rigSheet: await rigSheetName(p.castDir(id), p.castDir(id)).then((n) => (n ? `cast/${id}/${n}` : null)), concept: (await st.exists(path.join(p.castDir(id), 'concept.png'))) ? `cast/${id}/concept.png` : null } })
         }
         return a.cast ? out[0] : { cast: out }
       }
@@ -157,7 +172,7 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
 
     def(
       'cts_sheet_approve',
-      'The user\'s verdict on one character sheet (cast/<id>/sheet.png: the master and the wave, point and shrug poses, drawn by Z-Image over the app\'s sketches). The pipeline stops at "waiting-on-user" (sheet_review) after the sheets and nothing is rigged until EVERY character has been approved. Call it ONLY with the user\'s answer. ok: true records bible.cast[].sheet {approvedAt, seed, denoise, model}; ok: false needs a note (what to change): that character\'s sheet is made again with the note added to the prompt, with new seeds, and has to be approved again. Returns the cast members still open and the resumed pipelines.',
+      'The user\'s verdict on one character sheet. A Blender series: cast/<id>/sheet.png is the turnaround, expressions and mouths that Blender rendered from the character spec; ok: true records bible.cast[].sheet {approvedAt, specHash} (refused when the spec changed after the last build: build again and look again); ok: false needs a note, and that character is designed and built again (the designer gets the note). A canvas series: cast/<id>/sheet.png is the master and the wave, point and shrug poses, drawn by Z-Image over the app\'s sketches. The pipeline stops at "waiting-on-user" (sheet_review) after the sheets and nothing is rigged until EVERY character has been approved. Call it ONLY with the user\'s answer. ok: true records bible.cast[].sheet {approvedAt, seed, denoise, model}; ok: false needs a note (what to change): that character\'s sheet is made again with the note added to the prompt, with new seeds, and has to be approved again. Returns the cast members still open and the resumed pipelines.',
       z.object({ series, cast, ok: z.boolean().describe('true = the user approves the sheet; false = make it again'), note: z.string().optional().describe('What to change (required when ok is false); added to the image prompt') }),
       async (a) => pipe().approveSheet(a.series, a.cast, a.ok, a.note)
     ),
@@ -311,7 +326,7 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
     // ---------------------------------------------------------------- the pipeline
     def(
       'cts_run_pipeline',
-      'Start or resume the episode pipeline: pitch (3 premises) -> STOP until the user chooses (cts_pitch_choose) -> bible -> character sheets (sketch, Z-Image master, 3 poses) -> STOP until the user approves every sheet (cts_sheet_approve) -> rigs (raster from the master) -> pose images (optional) -> sets -> script -> child-safety review -> voice casting -> voices -> music (ComfyUI) -> Flow intro/outro clips -> lip-sync/timelines/lint -> preview renders -> frame review -> final renders with the mix check (hr and en MP4s). Call it again with the same series and episode to resume (it never skips a pause). The first call needs a brief {idea, title?, ageMin?, ageMax?, notes?, seconds?, lineRange?: [12,16], intro?: false, outro?: false}, or brief.pitch {id?: "p1", title: {hr,en}, logline: {hr,en}, leads: [{name, what}], sets: [], why}: that premise is the chosen one, the pitch step and its pause are skipped and the bible starts from it. retry: true puts failed steps back; from: "<step>" redoes that step and all after it. options: rigPaths {castId: ["raster"] (default) or ["claude-svg"]} (SVG only when asked), rigChoice {castId: "a"|"c"}, poses {castId: [gesture, ...]} (pose images, at most 2 per character; default none), skipClips: true (drop the Flow clips), clipCredits {clipId: max_credits}. Model work is done through cts_get_task / cts_submit_task; the answer says what to do next (hint) and shows every step.',
+      'Start or resume the episode pipeline. A 3D series (options.renderer "blender", or a bible whose renderer is "blender"): pitch (skipped with brief.pitch) -> bible (writes style3d.json) -> characters (designer spec, Blender build, self-review of sheet.png, at most 2 revisions) -> STOP until the user approves every character sheet (cts_sheet_approve) -> sets (spec, build, self-review) -> script (the writer gets the acting library names, marks and shots) -> child-safety review -> voice casting -> voices (with whisper word times) -> music -> Flow intro/outro clips (the keyframe is a Blender still; waits for the credit cap and max_credits) -> 3D timelines with six-viseme lip-sync and lint -> assemble (a Blender scene per language) -> Blender preview renders -> frame review -> final renders (hr and en MP4s). A canvas series (pilots 1 and 2): pitch (3 premises) -> STOP until the user chooses (cts_pitch_choose) -> bible -> character sheets (sketch, Z-Image master, 3 poses) -> STOP until the user approves every sheet (cts_sheet_approve) -> rigs (raster from the master) -> pose images (optional) -> sets -> script -> child-safety review -> voice casting -> voices -> music (ComfyUI) -> Flow intro/outro clips -> lip-sync/timelines/lint -> preview renders -> frame review -> final renders with the mix check (hr and en MP4s). Call it again with the same series and episode to resume (it never skips a pause). The first call needs a brief {idea, title?, ageMin?, ageMax?, notes?, seconds?, lineRange?: [12,16], intro?: false, outro?: false}, or brief.pitch {id?: "p1", title: {hr,en}, logline: {hr,en}, leads: [{name, what}], sets: [], why}: that premise is the chosen one, the pitch step and its pause are skipped and the bible starts from it. retry: true puts failed steps back; from: "<step>" redoes that step and all after it. options: renderer "canvas" | "blender" (a new episode only; default: the bible\'s, else canvas; a series that has a cast stays as it is), rigPaths {castId: ["raster"] (default) or ["claude-svg"]} (SVG only when asked), rigChoice {castId: "a"|"c"}, poses {castId: [gesture, ...]} (pose images, at most 2 per character; default none), skipAuditions: true (no audition line per voice in the voice casting step; tests and offline runs), skipClips: true (drop the Flow clips), clipCredits {clipId: max_credits}. Model work is done through cts_get_task / cts_submit_task; the answer says what to do next (hint) and shows every step.',
       z.object({
         series,
         episode,
@@ -355,7 +370,7 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
     ),
     def(
       'cts_clip_generate',
-      'Make one Flow clip (intro or outro only): a keyframe still drawn by our own player from the clip\'s staging (1280x720, clips/keyframes/<id>.png; no image goes to Flow), then the 8 s video scene (Omni 1.1 Flash 720p, first_frame = the keyframe) with max_credits = maxCredits, charged to the episode\'s Flow credit cap; the file goes to series/<slug>/clips/<id>.mp4, then the frame-critic reviews six frames (revise = one retry, a second fail marks the clip fallback). REFUSES without a recorded flowCreditsCap (cts_budget_set, after the user\'s yes) and past it (FLOW_CREDITS_EXCEEDED, nothing spent); any other clip id is refused. episode is only the budget that pays. Returns a job id at once.',
+      'Make one Flow clip (intro or outro only): a keyframe still of the clip\'s staging (1280x720, clips/keyframes/<id>.png; our own player draws it for a canvas series, Blender renders it from the built characters and set for a Blender series, the same still cts_still makes; the still is the only picture that goes to Flow), then the 8 s video scene (Omni 1.1 Flash 720p, first_frame = the keyframe) with max_credits = maxCredits, charged to the episode\'s Flow credit cap; the file goes to series/<slug>/clips/<id>.mp4, then the frame-critic reviews six frames (revise = one retry, a second fail marks the clip fallback). REFUSES without a recorded flowCreditsCap (cts_budget_set, after the user\'s yes) and past it (FLOW_CREDITS_EXCEEDED, nothing spent); any other clip id is refused. episode is only the budget that pays. Returns a job id at once.',
       z.object({ series, episode: episode.optional().describe('The episode whose budget pays (default: the only episode)'), clip: z.enum(CLIP_IDS).describe('The clip id: intro or outro'), polish: z.boolean().optional().describe('Z-Image img2img clean-up of the still (local ComfyUI, denoise 0.35; skipped with a note if ComfyUI cannot)'), maxCredits: z.number().positive().describe('The max_credits for this call, from video-plan.mjs next') }),
       async (a) => {
         const ep = await episodeOf(a.series, a.episode)

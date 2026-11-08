@@ -4,6 +4,10 @@
 
 Code: `src/engine/pipeline/` -- `steps.ts` (the step list), `run.ts` (the state machine: `Pipeline.run / advance / choosePitch`), `handlers.ts` and `media.ts` (the job handlers), `tasks.ts` (the role task contract), `rig.ts` (rig building), `clips.ts` (Flow clips), `tools.ts` (the MCP tools). Images: `src/engine/images/{reference,background}.ts`. Prompts: `seed/prompts/<role>/<kind>.md`, the drawing guide `seed/style/cutout-kids.md`.
 
+## Two step lists (CTS-27)
+
+The steps below are the list of a **canvas** series (pilots 1 and 2, the `mini` fixture; frozen since HUB-30). A series with `renderer: "blender"` follows the list under "A Blender series" further down. The renderer is chosen when the run starts: `options.renderer` (`"canvas"` or `"blender"`) of the first `cts_run_pipeline` of an episode, else the bible's `renderer` (a hand-made series), else canvas; `run` writes `renderer: "blender"` and `style3d: "style3d.json"` into the bible of a new series. A state file follows its own list for good: one that has a `character` or `assemble` step is a Blender run, any other is a canvas run and `normalise` never changes it. A canvas series with a cast or episodes cannot be switched (start a new series); an episode cannot change its renderer. `from: "<step>"` and the step names in the report are the ones of the run's own list.
+
 ## State
 
 `pipeline.json` (`cts.pipeline/1`):
@@ -47,6 +51,30 @@ A `pipeline.json` written before CTS-12 has a `cast_ref` step: on load a finishe
 | 11 | `preview_render` | (code) | 960x540 preview per language, 12-frame contact sheet, pose sheets | `out/<lang>.preview.mp4`, `render/<lang>/sheet-12.png` |
 | 12 | `frame_review` | frame-critic | reads the contact sheet and the pose sheets: off model, parts, mouth, facing, framing, background. Not must-pass; up to 2 rounds: a second round happens when the step runs again after the data was fixed (`from: "preview_render"`) | `reviews/frames-<lang>-<n>.json` |
 | 13 | `final_render` | (code) | 1920x1080 per language and the summary. The mix is set by `config/render.md` `mix` (voices to -20 LUFS, music 18 dB under the voice while someone speaks and 8 dB under in the gaps, then `loudnorm` to -16 LUFS); each final render writes `render/<lang>/mix-check.json` and the step detail and summary give the input loudness and `minUnderDb` (the smallest number of dB the music sits under the voice, over the lines) next to it (`W_MIX_MUSIC_LOUD` in lint below `minUnderVoiceDb`) | `out/<lang>.mp4`, `render/<lang>/mix-check.json`, `pipeline.json` `summary` |
+
+## A Blender series (CTS-27)
+
+`src/engine/pipeline/steps.ts` `BLENDER_STEPS`; the handlers of the new steps are in `media3d.ts`, the shared ones branch on `bible.renderer`. A character or a set is **data**: a JSON spec of primitives that Blender builds; no image model makes anything.
+
+| id | role | what it does | writes |
+|---|---|---|---|
+| `pitch`, `pitch_choice` | showrunner, gate | as above; skipped with `brief.pitch` | `bible.json` |
+| `bible` | showrunner | as above for a 3D look (toon shapes, palette, leads that differ in silhouette and speed); sets `renderer`, `style3d` and copies the default look `seed/style/style3d.json` to the series' `style3d.json` when it has none | `bible.json`, `style3d.json` |
+| `character` | character-designer | per cast member: the spec that is there is built first; with none (or on a redo) the designer writes `cast/<id>/character.json` (`cts.character3d/1`, guide `style/toon-3d.md`, the other characters' specs for contrast, the user's redo note); Blender builds it (`character_build`: `character.blend`, `sheet.png`, `build.json`); the designer reads `sheet.png` (kind `character-review`). `revise` or a build error such as `E_FACE_HIDDEN` sends the designer back, at most **2 revisions** (then the sheet goes to the user as it is, with what the designer would still change in the log). A built spec with a current sheet is kept | `cast/<id>/character.json`, `character.blend`, `sheet.png`, `sheet/*.png`, `build.json`, `tasks/character-*.json` |
+| `sheet_review` | (gate) | **waits for the user**: `cts_sheet_approve { series, cast, ok, note? }` for every character. `ok: true` writes `bible.cast[].sheet { approvedAt, specHash }` (refused when the spec changed after the last build; an approval of an older spec `specHash` no longer counts and the gate reopens); `ok: false` needs a note, keeps it in `cast/<id>/sheet-redo.json`, withdraws the approval and reopens `character` + `sheet_review` (only that character is designed again, the designer gets the note). Nothing else is built before every character is approved | bible `cast[].sheet`, `sheet/review.json` |
+| `set3d` | background-artist | per set: the same loop with `sets/<id>/set3d.json` (`cts.set3d/1`, the prop kit, marks, named cameras), `set_build` (`set.blend`, a four-view `sheet.png`) and a `set-review` of the sheet | `sets/<id>/set3d.json`, `set.blend`, `sheet.png`, `build.json` |
+| `script` | writer | as above, but the writer gets the **acting library** (`blender/cts_blender/acting/library.json`: action names, kind, seconds, `overLine`, `needsTarget`), the emotions the assembler knows, `move.style` (`walk`, `hop`, `run`, `tiptoe`), `gesture.target`, and per set the marks, the camera shots (the set's cameras, `wide`, `two`, `cu-<id>`, `ots-<a>-<b>`) and the props (a seat or not). The checks add: an action that needs a target has a valid one, `sit` targets a prop with a seat | `script.json`, `text/*.json` |
+| `safety`, `voice_cast`, `voice`, `music` | | as above; `voice` also asks whisper (`flow_transcribe`) for word times and stores the aligned words in the manifest | |
+| `clip_shots`, `clips` | showrunner, frame-critic | as above; the shot's `staging` is checked against the 3D set (marks, shots) and the library (a gesture without a target); the keyframe is a **Blender still** of that staging (`keyframe3d.ts`: a one-scene `cts.timeline3d/1` assembled in `clips/keyframes/work-<id>/` and one frame rendered, the same `still` command `cts_still` runs); the Flow prompt asks for the toon 3D look; the review compares with the characters' `sheet.png`. The gate (credit cap, `max_credits`) is unchanged | `clips/keyframes/<id>.png`, `clips/<id>.mp4` |
+| `timeline` | (code) | six-viseme lip-sync (24 fps), `cts.timeline3d/1` per language, then `cts_lint` with `requireAudio` must have 0 errors | `lipsync/`, `timeline.<lang>.json` |
+| `assemble` | (code) | one `scene.blend` and `assembly.json` per language (`assemble` command: assets appended, actors on marks, the acting library run, cameras, titles); an assembler error (`E_ACTION_UNKNOWN`, `E_MARK_UNKNOWN`, `E_SHOT_UNKNOWN`, `E_ASSEMBLE_FAILED`) fails the step with its code | `render/<lang>/scene.blend`, `assembly.json` |
+| `preview_render` | (code) | Blender renders 960x540 (4 samples) in chunks, each chunk is encoded while the next renders; 12-frame contact sheet cut from the MP4 (`render/blender.ts`) | `out/<lang>.preview.mp4`, `render/<lang>/sheet-12.png`, `blender-times.json` |
+| `frame_review` | frame-critic | kind `frames-3d`: the contact sheet and each character's `sheet.png`; on model, feet planted, no limb through the body, mouth shut in silence, eyes on the speaker, framing, the set. Not must-pass; up to 2 rounds | `reviews/frames-<lang>-<n>.json` |
+| `final_render` | (code) | 1920x1080 (16 samples), real Flow clips spliced in, the mix and `mix-check.json`; the summary has the Blender frame times per language | `out/<lang>.mp4`, `render/<lang>/blender-times.json`, `mix-check.json` |
+
+The Blender work reports its stage: `cts_status {series}` shows `blender { task, unit, stage, fraction }` in the pipeline entry while a build, the assembly or a render runs (`blender/stage.ts`; in memory only), and the studio gets the same as `job.progress`. The runner is the one of `config/blender.md`; tests inject a fake one with `setBlenderRunnerOverride` (`tests/pipeline.test.ts` runs this whole list on `mini3d`). A Blender that is missing or of another version fails the step with `E_BLENDER_MISSING` / `E_BLENDER_VERSION`; `cts_blender_status` says which first.
+
+`options` read by this list: `renderer`, `skipClips`, `clipCredits`, `skipAuditions` (no audition line in `voice_cast`). `rigPaths`, `rigChoice`, `poses` and `poseFacePlates` belong to the canvas list.
 
 ### Rig paths (step 3)
 
@@ -97,7 +125,7 @@ The answer is checked BEFORE anything is written. `cts_submit_task` already refu
 
 ## Options
 
-`options` of `cts_run_pipeline`: `rigPaths` (default raster; `claude-svg` only when asked), `rigChoice`, `poses`, `poseFacePlates`, `skipClips`, `clipCredits` (above). `brief.pitch` (above) skips the pitch pause. `brief` keys read by the steps: `idea`, `title`, `ageMin`, `ageMax`, `notes`, `seconds` (target length), `lineRange` (default `[12, 16]`), `intro` (false = no intro clip), `outro` (false = no outro clip).
+`options` of `cts_run_pipeline`: `renderer` (`canvas` or `blender`, a new episode only), `skipAuditions` (no audition lines in `voice_cast`), `rigPaths` (default raster; `claude-svg` only when asked), `rigChoice`, `poses`, `poseFacePlates`, `skipClips`, `clipCredits` (above). `brief.pitch` (above) skips the pitch pause. `brief` keys read by the steps: `idea`, `title`, `ageMin`, `ageMax`, `notes`, `seconds` (target length), `lineRange` (default `[12, 16]`), `intro` (false = no intro clip), `outro` (false = no outro clip).
 
 ## Not covered
 

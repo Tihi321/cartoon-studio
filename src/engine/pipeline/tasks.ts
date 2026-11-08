@@ -6,7 +6,9 @@ import type { ZodType } from 'zod'
 import {
   SCHEMAS_BY_TAG,
   bibleSchema,
+  character3dSchema,
   episodeSchema,
+  set3dSchema,
   facingSchema,
   idSchema,
   localizedSchema,
@@ -134,6 +136,10 @@ export const setPlaceAnswer = z.strictObject({
   notes: z.string().default('')
 })
 
+/** CTS-27: the designer's answer for a 3D character or set: the whole spec (the tools `cts_character_set` / `cts_set3d_set` write the same file) and what it would still change. */
+export const characterSpecAnswer = z.strictObject({ spec: character3dSchema, notes: z.string().default('') })
+export const setSpecAnswer = z.strictObject({ spec: set3dSchema, notes: z.string().default('') })
+
 export const scriptAnswer = z.strictObject({ script: episodeSchema, text: z.strictObject({ hr: textSchema, en: textSchema }), notes: z.string().default('') })
 
 export const voiceCastAnswer = z.strictObject({
@@ -199,6 +205,8 @@ export const TASK_SCHEMAS: Record<string, TaskSchema> = {
   'rig-raster': { zod: rigRasterAnswer },
   'set-plan': { zod: setPlanAnswer },
   'set-place': { zod: setPlaceAnswer },
+  'character-spec': { zod: characterSpecAnswer },
+  'set-spec': { zod: setSpecAnswer },
   script: { zod: scriptAnswer },
   'voice-cast': { zod: voiceCastAnswer },
   music: { zod: musicAnswer },
@@ -227,7 +235,7 @@ export function renderTemplate(template: string, vars: Record<string, string | n
   })
 }
 
-async function readSeeded(dataDir: string, rel: string): Promise<string | null> {
+export async function readSeeded(dataDir: string, rel: string): Promise<string | null> {
   for (const root of [dataDir, findSeedDir()]) {
     if (!root) continue
     try {
@@ -256,6 +264,12 @@ export async function loadRules(dataDir: string): Promise<{ raw: string; body: s
 export async function loadStyleGuide(dataDir: string): Promise<string> {
   const raw = await readSeeded(dataDir, path.join('style', 'cutout-kids.md'))
   return raw === null ? '' : parseMd(raw, 'cutout-kids.md').body.trim()
+}
+
+/** The 3D guide (`style/toon-3d.md`: controls, shapes, face rules, the Pip, Bruno and park examples) for the designer tasks. */
+export async function loadStyle3dGuide(dataDir: string): Promise<string> {
+  const raw = await readSeeded(dataDir, path.join('style', 'toon-3d.md'))
+  return raw === null ? '' : `## Guide: style/toon-3d.md\n\n${parseMd(raw, 'toon-3d.md').body.trim()}`
 }
 
 // ---- inputs ----

@@ -30,3 +30,11 @@ Only use emotions and gestures that exist for that character (the input lists th
 - Both languages tell the same story and use the same beats; the wording is natural in each (jokes may differ).
 - Nothing frightening or mean; follow the series rules in the input.
 - Self-check before you answer: count the words of every line in both languages (at most 12), check every mark, shot, gesture and emotion against the lists, and count the lines.
+
+## A 3D series (the input has `facts.actions`)
+When the input lists `facts.actions`, the episode is rendered in Blender and these rules replace the cutout ones above:
+- A `gesture` beat (and a line's `gesture`) names an **action** from `facts.actions` of kind `gesture` or `react`: `wave`, `nod`, `shake_head`, `shrug`, `think`, `sit`, `stand_up`, `cheer`, `point`, `look_at`, `react_surprised`, `laugh`, `droop`. An action with `needsTarget` (`point`, `sit`, `look_at`) needs `"target"`: a cast id, a prop id of the scene's set or a mark; `sit` needs a prop that has a seat (`marksShotsAndPropsBySet` says which). `overLine: false` means do not run it while that character speaks.
+- A `move` beat goes to a mark and may set `"style"`: `walk`, `hop`, `run` or `tiptoe` (the default is the character's own way: see `castHeightsAndMotion`). Give `seconds` a believable pace: roughly 0.8 m a second for a walk, 1.2 for a hop; the engine speeds a short beat up to 1.4 times and no more. Marks are in metres on the ground; there is no `offL` or `offR` unless the set lists them.
+- `emotion` is one of `facts.emotions`.
+- A `camera` beat names a shot of the set (`shots` in `marksShotsAndPropsBySet`: its own cameras, `wide`, `two`, `cu-<cast id>`, `ots-<a>-<b>`) with `transition`: `cut`, `pan` (with `seconds`) or `push` (a slow dolly-in, with `seconds`). Use the library: a 60 second episode uses at least 8 different actions, among them a walk of 3 metres or more, a `sit`, a `point`, a reaction and a `laugh`, and one `push` or `pan`.
+- Do not describe the look; the characters and sets are built from specs and look the same in every shot.

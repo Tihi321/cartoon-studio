@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { LANGS } from '../../shared/contracts'
 import type { Lang } from '../../shared/contracts'
-import { callTool, engineOrigin, playerUrl } from '../lib/studio'
+import { callTool, engineOrigin, episodeFile, playerUrl } from '../lib/studio'
 import { useCts } from '../store/hooks'
 import { Empty } from './common'
-import { LANG_NAME, NeedSeries } from './studio'
+import { LANG_NAME, NeedSeries, useSeries } from './studio'
 
 /**
  * Timeline preview: the engine's player page (/preview/?preview=1, the same player the render uses) in a frame, with its own play, pause and
@@ -19,6 +19,10 @@ export function PreviewPage() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const origin = mcp?.listening ? engineOrigin(mcp.url) : null
+  // a Blender series has no browser player: the preview is the MP4 that Blender rendered (out/<lang>.preview.mp4)
+  const blender = useSeries().data?.bible.renderer === 'blender'
+  const [noVideo, setNoVideo] = useState(false)
+  useEffect(() => setNoVideo(false), [slug, ep, lang, rev])
 
   const rebuild = async () => {
     if (!slug || !ep) return
@@ -47,8 +51,8 @@ export function PreviewPage() {
               </button>
             ))}
           </div>
-          <button onClick={() => setRev((n) => n + 1)} disabled={!origin || !slug} data-testid="preview-reload">
-            Reload the player
+          <button onClick={() => setRev((n) => n + 1)} disabled={(!origin && !blender) || !slug} data-testid="preview-reload">
+            {blender ? 'Reload the video' : 'Reload the player'}
           </button>
           <button onClick={() => void rebuild()} disabled={busy || !slug || !ep} data-testid="preview-rebuild">
             {busy ? 'Rebuilding...' : 'Rebuild the timelines'}
@@ -62,12 +66,25 @@ export function PreviewPage() {
       )}
       {!slug && <NeedSeries />}
       {slug && !ep && <p className="dim">This series has no episode yet.</p>}
-      {slug && ep && !origin && (
+      {slug && ep && blender && (
+        <div className="player-frame" data-testid="preview-frame">
+          {noVideo ? (
+            <Empty title="No Blender preview yet" testId="preview-novideo">
+              <p>
+                out/{lang}.preview.mp4 is not there. The pipeline's preview_render step makes it, or ask Claude Code for cts_render {'{'}quality: "preview"{'}'}.
+              </p>
+            </Empty>
+          ) : (
+            <video key={`${slug}/${ep}/${lang}/${rev}`} src={episodeFile(slug, ep, `out/${lang}.preview.mp4`)} controls preload="metadata" aria-label={`${ep} in ${LANG_NAME[lang]}, Blender preview`} onError={() => setNoVideo(true)} data-testid="preview-video" />
+          )}
+        </div>
+      )}
+      {slug && ep && !blender && !origin && (
         <Empty title="The player is not reachable" testId="preview-offline">
           <p>The preview page is served by the engine's MCP server. It is not listening; switch it on in Settings, MCP server.</p>
         </Empty>
       )}
-      {slug && ep && origin && (
+      {slug && ep && !blender && origin && (
         <div className="player-frame" data-testid="preview-frame">
           <iframe
             key={`${slug}/${ep}/${lang}/${rev}`}
@@ -79,7 +96,8 @@ export function PreviewPage() {
         </div>
       )}
       <p className="dim">
-        {slug && ep ? `${slug} / ${ep}, ${LANG_NAME[lang]}. ` : ''}The player draws the timeline in the browser the same way the render does, so what you see here is what the MP4 will show.
+        {slug && ep ? `${slug} / ${ep}, ${LANG_NAME[lang]}. ` : ''}
+        {blender ? 'This is the MP4 that Blender rendered for the preview (960x540, 4 samples), with the mixed sound.' : 'The player draws the timeline in the browser the same way the render does, so what you see here is what the MP4 will show.'}
       </p>
     </div>
   )

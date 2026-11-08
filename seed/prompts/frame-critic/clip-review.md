@@ -13,3 +13,6 @@ The clip must read as the same flat 2D paper-cutout cartoon as the rest of the s
 - no recognisable action (the frames are nearly identical, or a black or garbage frame).
 
 A pass is a clip a child would accept as part of the same show. Small differences in line weight or background are fine. `fix` for a revise: how to change the prompt (for example "say flat 2D paper cutout again, name the colours, remove the camera move"); a clip gets at most one retry, then it falls back to a title card.
+
+## A 3D series
+When the task says the clip must sit next to the Blender render, the clip keeps the stylised toon 3D look of the first frame instead of the flat 2D look above: simple rounded characters, flat cel shading, a thin dark outline, a bright simple set, the characters on model against their `sheet.png`. Fail it for a photoreal, glossy or painterly look, a different art style, off-model faces or colours, extra or missing limbs, text or anything frightening.

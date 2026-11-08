@@ -20,11 +20,13 @@ import { lintSeries } from '../series/lint'
 import { ask, castView, makeEnv, relTo, requireChosen } from './env'
 import type { Env } from './env'
 import { buildRig, clipsStep, finalRenderStep, castSheetStep, makeClip, previewRenderStep, reviewClip, rigStep, setStep, timelineStep, voiceStep, frameReviews } from './media'
+import { assembleStep, characterStep, ensureStyle3d, facts3d, scriptProblems3d, set3dStep } from './media3d'
+import type { Facts3d } from './media3d'
 import { poseJob, posesStep } from './poses'
 import { RIG_PATHS } from './rig'
 import type { RigPath } from './rig'
 import { Pipeline } from './run'
-import { STEPS, emptyState, taskOf } from './steps'
+import { ALL_STEPS, emptyState, taskOf } from './steps'
 import type { StepDef } from './steps'
 import type { bibleAnswer, clipShotAnswer, musicAnswer, pitchesAnswer, reviewAnswer, scriptAnswer, voiceCastAnswer } from './tasks'
 import { OMNIVOICE_TAGS } from '../voice/providers/comfy'
@@ -58,7 +60,7 @@ async function pitchStep(e: Env): Promise<string> {
     id: 'pitches',
     role: 'showrunner',
     kind: 'pitches',
-    prompt: `Pitch THREE different premises for a cutout-puppet cartoon series for children aged ${bible.audience.ageMin} to ${bible.audience.ageMax}, from the brief. Each pitch: id (p1, p2, p3), title and logline in Croatian and English, exactly two leads (name and what makes them fun), one or two sets, and why it works. Nothing visual is made until the user picks one.`,
+    prompt: `Pitch THREE different premises for a ${bible.renderer === 'blender' ? '3D toon (Blender) cartoon' : 'cutout-puppet cartoon'} series for children aged ${bible.audience.ageMin} to ${bible.audience.ageMax}, from the brief. Each pitch: id (p1, p2, p3), title and logline in Croatian and English, exactly two leads (name and what makes them fun), one or two sets, and why it works. Nothing visual is made until the user picks one.`,
     inputs: { paths: [], json: { brief: b, series: { slug: e.series, title: bible.title, audience: bible.audience, tone: bible.tone, rules: bible.rules } } },
     output: { schema: 'pitches', path: 'tasks/pitches.json' }
   })
@@ -72,14 +74,18 @@ async function bibleStep(e: Env): Promise<string> {
   const bible = await requireChosen(e)
   const pitch = bible.pitches.find((p) => p.id === bible.chosenPitch)!
   const keepVoices = new Map(bible.cast.map((c) => [c.id, c.voice]))
+  // HUB-30: the renderer of the series (cts_run_pipeline options.renderer, written to the bible when the run started)
+  const blender = (e.options.renderer ?? bible.renderer) === 'blender'
   const r = await ask<z.infer<typeof bibleAnswer>>(
     e,
     {
       id: 'bible',
       role: 'showrunner',
       kind: 'bible',
-      prompt: 'Turn the chosen premise into the series bible: title, logline, tone, rules, the visual style (look, palette of 4 to 6 colours, outline width, a reference prompt), the cast (the two leads of the pitch, plus at most two more if the premise needs them) with a concrete look for each, and the sets of the pitch. Voices are filled in later.',
-      inputs: { paths: [], json: { brief: e.brief, chosenPitch: pitch, audience: bible.audience, current: { tone: bible.tone, rules: bible.rules, style: bible.style } } },
+      prompt: blender
+        ? 'Turn the chosen premise into the series bible of a 3D toon cartoon (Blender, simple rounded characters built from primitives with a thin dark outline): title, logline, tone, rules, the visual style (look, a palette of 4 to 6 hex colours the characters and sets will use, outline width, a one-line reference prompt), the cast (the two leads of the pitch, plus at most two more if the premise needs them) with a concrete look for each (shape, colours, one telling detail such as a scarf or spines), and the sets of the pitch. If the brief or the premise already describes the leads, keep their looks and the palette. Voices are filled in later.'
+        : 'Turn the chosen premise into the series bible: title, logline, tone, rules, the visual style (look, palette of 4 to 6 colours, outline width, a reference prompt), the cast (the two leads of the pitch, plus at most two more if the premise needs them) with a concrete look for each, and the sets of the pitch. Voices are filled in later.',
+      inputs: { paths: [], json: { brief: e.brief, renderer: blender ? 'blender' : 'canvas', chosenPitch: pitch, audience: bible.audience, current: { tone: bible.tone, rules: bible.rules, style: bible.style } } },
       output: { schema: 'bible', path: 'tasks/bible.json' }
     },
     {
@@ -101,10 +107,24 @@ async function bibleStep(e: Env): Promise<string> {
     tone: v.tone,
     rules: v.rules,
     style: { ...bible.style, ...v.style },
-    cast: v.cast.map((c) => ({ id: c.id, name: c.name, role: c.role, personality: c.personality, look: c.look, ...(c.catchphrases ? { catchphrases: c.catchphrases } : {}), rig: `cast/${c.id}/rig.json`, voice: keepVoices.get(c.id) ?? {} })),
-    sets: v.sets.map((s) => ({ id: s.id, name: s.name, description: s.description, file: `sets/${s.id}/set.json` }))
+    cast: await Promise.all(
+      v.cast.map(async (c) => ({
+        id: c.id,
+        name: c.name,
+        role: c.role,
+        personality: c.personality,
+        look: c.look,
+        ...(c.catchphrases ? { catchphrases: c.catchphrases } : {}),
+        // a canvas series has a rig, a Blender series a character spec (linked once it exists; the character step writes it)
+        ...(blender ? ((await e.store.exists(e.store.paths(e.series).characterFile(c.id))) ? { character: `cast/${c.id}/character.json` } : {}) : { rig: `cast/${c.id}/rig.json` }),
+        voice: keepVoices.get(c.id) ?? {}
+      }))
+    ),
+    sets: v.sets.map((s) => ({ id: s.id, name: s.name, description: s.description, file: blender ? `sets/${s.id}/set3d.json` : `sets/${s.id}/set.json` })),
+    ...(blender ? { renderer: 'blender' as const, style3d: bible.style3d ?? 'style3d.json' } : {})
   })
-  return `bible: ${v.cast.map((c) => c.id).join(', ')}; sets ${v.sets.map((s) => s.id).join(', ')}`
+  if (blender) await ensureStyle3d(e)
+  return `bible${blender ? ' (blender, style3d.json from the default look)' : ''}: ${v.cast.map((c) => c.id).join(', ')}; sets ${v.sets.map((s) => s.id).join(', ')}`
 }
 
 // ---------------------------------------------------------------- step 5: script
@@ -188,6 +208,16 @@ export function scriptProblems(a: z.infer<typeof scriptAnswer>, o: { series: str
   return out
 }
 
+/** For the 3D writer: how tall and how quick each character is (a hop-walker covers ground faster than a waddler). */
+async function castMotion(e: Env, bible: Bible): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = {}
+  for (const c of bible.cast) {
+    const spec = await e.store.readCharacter3d(e.series, c.id).catch(() => null)
+    out[c.id] = spec ? { height: spec.height, tempo: spec.motion.tempo, walk: spec.motion.walk } : null
+  }
+  return out
+}
+
 async function scriptStep(e: Env): Promise<string> {
   const bible = await requireChosen(e)
   const p = e.store.paths(e.series)
@@ -197,8 +227,10 @@ async function scriptStep(e: Env): Promise<string> {
   }
   const b = e.brief
   const range = Array.isArray(b.lineRange) && b.lineRange.length === 2 ? ([Number(b.lineRange[0]), Number(b.lineRange[1])] as [number, number]) : ([12, 16] as [number, number])
-  const rigs = await rigFacts(e, bible)
-  const sets = await setFacts(e, bible)
+  // a Blender series: the gestures are the acting library's, the emotions the assembler's, the marks and shots the 3D sets' (HUB-30)
+  const f3: Facts3d | null = bible.renderer === 'blender' ? await facts3d(e, bible) : null
+  const rigs = f3 ? Object.fromEntries(bible.cast.map((c) => [c.id, { gestures: [...f3.library.scriptable], emotions: [...f3.emotions] }])) : await rigFacts(e, bible)
+  const sets = f3 ? Object.fromEntries(Object.entries(f3.sets).map(([id, v]) => [id, { marks: v.marks, shots: v.shots }])) : await setFacts(e, bible)
   const revise = e.detail.startsWith('revise') ? await e.store.readReview(e.series, e.episode, 'safety').catch(() => null) : null
   const previous = revise ? await e.store.readScript(e.series, e.episode).catch(() => null) : null
   const wantIntro = b.intro !== false
@@ -209,7 +241,7 @@ async function scriptStep(e: Env): Promise<string> {
       id: 'script',
       role: 'writer',
       kind: 'script',
-      prompt: `Write episode "${e.episode}" for the series: the language-independent script (scenes, beats in order) and the texts in Croatian and English. ${range[0]} to ${range[1]} spoken lines in all, each at most 12 words in BOTH languages. Use only the beat types ${ALLOWED_BEATS.join(', ')}, only the marks, shots, gestures and emotions listed in "facts". ${wantIntro ? 'Start with one clip beat {"type":"clip","clip":"intro","seconds":8,"audio":"keep"} (the series intro; no beat runs "with":"prev" over it).' : 'No intro clip.'} ${wantOutro ? 'End with one clip beat {"type":"clip","clip":"outro","seconds":8,"audio":"keep"} (the series outro, the last beat). There is no other clip: no hero clip.' : 'No outro clip, and no other clip either.'} Music cue "theme" is music/theme.ogg; a sound effect cue is music/sfx-<cue>.ogg (at most two). The target length is about ${b.seconds ?? 60} seconds.${revise ? ' This is a REVISION: fix every problem of the safety review and keep what was fine.' : ''}`,
+      prompt: `Write episode "${e.episode}" for the series: the language-independent script (scenes, beats in order) and the texts in Croatian and English. ${range[0]} to ${range[1]} spoken lines in all, each at most 12 words in BOTH languages. Use only the beat types ${ALLOWED_BEATS.join(', ')}, only the marks, shots, gestures and emotions listed in "facts".${f3 ? ' This is a 3D series: a gesture beat or a line gesture is an action name of facts.actions (kind gesture or react); an action with needsTarget (point, sit, look_at) needs a "target" (a cast id, a prop id or a mark of the scene set; sit needs a prop with a seat); a move beat may set "style" (walk, hop, run, tiptoe; default is the character) and its "seconds" must give a believable pace; a camera beat names a shot of the set (its cameras, wide, two, cu-<cast id>, ots-<a>-<b>) with transition cut, pan or push. Use the library: at least 8 different actions in a 60 second episode, including a walk of 3 metres or more, a sit on a prop with a seat, a point, a reaction and a laugh, and one push or pan.' : ''} ${wantIntro ? 'Start with one clip beat {"type":"clip","clip":"intro","seconds":8,"audio":"keep"} (the series intro; no beat runs "with":"prev" over it).' : 'No intro clip.'} ${wantOutro ? 'End with one clip beat {"type":"clip","clip":"outro","seconds":8,"audio":"keep"} (the series outro, the last beat). There is no other clip: no hero clip.' : 'No outro clip, and no other clip either.'} Music cue "theme" is music/theme.ogg; a sound effect cue is music/sfx-<cue>.ogg (at most two). The target length is about ${b.seconds ?? 60} seconds.${revise ? ' This is a REVISION: fix every problem of the safety review and keep what was fine.' : ''}`,
       inputs: {
         paths: [],
         json: {
@@ -217,13 +249,22 @@ async function scriptStep(e: Env): Promise<string> {
           series: e.series,
           episode: e.episode,
           bible: { title: bible.title, logline: bible.logline, tone: bible.tone, rules: bible.rules, cast: bible.cast.map(castView), sets: bible.sets },
-          facts: { gesturesAndEmotionsByCast: rigs, marksAndShotsBySet: sets },
+          facts: f3
+            ? { actions: f3.actions, emotions: f3.emotions, moveStyles: ['walk', 'hop', 'run', 'tiptoe'], marksShotsAndPropsBySet: f3.sets, castHeightsAndMotion: await castMotion(e, bible) }
+            : { gesturesAndEmotionsByCast: rigs, marksAndShotsBySet: sets },
           ...(revise ? { safetyReview: revise, previousScript: previous } : {})
         }
       },
       output: { schema: 'script', path: `tasks/script-${e.episode}.json` }
     },
-    { check: (v) => scriptProblems(v as z.infer<typeof scriptAnswer>, { series: e.series, episode: e.episode, bible, rigs, sets, lineRange: range, maxWords: 12 }), rounds: 3, maxTokens: 16000 }
+    {
+      check: (v) => {
+        const a = v as z.infer<typeof scriptAnswer>
+        return [...scriptProblems(a, { series: e.series, episode: e.episode, bible, rigs, sets, lineRange: range, maxWords: 12 }), ...(f3 ? scriptProblems3d(a.script, f3) : [])]
+      },
+      rounds: 3,
+      maxTokens: 16000
+    }
   )
   const { script, text } = r.value
   await e.store.writeScript(e.series, e.episode, { ...script, series: e.series, id: e.episode })
@@ -349,6 +390,7 @@ async function voiceCastStep(e: Env): Promise<string> {
   const heard: string[] = []
   for (const c of bible.cast) {
     for (const lang of ['hr', 'en'] as const) {
+      if (e.options.skipAuditions === true) continue
       try {
         const spec = r.value.voices[c.id]?.[lang]
         const text = r.value.audition[c.id]?.[lang]
@@ -358,7 +400,7 @@ async function voiceCastStep(e: Env): Promise<string> {
       }
     }
   }
-  return `voices for ${bible.cast.map((c) => c.id).join(', ')}; auditions ${heard.length ? heard.join(', ') : 'none (the voice services were not up)'}`
+  return `voices for ${bible.cast.map((c) => c.id).join(', ')}; auditions ${heard.length ? heard.join(', ') : e.options.skipAuditions === true ? 'skipped' : 'none (the voice services were not up)'}`
 }
 
 // ---------------------------------------------------------------- step 9: music
@@ -422,14 +464,17 @@ async function clipShotsStep(e: Env): Promise<string> {
   if (need.length === 0) return 'no clips needed'
   const script = await e.store.readScript(e.series, e.episode)
   const ids = need.map((n) => n.clip)
+  const f3: Facts3d | null = bible.renderer === 'blender' ? await facts3d(e, bible) : null
   const r = await ask<z.infer<typeof clipShotAnswer>>(
     e,
     {
       id: 'clip-shots',
       role: 'showrunner',
       kind: 'clip-shots',
-      prompt: `Write the shot for each missing Flow clip (${ids.join(', ')}): who is in it (cast ids, at most 3), what happens in 8 seconds as flat 2D cutout motion, the framing and move, and what the first frame (keyframe) shows. The intro is the series intro with the two leads; the outro is the closing moment with the two leads. Also give staging for the keyframe still that our own player draws: the set, a camera shot of it, and each lead's mark, facing, emotion and optional gesture (only names listed in the input; the sets' marks and shots are in "sets", the emotions and gestures in "cast"). No speech, no 3D, no shading.`,
-      inputs: { paths: [], json: { missing: need, series: { title: bible.title, logline: bible.logline, style: bible.style }, cast: bible.cast.map(castView), sets: bible.sets, scriptBeatsAround: script.scenes.map((s) => ({ scene: s.id, set: s.set, beats: s.beats.map((b) => ({ id: b.id, type: b.type, ...('clip' in b ? { clip: b.clip } : {}), ...('speaker' in b ? { speaker: b.speaker } : {}) })) })) } },
+      prompt: f3
+        ? `Write the shot for each missing Flow clip (${ids.join(', ')}): who is in it (cast ids, at most 3), what happens in 8 seconds as gentle toon 3D character motion that matches the series look, the framing and move, and what the first frame (keyframe) shows. The intro is the series intro with the two leads; the outro is the closing moment with the two leads. Also give staging for the keyframe still that Blender renders from our own characters and set: the set, a camera shot of it (a name from the set's "shots"), and each lead's mark (a mark of the set), facing, emotion (one of "emotions") and an optional gesture (one of "gestures", which need no target). Only names listed in the input. No speech, no text.`
+        : `Write the shot for each missing Flow clip (${ids.join(', ')}): who is in it (cast ids, at most 3), what happens in 8 seconds as flat 2D cutout motion, the framing and move, and what the first frame (keyframe) shows. The intro is the series intro with the two leads; the outro is the closing moment with the two leads. Also give staging for the keyframe still that our own player draws: the set, a camera shot of it, and each lead's mark, facing, emotion and optional gesture (only names listed in the input; the sets' marks and shots are in "sets", the emotions and gestures in "cast"). No speech, no 3D, no shading.`,
+      inputs: { paths: [], json: { missing: need, series: { title: bible.title, logline: bible.logline, style: bible.style }, cast: bible.cast.map(castView), sets: f3 ? f3.sets : bible.sets, ...(f3 ? { emotions: f3.emotions, gestures: f3.actions.filter((a) => a.kind === 'gesture' || a.kind === 'react').filter((a) => !a.needsTarget).map((a) => a.name) } : {}), scriptBeatsAround: script.scenes.map((s) => ({ scene: s.id, set: s.set, beats: s.beats.map((b) => ({ id: b.id, type: b.type, ...('clip' in b ? { clip: b.clip } : {}), ...('speaker' in b ? { speaker: b.speaker } : {}) })) })) } },
       output: { schema: 'clip-shots', path: 'tasks/clip-shots-new.json' }
     },
     {
@@ -440,6 +485,18 @@ async function clipShotsStep(e: Env): Promise<string> {
         for (const c of a.clips) {
           if (!ids.includes(c.id)) out.push(`"${c.id}" is not a missing clip (${ids.join(', ')})`)
           for (const w of c.who) if (!bible.cast.some((x) => x.id === w)) out.push(`clip ${c.id}: "${w}" is not in the cast`)
+          if (f3) {
+            const set = f3.sets[c.staging.set]
+            if (!set) out.push(`clip ${c.id}: staging.set "${c.staging.set}" has no 3D spec (${Object.keys(f3.sets).join(', ')})`)
+            else {
+              if (!set.shots.includes(c.staging.shot)) out.push(`clip ${c.id}: staging.shot "${c.staging.shot}" is not a shot of set ${c.staging.set} (${set.shots.join(', ')})`)
+              for (const x of c.staging.actors) {
+                if (!set.marks.includes(x.mark)) out.push(`clip ${c.id}: mark "${x.mark}" is not a mark of set ${c.staging.set} (${set.marks.join(', ')})`)
+                if (!f3.emotions.includes(x.emotion)) out.push(`clip ${c.id}: emotion "${x.emotion}" is not one of ${f3.emotions.join(', ')}`)
+                if (x.gesture && (!f3.library.scriptable.has(x.gesture) || f3.library.byName.get(x.gesture)?.needsTarget)) out.push(`clip ${c.id}: gesture "${x.gesture}" must be a gesture without a target (${f3.actions.filter((a) => (a.kind === 'gesture' || a.kind === 'react') && !a.needsTarget).map((a) => a.name).join(', ')})`)
+              }
+            }
+          }
         }
         return out
       }
@@ -472,9 +529,19 @@ async function frameReviewStep(e: Env): Promise<string> {
     }
     const sheet = path.join(e.store.paths(e.series).episodeDir(e.episode), 'render', lang, 'sheet-12.png')
     if (!(await e.store.exists(sheet))) throw new Error(`no contact sheet for ${lang} (${relTo(e, sheet)}): the preview_render step makes it`)
+    const blender = bible.renderer === 'blender'
     const r = await ask<z.infer<typeof reviewAnswer>>(
       e,
-      {
+      blender
+        ? {
+            id: `frames-${lang}-${round}`,
+            role: 'frame-critic',
+            kind: 'frames-3d',
+            prompt: `Review the contact sheet of the ${lang} Blender preview (round ${round} of at most 2): the first picture is 12 frames cut from out/${lang}.preview.mp4 in time order, the others are the sheet.png of each character (what it must look like). Check: each character on model against its sheet (colours, parts, proportions, accessories), feet planted (no sliding or floating while standing or walking), no limb through the body, the mouth shut in silence and moving while the character speaks, the eyes on the speaker (or the one the script looks at), the framing (heads and feet in the frame, the speaker on a third, nobody cut at the edge), and the set (marks, props, nothing floating). For each problem say where (time and character), what, and the data fix (a beat, a mark, a camera, a spec value) and who owns it.`,
+            inputs: { paths: [relTo(e, sheet), ...bible.cast.map((c) => `cast/${c.id}/sheet.png`)], json: { lang, round, lintWarnings: lint.warnings.slice(0, 12).map((w) => `${w.code} ${w.message}`), cast: bible.cast.map((c) => ({ id: c.id, name: c.name.en })) } },
+            output: { schema: 'review', path: `episodes/${e.episode}/reviews/frames-${lang}-${round}.json` }
+          }
+        : {
         id: `frames-${lang}-${round}`,
         role: 'frame-critic',
         kind: 'frames',
@@ -497,6 +564,9 @@ const STEP_FNS: Record<string, StepFn> = {
   pitch: pitchStep,
   bible: bibleStep,
   cast_sheet: castSheetStep,
+  character: characterStep,
+  set3d: set3dStep,
+  assemble: assembleStep,
   rig: rigStep,
   poses: posesStep,
   set: setStep,
@@ -521,7 +591,7 @@ function envFor(svc: Engine['cts'], pipe: Pipeline, ctx: JobContext, state: Awai
 export function registerPipeline(engine: Engine): void {
   const svc = engine.cts
   const pipe = new Pipeline(svc)
-  for (const step of STEPS) {
+  for (const step of ALL_STEPS) {
     if (step.kind === 'gate') continue
     const fn = STEP_FNS[step.id]
     if (!fn) throw new Error(`no handler for step ${step.id}`)

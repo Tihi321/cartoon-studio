@@ -3,6 +3,7 @@ import path from 'node:path'
 import type { Lang, TimelineClip } from '../../shared/contracts'
 import { loadBlenderConfig } from '../blender/config'
 import { assembleInputs, assembleScene, renderDirOf, sha1 } from '../blender/jobs'
+import { endBlenderStage, noteBlenderStage } from '../blender/stage'
 import { blenderRunnerFor } from '../blender/runner'
 import type { BlenderRunner } from '../blender/runner'
 import { SeriesStore } from '../series/service'
@@ -141,7 +142,10 @@ export async function renderBlenderEpisode(req: BlenderRenderRequest): Promise<R
           { blend, outDir: frames, ranges, chunkFrames: bcfg.chunkFrames, width: frame.width, height: frame.height, samples: frame.samples, timesFile },
           {
             signal: stop.signal,
-            onProgress: (e) => req.onProgress?.(e.done, Math.max(e.total, 1)),
+            onProgress: (e) => {
+              noteBlenderStage(req.series, { task: 'render', unit: `${req.episode}-${req.lang}-${req.quality}`, stage: e.stage ?? 'render', fraction: e.total ? e.done / e.total : null })
+              req.onProgress?.(e.done, Math.max(e.total, 1))
+            },
             onChunk: (e) => {
               chunkCount++
               chain = chain.then(() => encodeChunk(e)).catch((err: Error) => {
@@ -221,6 +225,7 @@ export async function renderBlenderEpisode(req: BlenderRenderRequest): Promise<R
       await attempt('libx264')
     }
   } finally {
+    endBlenderStage(req.series, 'render', `${req.episode}-${req.lang}-${req.quality}`)
     await fs.rm(work, { recursive: true, force: true }).catch(() => undefined)
   }
 

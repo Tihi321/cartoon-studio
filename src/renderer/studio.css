@@ -531,7 +531,8 @@ svg.stage {
   box-shadow: var(--cts-shadow-2);
   overflow: hidden;
 }
-.player-frame iframe {
+.player-frame iframe,
+.player-frame video {
   display: block;
   width: 100%;
   height: 100%;

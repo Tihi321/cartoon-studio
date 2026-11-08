@@ -61,7 +61,12 @@ function CastMemberView({ slug, member }: { slug: string; member: CastMember }) 
         <p>{member.personality}</p>
         <div className="row">
           <Pill tone="dim">{member.role}</Pill>
-          {t.data && <RigCheckPill check={t.data.check} testId="cast-rig-check" none="no rig yet" />}
+          {t.data && !t.data.character && <RigCheckPill check={t.data.check} testId="cast-rig-check" none="no rig yet" />}
+          {t.data?.character && (
+            <Pill tone={t.data.character.stale ? 'warn' : 'dim'} testId="cast3d-spec-pill">
+              3D character, spec {t.data.character.specHash.slice(0, 8)}
+            </Pill>
+          )}
         </div>
       </section>
 
@@ -70,23 +75,27 @@ function CastMemberView({ slug, member }: { slug: string; member: CastMember }) 
           <>
             <CharacterSheet slug={slug} cast={member.id} info={t.data} onChanged={t.reload} />
 
-            <section className="look-pair" aria-label="Rig" data-testid="cast-look">
-              <figure className="plate wide">
-                <PoseSheet slug={slug} cast={member.id} sheet={t.data.sheet} hasRig={!!t.data.rig} onSaved={t.reload} />
-                <figcaption>Rig pose sheet: neutral, each emotion, gestures, 8 mouths, 3 eye states</figcaption>
-              </figure>
-            </section>
+            {!t.data.character && (
+              <>
+                <section className="look-pair" aria-label="Rig" data-testid="cast-look">
+                  <figure className="plate wide">
+                    <PoseSheet slug={slug} cast={member.id} sheet={t.data.sheet} hasRig={!!t.data.rig} onSaved={t.reload} />
+                    <figcaption>Rig pose sheet: neutral, each emotion, gestures, 8 mouths, 3 eye states</figcaption>
+                  </figure>
+                </section>
 
-            <section aria-labelledby="cast-variants" data-testid="cast-variants">
-              <h2 className="panel-title" id="cast-variants">
-                Rig variants
-              </h2>
-              <ul className="variants">
-                {t.data.variants.map((v) => (
-                  <VariantCard key={v.variant} slug={slug} v={v} />
-                ))}
-              </ul>
-            </section>
+                <section aria-labelledby="cast-variants" data-testid="cast-variants">
+                  <h2 className="panel-title" id="cast-variants">
+                    Rig variants
+                  </h2>
+                  <ul className="variants">
+                    {t.data.variants.map((v) => (
+                      <VariantCard key={v.variant} slug={slug} v={v} />
+                    ))}
+                  </ul>
+                </section>
+              </>
+            )}
 
             <VoiceSection slug={slug} member={member} />
           </>
@@ -118,6 +127,9 @@ function CharacterSheet({ slug, cast, info, onChanged }: { slug: string; cast: s
     }
   }
   const a = info.approval
+  const c3 = info.character
+  // a 3D approval is of one spec: when the spec changed since, the sheet has to be looked at again
+  const approved = c3 ? a.approved && c3.approvalHolds : a.approved
   const redo = a.review && !a.review.ok ? a.review : null
   return (
     <section className="panel" aria-labelledby="cast-charsheet" data-testid="cast-charsheet">
@@ -125,10 +137,13 @@ function CharacterSheet({ slug, cast, info, onChanged }: { slug: string; cast: s
         <h2 className="panel-title" id="cast-charsheet">
           Character sheet
         </h2>
-        <Pill tone={a.approved ? 'good' : redo ? 'bad' : 'dim'} testId="cast-approval" title={redo?.note ?? undefined}>
-          {a.approved ? `approved ${a.approvedAt ?? ''}` : redo ? 'redo asked' : info.charSheet ? 'waiting for your look' : 'no sheet yet'}
+        <Pill tone={approved ? 'good' : redo ? 'bad' : 'dim'} testId="cast-approval" title={redo?.note ?? undefined}>
+          {approved ? `approved ${a.approvedAt ?? ''}` : a.approved && c3 ? 'approval is of an older spec' : redo ? 'redo asked' : info.charSheet ? 'waiting for your look' : 'no sheet yet'}
         </Pill>
       </div>
+      {c3 ? (
+        <Sheet3d slug={slug} cast={cast} info={info} c3={c3} />
+      ) : (
       <div className="row">
         <figure className="plate">
           <Picture src={info.sketch ? seriesFile(slug, info.sketch) : null} alt={`Rough sketch of ${cast}`} testId="cast-sketch" />
@@ -151,6 +166,7 @@ function CharacterSheet({ slug, cast, info, onChanged }: { slug: string; cast: s
           </figure>
         )}
       </div>
+      )}
       {redo?.note && (
         <p className="dim" data-testid="cast-redo-asked">
           Redo asked: {redo.note}
@@ -158,10 +174,10 @@ function CharacterSheet({ slug, cast, info, onChanged }: { slug: string; cast: s
       )}
       {info.charSheet && (
         <div className="row">
-          <button onClick={() => void verdict(true)} disabled={busy || a.approved} data-testid="cast-approve">
+          <button onClick={() => void verdict(true)} disabled={busy || approved || !!c3?.stale} data-testid="cast-approve" title={c3?.stale ? 'The spec changed after the last build: build it again first' : undefined}>
             Approve
           </button>
-          <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Redo: what to change" aria-label={`Redo note for ${cast}`} data-testid="cast-redo-note" />
+          <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder={c3 ? 'Redo: what to change (the designer gets it)' : 'Redo: what to change'} aria-label={`Redo note for ${cast}`} data-testid="cast-redo-note" />
           <button onClick={() => void verdict(false)} disabled={busy || !note.trim()} data-testid="cast-redo">
             Redo with this note
           </button>
@@ -173,6 +189,42 @@ function CharacterSheet({ slug, cast, info, onChanged }: { slug: string; cast: s
         </div>
       )}
     </section>
+  )
+}
+
+/** The sheet of a 3D character (Blender): turnaround, six mouths, blink, half lid, emotions, looks; the spec hash and the build behind it. */
+function Sheet3d({ slug, cast, info, c3 }: { slug: string; cast: string; info: CastInfo; c3: NonNullable<CastInfo['character']> }) {
+  return (
+    <>
+      <div className="row">
+        <figure className="plate wide">
+          <Picture src={info.charSheet ? seriesFile(slug, info.charSheet) : null} alt={`3D sheet of ${cast}: turnaround, mouths, expressions`} testId="cast3d-sheet" />
+          <figcaption>sheet.png: turnaround, the six mouths, blink and half lid, happy, sad, surprised, looks (rendered by Blender from the spec)</figcaption>
+        </figure>
+        {info.concept && (
+          <figure className="plate">
+            <Picture src={seriesFile(slug, info.concept)} alt={`Concept picture of ${cast}`} testId="cast3d-concept" />
+            <figcaption>Concept picture (to look at; nothing is built from it)</figcaption>
+          </figure>
+        )}
+      </div>
+      <dl className="variant-facts">
+        <dt>Spec hash</dt>
+        <dd data-testid="cast3d-spec-hash" title={c3.specHash}>
+          {c3.specHash.slice(0, 12)}
+        </dd>
+        <dt>Build</dt>
+        <dd data-testid="cast3d-build-time">{c3.build?.buildSeconds != null ? `built in ${seconds(c3.build.buildSeconds)}${c3.build.blender ? ` (Blender ${c3.build.blender})` : ''}` : 'not built yet'}</dd>
+        <dt>Up to date</dt>
+        <dd data-testid="cast3d-stale">{c3.stale ? 'no: the spec changed after the last build' : 'yes, the sheet shows this spec'}</dd>
+        {(c3.build?.warnings.length ?? 0) > 0 && (
+          <>
+            <dt>Warnings</dt>
+            <dd data-testid="cast3d-warnings">{c3.build!.warnings.join('; ')}</dd>
+          </>
+        )}
+      </dl>
+    </>
   )
 }
 

@@ -10,6 +10,7 @@ import { SeriesStore } from '../series/service'
 import type { CtsService } from '../service'
 import { ffprobe } from '../render/ffmpeg'
 import type { z } from 'zod'
+import { renderKeyframe3d } from './keyframe3d'
 import type { clipShotAnswer } from './tasks'
 
 /**
@@ -33,6 +34,8 @@ export const VIDEO_SECONDS = 8
 /** How far the Z-Image img2img polish of a keyframe may drift from the player still. */
 export const POLISH_DENOISE = 0.35
 export const CLIP_STYLE = 'Flat 2D paper cutout cartoon for small children: solid flat colours, thick dark outlines, simple shapes, characters made of cut-out parts that slide and rotate, a plain flat painted background. No 3D, no shading, no gradients, no realistic lighting, no camera shake, no text, no speech.'
+/** The same for a `blender` series: the clip must sit next to the Blender render, so it asks for the toon 3D look of the first frame. */
+export const CLIP_STYLE_3D = 'Stylised 3D toon cartoon for small children, exactly as in the first frame: simple rounded characters with clean flat cel shading and a thin dark outline, soft flat light, a simple bright set, gentle character motion. No photoreal textures, no realistic lighting, no camera shake, no text, no speech.'
 
 export type ClipShots = z.infer<typeof clipShotAnswer>['clips']
 
@@ -122,7 +125,7 @@ export function buildScreenplay(series: string, episode: string, bible: Bible, s
     title: bible.title.en,
     format: 'kids-cartoon',
     aspect: '16:9',
-    style: bible.style.look ? `${CLIP_STYLE} Series look: ${bible.style.look}.` : CLIP_STYLE,
+    style: ((base) => (bible.style.look ? `${base} Series look: ${bible.style.look}.` : base))(bible.renderer === 'blender' ? CLIP_STYLE_3D : CLIP_STYLE),
     runtimeSeconds: shots.reduce((n, s) => n + s.seconds, 0),
     characters: leads.map((id) => ({ ...(({ name, look }) => ({ name, looks: look, voice: '' }))(looks(id)) })),
     places: bible.sets.map((s) => ({ name: s.name.en, looks: s.description })),
@@ -216,14 +219,18 @@ export async function buildStillTimeline(store: SeriesStore, series: string, sho
   }
 }
 
-/** Draws the keyframe still of a shot with the player: `clips/keyframes/<id>.png` at series level, 1280x720. */
-export async function renderKeyframe(svc: CtsService, store: SeriesStore, series: string, shot: ClipShots[number]): Promise<string> {
+/** Draws the keyframe still of a shot: `clips/keyframes/<id>.png` at series level, 1280x720. The player draws it for a canvas series, Blender for a `blender` series (`keyframe3d.ts`). */
+export async function renderKeyframe(svc: CtsService, store: SeriesStore, series: string, shot: ClipShots[number], signal?: AbortSignal, log?: (m: string) => void): Promise<string> {
+  if ((await store.readBible(series)).renderer === 'blender') return renderKeyframe3d(svc.dataDir, store, series, shot, signal, log)
   const timeline = await buildStillTimeline(store, series, shot)
   return stillFrame({ dataDir: svc.dataDir, series, timeline, out: path.join(store.paths(series).root, 'clips', 'keyframes', `${shot.id}.png`), width: STILL_SIZE.width, height: STILL_SIZE.height })
 }
 
-export function videoPrompt(shot: ClipShots[number]): string {
-  return `${shot.action.replace(/\s+/g, ' ').trim().replace(/[.!?]*$/, '.')} Flat 2D cutout motion only: parts slide, rotate and bob like paper puppets. Camera: ${shot.framing}${shot.move && shot.move !== 'static' ? `, ${shot.move}` : ', static'}. No 3D, no shading, no speech, no text.`
+export function videoPrompt(shot: ClipShots[number], renderer: 'canvas' | 'blender' = 'canvas'): string {
+  const action = shot.action.replace(/\s+/g, ' ').trim().replace(/[.!?]*$/, '.')
+  const camera = `Camera: ${shot.framing}${shot.move && shot.move !== 'static' ? `, ${shot.move}` : ', static'}.`
+  if (renderer === 'blender') return `${action} Keep the toon 3D look of the first frame; the characters move gently and stay on model. ${camera} No speech, no text.`
+  return `${action} Flat 2D cutout motion only: parts slide, rotate and bob like paper puppets. ${camera} No 3D, no shading, no speech, no text.`
 }
 
 // ---- making one clip ----
@@ -284,13 +291,14 @@ export async function generateClip(a: GenerateClipArgs): Promise<GeneratedClip> 
   const dir = videoDir(store, series, episode)
   const project = `cartoon-studio-${series}`
   if (!shot.staging) throw new Error(`shot "${clip}" in tasks/clip-shots.json has no staging (set, shot, actors): the clip_shots step writes it`)
-  a.log(`clip ${clip}: keyframe from the player (set ${shot.staging.set}, ${shot.staging.actors.map((x) => x.who).join(', ')})`)
-  let keyframe = await (a.renderStill ?? ((sh) => renderKeyframe(svc, store, series, sh)))(shot)
+  const renderer = (await store.readBible(series)).renderer
+  a.log(`clip ${clip}: keyframe from ${renderer === 'blender' ? 'a Blender still' : 'the player'} (set ${shot.staging.set}, ${shot.staging.actors.map((x) => x.who).join(', ')})`)
+  let keyframe = await (a.renderStill ?? ((sh) => renderKeyframe(svc, store, series, sh, a.signal, a.log)))(shot)
   let polish: GeneratedClip['polish']
   if (a.polish) {
     try {
       const img = await comfyProvider({ svc, store, series, episode, what: `clip ${clip} keyframe polish` }).generate({
-        prompt: `${shot.action.replace(/s+/g, ' ').trim()} ${CLIP_STYLE}`,
+        prompt: `${shot.action.replace(/s+/g, ' ').trim()} ${renderer === 'blender' ? CLIP_STYLE_3D : CLIP_STYLE}`,
         size: STILL_SIZE,
         format: 'png',
         out: keyframe.replace(/.png$/i, '') + '-polished',
@@ -307,7 +315,7 @@ export async function generateClip(a: GenerateClipArgs): Promise<GeneratedClip> 
     }
   }
   a.log(`clip ${clip}: keyframe ${keyframe}; video (max_credits ${a.maxCredits})`)
-  const prompt = videoPrompt(shot)
+  const prompt = videoPrompt(shot, renderer)
   const r = await charge(
     { store, series, episode, provider: 'flow', model: `${VIDEO_MODEL} ${VIDEO_RESOLUTION}`, what: `clip ${clip} (${VIDEO_SECONDS} s)`, currency: 'credits', estimate: a.maxCredits },
     () => flow.generateVideo!({ prompt, aspect: '16:9', model: VIDEO_MODEL, duration: VIDEO_SECONDS, resolution: VIDEO_RESOLUTION, firstFrame: keyframe, maxCredits: a.maxCredits, project, out: path.join(dir, 'clips'), name: clip, timeoutMs: 1_800_000, signal: a.signal }),

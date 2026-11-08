@@ -12,6 +12,7 @@ import type { SheetMeta } from '../images/reference'
 import { SHEET_POSES, SKETCH_BACKGROUND, SKETCH_SIZE, bodyPlanProblems, poseSketch, renderSketch, sketchProblems } from '../images/sketch'
 import { buildEpisodeTimelines } from '../anim/timeline'
 import { renderEpisode } from '../render/render'
+import { blenderContactSheet, renderBlenderEpisode } from '../render/blender'
 import { contactSheet, poseSheet, rigSheetName } from '../render/sheet'
 import { checkRig, lintSeries } from '../series/lint'
 import { voiceDeps } from '../voice/tools'
@@ -360,8 +361,11 @@ export async function voiceStep(e: Env): Promise<string> {
 /** The sheet and the review of one clip. Returns the verdict. */
 export async function reviewClip(e: Env, clip: string, file: string, who: string[]): Promise<'pass' | 'revise'> {
   const p = e.store.paths(e.series)
+  const blender = (await e.store.readBible(e.series)).renderer === 'blender'
   const sheet = await clipSheet(file, path.join(videoDir(e.store, e.series, e.episode), 'review'), clip)
-  const poses = (await Promise.all(who.map(async (id) => await rigSheetName(p.castDir(id), p.castDir(id)).then((n) => (n ? `cast/${id}/${n}` : null))))).filter((x): x is string => !!x)
+  const poses = blender
+    ? who.map((id) => `cast/${id}/sheet.png`)
+    : (await Promise.all(who.map(async (id) => await rigSheetName(p.castDir(id), p.castDir(id)).then((n) => (n ? `cast/${id}/${n}` : null))))).filter((x): x is string => !!x)
   const existing = await fs.readdir(path.join(p.episodeDir(e.episode), 'reviews')).catch(() => [] as string[])
   const n = existing.filter((f) => f.startsWith(`clip-${clip}-`)).length + 1
   const r = await ask<z.infer<typeof reviewAnswer>>(
@@ -370,7 +374,9 @@ export async function reviewClip(e: Env, clip: string, file: string, who: string
       id: `clip-review-${clip}-${n}`,
       role: 'frame-critic',
       kind: 'clip-review',
-      prompt: `Review the Flow clip "${clip}": the first picture is six frames of the clip, the next ones are the pose sheets of the characters in it. It must read as a flat 2D paper-cutout cartoon with the characters on model (shapes, colours, faces). Fail it for a 3D look, shading, gradients, off-model faces or colours, extra limbs, text, or anything frightening.`,
+      prompt: blender
+        ? `Review the Flow clip "${clip}": the first picture is six frames of the clip, the next ones are the Blender sheets of the characters. It must sit next to our Blender render: the same stylised toon 3D look (simple rounded characters, flat cel shading, thin dark outline, bright simple set) with the characters on model (shapes, colours, faces, accessories). Fail it for a photoreal or glossy look, a different art style, off-model faces or colours, extra or missing limbs, text, or anything frightening.`
+        : `Review the Flow clip "${clip}": the first picture is six frames of the clip, the next ones are the pose sheets of the characters in it. It must read as a flat 2D paper-cutout cartoon with the characters on model (shapes, colours, faces). Fail it for a 3D look, shading, gradients, off-model faces or colours, extra limbs, text, or anything frightening.`,
       inputs: { paths: [relTo(e, sheet), ...poses], json: { clip, characters: who } },
       output: { schema: 'review', path: `episodes/${e.episode}/reviews/clip-${clip}-${n}.json` }
     }
@@ -444,6 +450,16 @@ export async function previewRenderStep(e: Env): Promise<string> {
   await requireChosen(e)
   const bible = await e.store.readBible(e.series)
   const out: string[] = []
+  if (bible.renderer === 'blender') {
+    for (const [i, lang] of bible.languages.entries()) {
+      e.progress(i / bible.languages.length, `preview ${lang}`)
+      const r = await renderBlenderEpisode({ dataDir: e.svc.dataDir, series: e.series, episode: e.episode, lang, quality: 'preview', signal: e.ctx.signal, onProgress: (done, total) => e.progress((i + done / Math.max(1, total)) / bible.languages.length, `preview ${lang} ${done}/${total}`) })
+      const sheet = await blenderContactSheet({ dataDir: e.svc.dataDir, series: e.series, episode: e.episode, lang, count: 12, quality: 'preview' })
+      const t = r.blenderTimes
+      out.push(`${lang}: ${r.seconds.toFixed(1)} s in ${r.wallSeconds.toFixed(1)} s (${r.encoder}${t ? `, Blender warm mean ${t.warmMean.toFixed(3)} s a frame` : ''}), sheet ${relTo(e, sheet)}`)
+    }
+    return out.join('; ')
+  }
   for (const [i, lang] of bible.languages.entries()) {
     e.progress(i / bible.languages.length, `preview ${lang}`)
     const r = await renderEpisode({ dataDir: e.svc.dataDir, series: e.series, episode: e.episode, lang, quality: 'preview', signal: e.ctx.signal, onProgress: (done, total) => e.progress((i + done / Math.max(1, total)) / bible.languages.length, `preview ${lang} ${done}/${total}`) })
@@ -474,8 +490,8 @@ export async function finalRenderStep(e: Env): Promise<string> {
   const out: string[] = []
   for (const [i, lang] of bible.languages.entries()) {
     e.progress(i / bible.languages.length, `final ${lang}`)
-    const r = await renderEpisode({ dataDir: e.svc.dataDir, series: e.series, episode: e.episode, lang, quality: 'final', signal: e.ctx.signal, onProgress: (done, total) => e.progress((i + done / Math.max(1, total)) / bible.languages.length, `final ${lang} ${done}/${total}`) })
-    languages[lang] = { file: relTo(e, r.file), seconds: Math.round(r.seconds * 10) / 10, renderSeconds: Math.round(r.wallSeconds * 10) / 10, encoder: r.encoder, frames: r.frames, loudnessInputLufs: r.loudness?.input_i ?? null, mixMinUnderDb: r.mixCheck?.minUnderDb ?? null, mixMedianUnderDb: r.mixCheck?.medianUnderDb ?? null, log: relTo(e, r.logFile), warnings: r.warnings }
+    const r = await (bible.renderer === 'blender' ? renderBlenderEpisode : renderEpisode)({ dataDir: e.svc.dataDir, series: e.series, episode: e.episode, lang, quality: 'final', signal: e.ctx.signal, onProgress: (done, total) => e.progress((i + done / Math.max(1, total)) / bible.languages.length, `final ${lang} ${done}/${total}`) })
+    languages[lang] = { ...(r.blenderTimes ? { blenderTimes: { frames: r.blenderTimes.frames, first: r.blenderTimes.first, warmMean: r.blenderTimes.warmMean, p95: r.blenderTimes.p95, total: r.blenderTimes.total } } : {}), file: relTo(e, r.file), seconds: Math.round(r.seconds * 10) / 10, renderSeconds: Math.round(r.wallSeconds * 10) / 10, encoder: r.encoder, frames: r.frames, loudnessInputLufs: r.loudness?.input_i ?? null, mixMinUnderDb: r.mixCheck?.minUnderDb ?? null, mixMedianUnderDb: r.mixCheck?.medianUnderDb ?? null, log: relTo(e, r.logFile), warnings: r.warnings }
     out.push(`${lang}: ${r.seconds.toFixed(1)} s in ${r.wallSeconds.toFixed(1)} s (${r.encoder}), loudness ${r.loudness?.input_i ?? 'n/a'} LUFS in, music min ${r.mixCheck?.minUnderDb ?? 'n/a'} dB under the voice`)
     const reviews = await frameReviews(e, lang)
     const lastReview = reviews[reviews.length - 1]

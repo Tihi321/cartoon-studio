@@ -9,6 +9,10 @@
  * Two modes:
  *   (default)   MOCKED tools: the bridge answers with the fixture `mini` (tests/fixtures/mini) in the shapes of the real tools, three pitches, and it plays
  *               engine events (voice clips, job progress) so the live parts of the views show.
+ *   --blender   the REAL engine on the 3D fixture `mini3d` (a `blender` series; implies --engine): the Cast view with the turnaround sheet, spec hash, build time
+ *               and the approve and redo buttons, the Sets view with the set sheet, the Preview view with a <video> of out/<lang>.preview.mp4 and the Settings
+ *               Blender section (path, version, GPU, samples; it asks the real cts_blender_status). The sheets and the preview MP4 are stand-in pictures
+ *               made here (no Blender render): the views are what is checked, not the look.
  *   --engine    the REAL engine: starts `node out/engine/index.js --mcp-only` (CTS_AUTOSTART=0, port 7477) on a scratch data folder under
  *               .claude/temp/ that holds `mini` as a series with three pitches, and routes every `call` to it over MCP. It also renders a preview MP4
  *               (headless Chromium and ffmpeg, local, no paid call). Run `yarn build:engine` first.
@@ -26,18 +30,20 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
-const ENGINE = args.includes('--engine')
+const BLENDER = args.includes('--blender')
+const ENGINE = args.includes('--engine') || BLENDER
+const SLUG = BLENDER ? 'mini3d' : 'mini'
 const ENGINE_PORT = 7477
 const opt = (n, d) => {
   const i = args.indexOf(`--${n}`)
   return i >= 0 && args[i + 1] ? args[i + 1] : d
 }
-const OUT = path.resolve(ROOT, opt('out', ENGINE ? '.claude/temp/screens/studio-engine' : '.claude/temp/screens/studio'))
+const OUT = path.resolve(ROOT, opt('out', BLENDER ? '.claude/temp/screens/studio-blender' : ENGINE ? '.claude/temp/screens/studio-engine' : '.claude/temp/screens/studio'))
 const HARNESS = path.join(ROOT, '.claude', 'temp', 'studio-harness')
 const DIST = path.join(HARNESS, 'dist')
 // the fixture mini, copied, with its timelines built by the engine code, so the real player has something to play
-const DATA = path.join(HARNESS, ENGINE ? 'engine-data' : 'data')
-const MINI = path.join(DATA, 'series', 'mini')
+const DATA = path.join(HARNESS, BLENDER ? 'blender-data' : ENGINE ? 'engine-data' : 'data')
+const MINI = path.join(DATA, 'series', SLUG)
 const PLAYER = path.join(ROOT, 'out', 'player')
 const failures = []
 const fail = (m) => {
@@ -81,7 +87,41 @@ const pitches = () => [
   }
 ]
 
+/** The fixture mini3d with stand-in sheets (grey pictures with a label), a build record that matches each spec, and a 2 s preview MP4 per language. */
+async function prepareBlenderData() {
+  fs.rmSync(DATA, { recursive: true, force: true })
+  const code = `import { installMini3d } from './tests/fixtures/mini3d.ts'
+await installMini3d(process.argv[1])`
+  const r = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', code, DATA], { cwd: ROOT, encoding: 'utf8' })
+  if (r.status !== 0) throw new Error(`could not install the mini3d fixture: ${(r.stderr || '').split(String.fromCharCode(10))[0]}`)
+  const sharp = (await import('sharp')).default
+  const { createHash } = await import('node:crypto')
+  const card = async (file, w, h, label, fill) => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="${fill}"/><text x="50%" y="50%" font-family="sans-serif" font-size="${Math.round(h / 12)}" text-anchor="middle" fill="#2b2118">${label}</text></svg>`
+    await sharp(Buffer.from(svg)).png().toFile(file)
+  }
+  for (const [id, fill] of [['tilly', '#f4d35e'], ['blobby', '#7aa6d8']]) {
+    const dir = path.join(MINI, 'cast', id)
+    await card(path.join(dir, 'sheet.png'), 1280, 720, `stand-in sheet of ${id}: turnaround, mouths, expressions`, fill)
+    const hash = createHash('sha1').update(fs.readFileSync(path.join(dir, 'character.json'))).digest('hex')
+    fs.writeFileSync(path.join(dir, 'build.json'), JSON.stringify({ schema: 'cts.character-build/1', id, specHash: hash, blender: '5.2.0', buildSeconds: 14.6, warnings: [] }, null, 2))
+  }
+  const setDir = path.join(MINI, 'sets', 'park')
+  await card(path.join(setDir, 'sheet.png'), 1280, 720, 'stand-in set sheet of the park: wide, two marks, bench camera', '#b7e0a5')
+  const setHash = createHash('sha1').update(fs.readFileSync(path.join(setDir, 'set3d.json'))).digest('hex')
+  fs.writeFileSync(path.join(setDir, 'build.json'), JSON.stringify({ schema: 'cts.set-build/1', id: 'park', specHash: setHash, blender: '5.2.0', buildSeconds: 6.2, warnings: ['mark "bench" is inside the footprint of prop "oak"'] }, null, 2))
+  const out = path.join(MINI, 'episodes', 'ep00-mini3d', 'out')
+  fs.mkdirSync(out, { recursive: true })
+  for (const lang of ['hr', 'en']) {
+    const mp4 = path.join(out, `${lang}.preview.mp4`)
+    const ff = spawnSync('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=960x540:rate=24:duration=2', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', mp4], { encoding: 'utf8' })
+    if (ff.status !== 0) console.error(`could not make the stand-in preview ${lang}.preview.mp4 (the Preview view will show its empty state): ${(ff.stderr || ff.error?.message || '').split(String.fromCharCode(10))[0]}`)
+  }
+}
+
 async function prepareData() {
+  if (BLENDER) return prepareBlenderData()
   fs.rmSync(DATA, { recursive: true, force: true })
   const code = `import { installMini } from './tests/fixtures/mini.ts'
 import { SeriesStore } from './src/engine/series/service.ts'
@@ -167,7 +207,7 @@ function serve() {
     const url = decodeURIComponent((req.url ?? '/').split('?')[0])
     const rel = url.replace(/^\/+/, '') || 'index.html'
     if (rel === 'favicon.ico') return res.writeHead(204).end()
-    for (const prefix of ['data/series/mini/', 'files/mini/']) {
+    for (const prefix of [`data/series/${SLUG}/`, `files/${SLUG}/`]) {
       if (!rel.startsWith(prefix)) continue
       const f = inside(MINI, rel.slice(prefix.length))
       return f ? send(res, f) : res.writeHead(404).end()
@@ -426,6 +466,70 @@ async function startEngine() {
   return { child, client, origin: `http://127.0.0.1:${ENGINE_PORT}` }
 }
 
+/** The views of a `blender` series on the real engine: Cast, Sets, Preview, Settings. */
+async function blenderViews({ page, T, must, shot, go, text, eng, fail }) {
+  // Cast: the 3D sheet, the spec hash, the build time, Approve (off while the build is current and unapproved?) and Redo (needs a note)
+  await go('cast')
+  await must('3D sheet', T('cast3d-sheet'))
+  await must('spec hash', T('cast3d-spec-hash'))
+  await must('build time', T('cast3d-build-time'))
+  await must('approval pill', T('cast-approval'))
+  if (!/14.6 s/.test(await text(T('cast3d-build-time')))) fail(`the build time does not show 14.6 s: "${await text(T('cast3d-build-time'))}"`)
+  if (!/waiting for your look/.test(await text(T('cast-approval')))) fail(`the first character should wait for the look, it says "${await text(T('cast-approval'))}"`)
+  if (!(await page.isDisabled(T('cast-redo')))) fail('Redo should be off while the note is empty')
+  if (await page.locator(T('cast-rig-check')).count()) fail('a 3D character has no rig check pill')
+  if (await page.locator(T('cast-variants')).count()) fail('a 3D character has no rig variants section')
+  await shot('b1-cast-waiting')
+  await page.click(T('cast-approve'))
+  await page.waitForFunction(() => /approved/.test(document.querySelector('[data-testid="cast-approval"]')?.textContent ?? ''), null, { timeout: 8000 }).catch(() => fail('Approve did not change the state'))
+  const bible = await eng.client.callTool({ name: 'cts_series_get', arguments: { series: SLUG } })
+  const approved = bible.structuredContent?.bible?.cast?.find((c) => c.id === (bible.structuredContent.bible.cast[0].id))
+  if (!approved?.sheet?.specHash) fail('the engine did not record a specHash with the approval')
+  await page.click(T('cast-pick-blobby'))
+  await must('second character sheet', T('cast3d-sheet'))
+  await page.fill(T('cast-redo-note'), 'bigger ears')
+  await page.click(T('cast-redo'))
+  await page.waitForFunction(() => /redo asked/.test(document.querySelector('[data-testid="cast-approval"]')?.textContent ?? ''), null, { timeout: 8000 }).catch(() => fail('Redo did not show "redo asked"'))
+  await shot('b1-cast-redo')
+
+  // Sets: the set sheet, the hash, the build time and warning, the marks and the cameras
+  await go('sets')
+  await must('set sheet', T('set3d-sheet'))
+  await must('set build time', T('set3d-build-time'))
+  await must('set warnings', T('set3d-warnings'))
+  await must('set marks', '[data-testid^="set3d-mark-"]')
+  await must('set cameras', '[data-testid^="set3d-camera-"]')
+  await shot('b2-sets')
+
+  // Preview: a <video> on out/<lang>.preview.mp4
+  await go('preview')
+  await must('preview video', T('preview-video'))
+  const src = await page.locator(T('preview-video')).getAttribute('src')
+  if (!src || !src.endsWith('/out/hr.preview.mp4')) fail(`the video source is wrong: ${src}`)
+  if (await page.locator(T('preview-player')).count()) fail('a Blender series must not load the canvas player')
+  await page.click(T('preview-lang-en'))
+  await page.waitForFunction(() => document.querySelector('[data-testid="preview-video"]')?.getAttribute('src')?.endsWith('/out/en.preview.mp4'), null, { timeout: 5000 }).catch(() => fail('the language switch did not change the video'))
+  await page.waitForTimeout(800)
+  const ready = await page.evaluate(() => {
+    const v = document.querySelector('[data-testid="preview-video"]')
+    return v ? { err: v.error?.code ?? null, state: v.readyState } : null
+  })
+  if (ready?.err) fail(`the video element reports error code ${ready.err}`)
+  await shot('b3-preview')
+
+  // Settings: the Blender section (the real cts_blender_status)
+  await go('settings')
+  await must('blender section', T('set-blender'))
+  await must('blender path', T('blender-path'))
+  await page.waitForFunction(() => !/checking/.test(document.querySelector('[data-testid="blender-status"]')?.textContent ?? 'checking'), null, { timeout: 60000 }).catch(() => fail('cts_blender_status did not answer'))
+  await must('preview samples', T('blender-samples-preview'))
+  await must('final samples', T('blender-samples-final'))
+  console.log(`blender status: ${await text(T('blender-status'))}; version: ${await text(T('blender-version'))}; GPU: ${await text(T('blender-gpu'))}`)
+  if (!/4 samples/.test(await text(T('blender-samples-preview')))) fail('the preview samples are not shown')
+  if (!(await page.isDisabled(T('blender-save')))) fail('Save the path should be off until the path is edited')
+  await shot('b4-settings')
+}
+
 async function main() {
   await prepareData()
   await buildRenderer()
@@ -456,7 +560,7 @@ async function main() {
       }
     })
   }
-  await page.addInitScript(bridge, { fix: fixtures(), origin, engine: !!eng, engineOrigin: eng ? eng.origin : origin })
+  await page.addInitScript(bridge, { fix: BLENDER ? {} : fixtures(), origin, engine: !!eng, engineOrigin: eng ? eng.origin : origin })
   await page.goto(`${origin}/index.html`)
   await page.waitForSelector('[data-testid="brand"]')
 
@@ -485,6 +589,9 @@ async function main() {
   await page.setViewportSize({ width: 1280, height: 1500 })
 
   try {
+    if (BLENDER) {
+      await blenderViews({ page, T, must, shot, go, text, eng, fail })
+    } else {
     // 1. Series and bible: three pitch cards, Choose moves the series out of "waiting for you"
     await go('series')
     await must('series list', T('series-mini'))
@@ -616,6 +723,7 @@ async function main() {
     await page.click(T('nav-agents'))
     await must('agents view', T('page-agents'))
     await shot('10-agents')
+    }
   } catch (e) {
     fail(`the harness stopped: ${e.message}`)
   }
@@ -628,7 +736,7 @@ async function main() {
     eng.child.kill()
   }
   if (failures.length) process.exit(1)
-  console.log(`studio-shots passed${ENGINE ? ' (real engine)' : ' (mocked tools)'}`)
+  console.log(`studio-shots passed${BLENDER ? ' (real engine, 3D series)' : ENGINE ? ' (real engine)' : ' (mocked tools)'}`)
 }
 
 main().catch((e) => {

@@ -9,8 +9,9 @@ import type { JobState } from '../queue/jobs'
 import { assertId, assertSlug } from '../series/paths'
 import { SeriesStore } from '../series/service'
 import type { CtsService } from '../service'
+import { sha1 } from '../blender/jobs'
 import { clipsGate } from './clips'
-import { STEPS, emptyState, normalise, resetFrom, stepDef, taskOf } from './steps'
+import { emptyState, normalise, rendererOfState, resetFrom, stepDef, stepsOf, taskOf } from './steps'
 import type { StepDef } from './steps'
 
 /**
@@ -61,6 +62,23 @@ export interface PipelineReport {
   brief?: Record<string, unknown>
   options?: Record<string, unknown>
   summary?: Record<string, unknown>
+}
+
+/** sha1 of the bytes of `cast/<id>/character.json` (what a 3D sheet approval is of), or null without a spec. */
+export async function specHashOf(store: SeriesStore, series: string, castId: string): Promise<string | null> {
+  try {
+    return sha1(await fs.readFile(store.paths(series).characterFile(castId)))
+  } catch {
+    return null
+  }
+}
+
+async function readJsonFile(file: string): Promise<Record<string, unknown> | null> {
+  try {
+    return JSON.parse(await fs.readFile(file, 'utf8')) as Record<string, unknown>
+  } catch {
+    return null
+  }
 }
 
 const locks = new Map<string, Promise<unknown>>()
@@ -121,7 +139,18 @@ export class Pipeline {
         const title = typeof b.title === 'string' && b.title ? b.title : typeof pitchTitle === 'string' && pitchTitle ? pitchTitle : o.series
         await store.createSeries(o.series, { title, ...(typeof b.idea === 'string' ? { logline: b.idea } : {}), ...(typeof b.ageMin === 'number' ? { ageMin: b.ageMin } : {}), ...(typeof b.ageMax === 'number' ? { ageMax: b.ageMax } : {}) })
       }
-      const state = (await this.read(o.series, o.episode)) ?? emptyState(o.series, o.episode, this.now())
+      // HUB-30: the renderer decides the step list. A new run takes `options.renderer`, else the bible's (a hand-made series), else canvas.
+      const wanted = o.options?.renderer
+      if (wanted !== undefined && wanted !== 'canvas' && wanted !== 'blender') throw new Error(`options.renderer must be "canvas" or "blender", not ${JSON.stringify(wanted)}`)
+      const existing = await this.read(o.series, o.episode)
+      if (existing && wanted && wanted !== rendererOfState(existing)) throw new Error(`this episode already runs with the ${rendererOfState(existing)} renderer; the renderer of a run cannot change (use a new episode id)`)
+      const renderer = existing ? rendererOfState(existing) : ((wanted as 'canvas' | 'blender' | undefined) ?? (await store.readBible(o.series)).renderer)
+      if (renderer === 'blender') {
+        const bible = await store.readBible(o.series)
+        if (bible.renderer !== 'blender' && (bible.cast.length > 0 || bible.episodes.length > 0)) throw new Error(`series "${o.series}" is a canvas series with a cast or episodes; the 3D route is a new series (cts_run_pipeline with options.renderer "blender" and another slug)`)
+        if (bible.renderer !== 'blender') await store.writeBible(o.series, { ...bible, renderer: 'blender', style3d: bible.style3d ?? 'style3d.json' })
+      }
+      const state = existing ?? emptyState(o.series, o.episode, this.now(), renderer)
       if (o.brief || o.options) {
         state.brief = { ...briefOf(state), ...(o.brief ?? {}), [OPTION_KEY]: { ...optionsOf(state), ...(o.options ?? {}) } }
       }
@@ -176,8 +205,8 @@ export class Pipeline {
     if (!state) throw new Error(`the episode "${episode}" of "${series}" has no pipeline run (cts_run_pipeline starts one)`)
     const jobs = this.svc.deps.jobs
     const queue = this.svc.deps.registry.clientQueue
-    outer: for (let guard = 0; guard < STEPS.length * 3; guard++) {
-      for (const step of STEPS) {
+    outer: for (let guard = 0; guard < stepsOf(state).length * 3; guard++) {
+      for (const step of stepsOf(state)) {
         const st = state.steps[step.id]!
         if (st.state === 'done' || st.state === 'skipped') continue
         if (st.state === 'failed') {
@@ -249,6 +278,16 @@ export class Pipeline {
     }
     if (step.id === 'sheet_review') {
       const bible = await store.readBible(state.series)
+      if (rendererOfState(state) === 'blender') {
+        // a 3D sheet is approved for one spec: a spec that changed since (specHash) needs the user's look again
+        const open: string[] = []
+        for (const c of bible.cast) {
+          const hash = await specHashOf(store, state.series, c.id)
+          if (!c.sheet?.approvedAt || !hash || c.sheet.specHash !== hash) open.push(c.id)
+        }
+        if (open.length === 0) return null
+        return `waiting for the user to look at the character sheet of ${open.join(', ')} (cast/<id>/sheet.png: turnaround, expressions, mouths) and approve it: cts_sheet_approve {series, cast, ok: true}, or ok: false with a note to build it again. The sets, the script and everything after are not made before every character is approved.`
+      }
       const open = bible.cast.filter((c) => !c.sheet?.approvedAt).map((c) => c.id)
       if (open.length === 0) return null
       return `waiting for the user to look at the character sheet of ${open.join(', ')} (cast/<id>/sheet.png) and approve it: cts_sheet_approve {series, cast, ok: true}, or ok: false with a note to make it again. Nothing is rigged before every character is approved.`
@@ -259,8 +298,8 @@ export class Pipeline {
 
   private async enqueue(state: PipelineState, step: StepDef): Promise<string> {
     // belt and braces: nothing visual before the user's pick, whatever called us
-    const idx = STEPS.findIndex((s) => s.id === step.id)
-    if (idx > STEPS.findIndex((s) => s.id === 'pitch_choice')) {
+    const idx = stepsOf(state).findIndex((s) => s.id === step.id)
+    if (idx > stepsOf(state).findIndex((s) => s.id === 'pitch_choice')) {
       const bible = await this.store.readBible(state.series)
       if (!bible.chosenPitch || !bible.pitches.some((p) => p.id === bible.chosenPitch)) throw new Error('refusing to start a step before the user has chosen a premise (cts_pitch_choose)')
     }
@@ -345,6 +384,7 @@ export class Pipeline {
     const member = bible.cast.find((c) => c.id === castId)
     if (!member) throw new Error(`no cast member "${castId}" in "${series}" (${bible.cast.map((c) => c.id).join(', ') || 'none yet'})`)
     const castDir = store.paths(series).castDir(castId)
+    if (bible.renderer === 'blender') return this.approveSheet3d(series, bible, castId, ok, note)
     const meta = await readSheetMeta(castDir)
     if (!meta || !(await store.exists(path.join(castDir, 'sheet.png')))) throw new Error(`"${castId}" has no character sheet yet (cast/${castId}/sheet.png): the cast_sheet step makes it`)
     if (!ok && !note?.trim()) throw new Error('a redo needs a note: say what to change (the note is added to the image prompt)')
@@ -375,6 +415,49 @@ export class Pipeline {
     return { cast: castId, ok, approvedAt: at, sheet, stillOpen, resumed }
   }
 
+  /**
+   * The user's verdict on a 3D character sheet (CTS-27). `ok`: the sheet must be of the current spec (the build is not stale); the cast entry gets
+   * `sheet { approvedAt, specHash }` and the pipelines that wait at `sheet_review` go on once the last character is approved. Not `ok`: `sheet-redo.json`
+   * keeps the note for the designer, the approval is withdrawn and `character` + `sheet_review` are reopened (only this character is designed again).
+   */
+  private async approveSheet3d(series: string, bible: Bible, castId: string, ok: boolean, note?: string): ReturnType<Pipeline['approveSheet']> {
+    const store = this.store
+    const castDir = store.paths(series).castDir(castId)
+    const specHash = await specHashOf(store, series, castId)
+    if (!specHash) throw new Error(`"${castId}" has no character spec yet (cast/${castId}/character.json): the character step makes it`)
+    const build = await readJsonFile(path.join(castDir, 'build.json'))
+    if (!(await store.exists(path.join(castDir, 'sheet.png'))) || !build) throw new Error(`"${castId}" has no built sheet yet (cast/${castId}/sheet.png): the character step builds it`)
+    if (ok && build.specHash !== specHash) throw new Error(`the sheet of "${castId}" is of an older spec (the spec changed after the last build): cts_character_build {series, cast} first, then look at the new sheet`)
+    if (!ok && !note?.trim()) throw new Error('a redo needs a note: say what to change (the designer gets the note)')
+    const at = this.now()
+    await store.writeFile(series, 'sheet/review.json', `${JSON.stringify({ ok, note: note ?? null, at, specHash }, null, 2)}\n`, castDir)
+    const resumed: PipelineReport[] = []
+    if (!ok) {
+      await store.writeFile(series, 'sheet-redo.json', `${JSON.stringify({ note: note!.trim(), at, specHash }, null, 2)}\n`, castDir)
+      await store.writeBible(series, { ...bible, cast: bible.cast.map((c) => (c.id === castId ? { ...c, sheet: undefined } : c)) })
+      let past = false
+      for (const ep of await this.episodesWithPipeline(series)) {
+        const st = await this.read(series, ep)
+        if (!st) continue
+        const steps = stepsOf(st).map((s) => s.id)
+        if (steps.slice(steps.indexOf('sheet_review') + 1).some((id) => st.steps[id]?.state !== 'pending')) past = true
+        await this.reopen(series, ep, ['character', 'sheet_review'], `revise sheet ${castId}`)
+        resumed.push(await this.advance(series, ep))
+      }
+      return { cast: castId, ok, stillOpen: bible.cast.map((c) => c.id), resumed, ...(past ? { warning: 'steps after the sheets had already started: run cts_run_pipeline {from: "set3d"} (or "assemble" when only the look changed) after the new sheet is approved' } : {}) }
+    }
+    const sheet = { approvedAt: at, specHash }
+    await store.writeBible(series, { ...bible, cast: bible.cast.map((c) => (c.id === castId ? { ...c, sheet } : c)) })
+    const fresh = await store.readBible(series)
+    const stillOpen: string[] = []
+    for (const c of fresh.cast) if (!c.sheet?.approvedAt || c.sheet.specHash !== (await specHashOf(store, series, c.id))) stillOpen.push(c.id)
+    for (const ep of await this.episodesWithPipeline(series)) {
+      const st = await this.read(series, ep)
+      if (st && st.state === 'waiting-on-user' && st.steps.sheet_review?.state !== 'done') resumed.push(await this.advance(series, ep))
+    }
+    return { cast: castId, ok, approvedAt: at, sheet, stillOpen, resumed }
+  }
+
   async episodesWithPipeline(series: string): Promise<string[]> {
     const dir = this.store.paths(series).episodesDir
     const names = await fs.readdir(dir).catch(() => [] as string[])
@@ -391,13 +474,13 @@ export class Pipeline {
     if (!state) return null
     // a run that is going looks at its jobs again (a job that failed for good, a step that finished): advance is safe to call at any time
     if (state.state === 'running' || state.state === 'waiting-on-client') return this.advance(series, episode)
-    const cur = STEPS.find((s) => !['done', 'skipped'].includes(state.steps[s.id]!.state))
+    const cur = stepsOf(state).find((s) => !['done', 'skipped'].includes(state.steps[s.id]!.state))
     return this.report(state, cur?.id ?? null)
   }
 
   private async report(state: PipelineState, step: string | null): Promise<PipelineReport> {
     const bible = await this.store.readBible(state.series).catch(() => null)
-    const views: StepView[] = STEPS.map((s) => {
+    const views: StepView[] = stepsOf(state).map((s) => {
       const st = state.steps[s.id]!
       return { id: s.id, no: s.no, label: s.label, role: s.role, kind: s.kind, state: st.state, ...(st.detail ? { detail: st.detail } : {}), ...(st.error ? { error: st.error } : {}), ...(st.job ? { job: st.job } : {}), ...(st.startedAt ? { startedAt: st.startedAt } : {}), ...(st.endedAt ? { endedAt: st.endedAt } : {}) }
     })
@@ -428,7 +511,9 @@ function hintFor(state: PipelineState, step: string | null): string {
       return step === 'pitch_choice'
         ? `STOP: the user must choose a premise. Show them the pitches (title, logline, leads, sets, why), wait for their answer, then cts_pitch_choose {series: "${s}", pitch: "<id>"}. Calling cts_run_pipeline again does not skip this.`
         : step === 'sheet_review'
-          ? `STOP: the user must look at the character sheets (cast/<id>/sheet.png: the master and three poses; cts_cast_get shows them). Show every sheet, wait for the answer per character, then cts_sheet_approve {series: "${s}", cast: "<id>", ok: true} or ok: false with a note to make that sheet again. Nothing is rigged before every character is approved.`
+          ? rendererOfState(state) === 'blender'
+            ? `STOP: the user must look at the character sheets (cast/<id>/sheet.png: turnaround, expressions, mouths; cts_character_get {series: "${s}", cast: "<id>"} shows one, the Cast view of the studio too). Show every sheet, wait for the answer per character, then cts_sheet_approve {series: "${s}", cast: "<id>", ok: true} or ok: false with a note to build that character again. The sets and everything after are not made before every character is approved.`
+            : `STOP: the user must look at the character sheets (cast/<id>/sheet.png: the master and three poses; cts_cast_get shows them). Show every sheet, wait for the answer per character, then cts_sheet_approve {series: "${s}", cast: "<id>", ok: true} or ok: false with a note to make that sheet again. Nothing is rigged before every character is approved.`
           : `Waiting for you or the user: ${state.waitingOn ?? ''}`
     case 'waiting-on-client':
       return `Model calls wait for you: cts_get_task -> answer -> cts_submit_task until none, then cts_wait {series: "${s}"}.`
