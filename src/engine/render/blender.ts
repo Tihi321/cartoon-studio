@@ -45,18 +45,24 @@ export interface BlenderRenderRequest {
 const ts = (): string => new Date().toISOString()
 const pad = (n: number): string => String(n).padStart(6, '0')
 
-/** The scene is rebuilt when it is missing or the timeline changed since (assembly.json records the hash of the timeline file). */
+/** The scene is rebuilt when it is missing, the timeline changed since, or a character spec/asset or the set spec/asset changed (assembly.json records all these hashes). */
 async function ensureAssembled(req: BlenderRenderRequest, runner: BlenderRunner, warnings: string[]): Promise<string> {
   const store = new SeriesStore(req.dataDir)
   const { job, blend, outDir } = await assembleInputs(store, req.series, req.episode, req.lang)
   const timelineHash = sha1(await fs.readFile(String((job as { timeline: string }).timeline)))
-  let fresh = false
-  try {
-    const info = JSON.parse(await fs.readFile(path.join(outDir, 'assembly.json'), 'utf8')) as { timelineHash?: string }
-    fresh = info.timelineHash === timelineHash && (await exists(blend))
-  } catch {
-    /* no assembly yet */
+  type Hashes = { specHash?: string; assetHash?: string }
+  const sameHashes = async (rec: Hashes | undefined, spec: string, asset: string): Promise<boolean> =>
+    !!rec && rec.specHash === sha1(await fs.readFile(spec)) && rec.assetHash === sha1(await fs.readFile(asset))
+  const isFresh = async (): Promise<boolean> => {
+    const info = JSON.parse(await fs.readFile(path.join(outDir, 'assembly.json'), 'utf8')) as { timelineHash?: string; set?: Hashes; actors?: Record<string, Hashes> }
+    if (info.timelineHash !== timelineHash || !(await exists(blend))) return false
+    const set = (job as { set: { spec: string; blend: string } }).set
+    if (!(await sameHashes(info.set, set.spec, set.blend))) return false
+    const chars = (job as { characters: Record<string, { spec: string; blend: string }> }).characters
+    for (const [id, c] of Object.entries(chars)) if (!(await sameHashes(info.actors?.[id], c.spec, c.blend))) return false
+    return true
   }
+  const fresh = await isFresh().catch(() => false) // no assembly yet, or an unreadable one
   if (!fresh) {
     const r = await assembleScene({ dataDir: req.dataDir, series: req.series, episode: req.episode, lang: req.lang, runner, signal: req.signal })
     if (!r.ok) throw new Error(`${r.code}: ${r.message}`)

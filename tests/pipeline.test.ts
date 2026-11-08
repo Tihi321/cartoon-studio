@@ -34,6 +34,8 @@ interface FakeJob {
   spec: string
   outDir: string
   timeline: string
+  set: { spec: string; blend: string }
+  characters: Record<string, { spec: string; blend: string }>
   ranges: [number, number][]
   chunkFrames: number
   timesFile: string
@@ -69,7 +71,10 @@ function fakeBlender(dir: string): { runner: BlenderRunner; calls: { command: st
         const timeline = JSON.parse(await readFile(job.timeline, 'utf8')) as { duration: number }
         await mkdir(job.outDir, { recursive: true })
         await writeFile(path.join(job.outDir, 'scene.blend'), 'scene')
-        await writeFile(path.join(job.outDir, 'assembly.json'), JSON.stringify({ timelineHash: sha1(await readFile(job.timeline)) }))
+        const hashes = async (x: { spec: string; blend: string }) => ({ specHash: sha1(await readFile(x.spec)), assetHash: sha1(await readFile(x.blend)) })
+        const actors: Record<string, unknown> = {}
+        for (const [id, c] of Object.entries(job.characters)) actors[id] = await hashes(c)
+        await writeFile(path.join(job.outDir, 'assembly.json'), JSON.stringify({ timelineHash: sha1(await readFile(job.timeline)), set: await hashes(job.set), actors }))
         return { blend: path.join(job.outDir, 'scene.blend'), assembly: path.join(job.outDir, 'assembly.json'), frames: Math.ceil(timeline.duration * 24), actions: ['wave', 'point', 'walk', 'sit'], shots: 3, warnings: [], assembleSeconds: 0.2 }
       }
       if (command === 'render') {
