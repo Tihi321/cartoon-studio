@@ -15,14 +15,12 @@ import {
   nameSchema,
   pitchSchema,
   reviewSchema,
-  rigSchema,
   textSchema,
   voiceSpecSchema
 } from '../../shared/contracts'
 import { parseMd } from '../../shared/md'
 import type { ChatMessage } from '../models/types'
 import type { JobContext } from '../queue/scheduler'
-import { bodyPlanSchema } from '../images/sketch'
 import { findSeedDir } from '../store/dataFolder'
 import type { SeriesStore } from '../series/service'
 import { chatJson } from './llm'
@@ -52,7 +50,6 @@ export interface RoleTask {
 // ---- the answer schemas ----
 
 const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'a colour is #rrggbb')
-const point = z.tuple([z.number(), z.number()])
 const loc = localizedSchema
 
 export const pitchesAnswer = z.strictObject({
@@ -88,52 +85,6 @@ export const bibleAnswer = z.strictObject({
     .min(2)
     .max(5),
   sets: z.array(z.strictObject({ id: idSchema, name: loc, description: z.string().min(5) })).min(1).max(3)
-})
-
-/** The character sheet's first answer: the image prompt and the body plan the app draws the sketch from (`images/sketch.ts`). */
-export const bodyPlanAnswer = z.strictObject({ prompt: z.string().min(20), bodyPlan: bodyPlanSchema, notes: z.string().default('') })
-export const refPickAnswer = z.strictObject({ pick: z.number().int().min(1).max(3), notes: z.string().default('') })
-
-/** The claude-svg rig: `rig` and `parts` (the part SVGs by their path in the rig or by file name), or `viaTool: true` after `cts_rig_set` wrote them. */
-export const rigClaudeAnswer = z
-  .strictObject({ rig: rigSchema.optional(), parts: z.record(z.string(), z.string()).optional(), viaTool: z.boolean().optional(), notes: z.string().default('') })
-  .superRefine((a, ctx) => {
-    if (!a.viaTool && !(a.rig && a.parts)) ctx.addIssue({ code: 'custom', message: 'give rig and parts, or write them with cts_rig_set and answer {"viaTool": true}' })
-  })
-
-/** A face box `[x, y, width, height]` in pixels of ref.png. */
-const faceBox = z.tuple([z.number().min(0), z.number().min(0), z.number().min(8), z.number().min(8)])
-
-/** The raster rig: cut polygons and pivots in the pixels of ref.png; the code crops the parts. `parent` null is the root (the body; its pivot is the feet point). */
-export const rigRasterAnswer = z.strictObject({
-  height: z.number().positive().describe('the figure height in px of ref.png (feet to top of head)'),
-  facing: z.enum(['left', 'right']).default('right'),
-  parts: z
-    .array(
-      z.strictObject({
-        id: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/),
-        parent: z.string().nullable(),
-        polygon: z.array(point).min(3),
-        pivot: point,
-        z: z.number(),
-        rot: z.tuple([z.number(), z.number()]).optional()
-      })
-    )
-    .min(2),
-  face: z.strictObject({ mouth: faceBox, eyes: faceBox, brows: faceBox }),
-  overlap: z.number().min(0).max(24).default(6),
-  notes: z.string().default('')
-})
-
-export const setPlanAnswer = z.strictObject({ backgroundPrompt: z.string().min(20), propName: z.string().nullable().default(null), propPrompt: z.string().nullable().default(null), notes: z.string().default('') })
-
-export const setPlaceAnswer = z.strictObject({
-  groundY: z.number(),
-  actorScale: z.number().positive().default(1),
-  propAt: point.nullable().default(null),
-  marks: z.record(nameSchema, point),
-  shots: z.record(nameSchema, z.strictObject({ center: point, zoom: z.number().positive() })),
-  notes: z.string().default('')
 })
 
 /** CTS-27: the designer's answer for a 3D character or set: the whole spec (the tools `cts_character_set` / `cts_set3d_set` write the same file) and what it would still change. */
@@ -199,12 +150,6 @@ export interface TaskSchema {
 export const TASK_SCHEMAS: Record<string, TaskSchema> = {
   pitches: { zod: pitchesAnswer },
   bible: { zod: bibleAnswer },
-  'body-plan': { zod: bodyPlanAnswer },
-  'ref-pick': { zod: refPickAnswer },
-  'rig-claude': { zod: rigClaudeAnswer },
-  'rig-raster': { zod: rigRasterAnswer },
-  'set-plan': { zod: setPlanAnswer },
-  'set-place': { zod: setPlaceAnswer },
   'character-spec': { zod: characterSpecAnswer },
   'set-spec': { zod: setSpecAnswer },
   script: { zod: scriptAnswer },
@@ -258,12 +203,6 @@ export async function loadRules(dataDir: string): Promise<{ raw: string; body: s
   const raw = await readSeeded(dataDir, path.join('prompts', '_rules.md'))
   if (raw === null) return { raw: '', body: 'Follow the task exactly. Answer in the requested format only.' }
   return { raw, body: parseMd(raw, '_rules.md').body.trim() }
-}
-
-/** The part drawing rules and mouth reference drawings (`style/cutout-kids.md`). */
-export async function loadStyleGuide(dataDir: string): Promise<string> {
-  const raw = await readSeeded(dataDir, path.join('style', 'cutout-kids.md'))
-  return raw === null ? '' : parseMd(raw, 'cutout-kids.md').body.trim()
 }
 
 /** The 3D guide (`style/toon-3d.md`: controls, shapes, face rules, the Pip, Bruno and park examples) for the designer tasks. */

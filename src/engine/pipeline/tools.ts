@@ -6,7 +6,6 @@ import { RIG_VARIANTS, bibleSchema, castMemberSchema, langSchema, setSchema, epi
 import type { Lang } from '../../shared/contracts'
 import { buildEpisodeTimelines } from '../anim/timeline'
 import { budgetState } from '../budget/spend'
-import { ToolOutput } from '../mcp/tools'
 import type { Tool, ToolDef } from '../mcp/tools'
 import { assertId, assertSlug } from '../series/paths'
 import { checkRig } from '../series/lint'
@@ -14,20 +13,19 @@ import { SeriesStore } from '../series/service'
 import type { CtsService } from '../service'
 import { readManifest } from '../voice/manifest'
 import { CLIP_IDS, clipLocation, missingClips, videoDir } from './clips'
-import { RIG_PATHS, chooseVariant, compareVariants, readVariants, writeRigSet } from './rig'
+import { readVariants } from './rig'
 import { blenderStageOf } from '../blender/stage'
 import { Pipeline, specHashOf } from './run'
 
 /**
  * The series, rig, set, episode, pipeline and clip tools (CTS-07). The model work of the pipeline is done through the `client` tools of the core
- * (`cts_get_task` / `cts_submit_task`); `cts_run_pipeline` starts and resumes the run. Long calls (`cts_rig_build`, `cts_clip_generate`,
+ * (`cts_get_task` / `cts_submit_task`); `cts_run_pipeline` starts and resumes the run. Long calls (`cts_clip_generate`,
  * `cts_clip_review`) return a job id at once: `cts_wait`, then `cts_status`.
  */
 
 const series = z.string().describe('The series slug')
 const episode = z.string().describe('The episode id, e.g. ep00-pilot')
 const cast = z.string().describe('The cast id, e.g. mia')
-const variant = z.enum(RIG_VARIANTS)
 
 /** CTS-17: where a character's sheet stands: the files, the bible's approval and the user's last verdict (cts_sheet_approve). */
 export async function sheetState(st: SeriesStore, seriesSlug: string, castId: string, approvedAt?: string): Promise<{ approved: boolean; approvedAt: string | null; review: { ok: boolean; note: string | null; at: string } | null; hasSheet: boolean; poses: string[] }> {
@@ -49,11 +47,6 @@ async function enqueueJob(svc: CtsService, o: { series: string; task: string; ro
     }
   }
   throw new Error('too many jobs for this unit')
-}
-
-async function withImage(file: string, data: Record<string, unknown>): Promise<unknown> {
-  const buf = await fs.readFile(file)
-  return buf.length > 4_000_000 ? { file, ...data } : new ToolOutput({ file, ...data }, [{ type: 'image', data: buf.toString('base64'), mimeType: 'image/png' }])
 }
 
 /** `cts_status {series}` also shows the pipelines of the series: state, current step, what waits. */
@@ -175,49 +168,6 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
       'The user\'s verdict on one character sheet. A Blender series: cast/<id>/sheet.png is the turnaround, expressions and mouths that Blender rendered from the character spec; ok: true records bible.cast[].sheet {approvedAt, specHash} (refused when the spec changed after the last build: build again and look again); ok: false needs a note, and that character is designed and built again (the designer gets the note). A canvas series: cast/<id>/sheet.png is the master and the wave, point and shrug poses, drawn by Z-Image over the app\'s sketches. The pipeline stops at "waiting-on-user" (sheet_review) after the sheets and nothing is rigged until EVERY character has been approved. Call it ONLY with the user\'s answer. ok: true records bible.cast[].sheet {approvedAt, seed, denoise, model}; ok: false needs a note (what to change): that character\'s sheet is made again with the note added to the prompt, with new seeds, and has to be approved again. Returns the cast members still open and the resumed pipelines.',
       z.object({ series, cast, ok: z.boolean().describe('true = the user approves the sheet; false = make it again'), note: z.string().optional().describe('What to change (required when ok is false); added to the image prompt') }),
       async (a) => pipe().approveSheet(a.series, a.cast, a.ok, a.note)
-    ),
-
-    // ---------------------------------------------------------------- rigs
-    def(
-      'cts_rig_set',
-      'Write a rig: rig.json plus its part SVGs. rig is the rig object (cts.rig/1), parts maps a file of the rig (its path "parts/body.svg", or just "body.svg" or "body") to the SVG text; a file the rig names that is not in parts must already be on disk. variant a|c writes under cast/<id>/variants/<v>/ (without it: cast/<id>/). Validates the schema, writes the files, then runs cts_rig_check and returns its result: fix every error and call again. Nothing is written when the rig does not parse or a file is missing.',
-      z.object({ series, cast, variant: variant.optional(), rig: z.unknown(), parts: z.record(z.string(), z.string()).default({}) }),
-      async (a) => writeRigSet(store(), a.series, a.cast, a.variant, a.rig, a.parts)
-    ),
-    def(
-      'cts_rig_build',
-      'Build one rig path of one character as a variant under cast/<id>/variants/<v>/ (claude-svg = a, raster = c): the character-designer role task (answer it with cts_get_task / cts_submit_task), the pose sheet, and the wall time and spend recorded in variants.json. Returns a job id at once.',
-      z.object({ series, episode, cast, path: z.enum(RIG_PATHS).default('claude-svg') }),
-      async (a) => {
-        if (!(await svc.seriesExists(a.series))) throw new Error(`no series "${a.series}"`)
-        const job = await enqueueJob(svc, { series: a.series, task: 'rig_build', role: 'character-designer', unit: `${a.cast}-${a.path}`, label: `rig ${a.cast} (${a.path})`, body: { episode: a.episode, cast: a.cast, path: a.path }, vision: true })
-        return { job, hint: 'cts_wait {series}; answer the client tasks; then cts_cast_get {series, cast}' }
-      }
-    ),
-    def(
-      'cts_pose_make',
-      'Make the optional pose image of one gesture (CTS-14): the player renders the rig at the peak of the gesture (flat grey, 1024x1536), Z-Image image-to-image at denoise 0.55 cleans up the joints and hands, the grey is keyed away -> cast/<id>/poses/<gesture>.png, and the rig gets poses.<gesture> and gesture.pose. The frame-critic compares it with the character sheet (answer its task with cts_get_task / cts_submit_task); revise = one retry at denoise 0.45, a second revise leaves the gesture a part rotation. The pose image shows the painted face and has no lip-sync, so the timeline never puts it over a line of that actor; facePlates: true draws the face plates of the rig on it instead. Needs ComfyUI and the rig of the character at cast/<id>/rig.json. Returns a job id at once.',
-      z.object({ series, episode, cast, gesture: z.string().min(1), facePlates: z.boolean().default(false) }),
-      async (a) => {
-        if (!(await svc.seriesExists(a.series))) throw new Error(`no series "${a.series}"`)
-        const job = await enqueueJob(svc, { series: a.series, task: 'pose_make', role: 'frame-critic', unit: `${a.cast}-${a.gesture}`, label: `pose image ${a.cast}/${a.gesture}`, body: { episode: a.episode, cast: a.cast, gesture: a.gesture, facePlates: a.facePlates }, vision: true })
-        return { job, hint: 'cts_wait {series}; answer the frame-critic task; then cts_cast_get {series, cast} (the rig lists poses) and cts_pose_sheet' }
-      }
-    ),
-    def(
-      'cts_rig_compare',
-      'Render one comparison sheet of the built variants of a character side by side (the pose sheets: neutral, every emotion, the gesture peaks, the A/E/O/MBP mouths and the eye states), each under a label with its path, wall time and spend. Written to cast/<id>/variants/compare.png and returned as a picture. Variants that are not built are listed in `missing`.',
-      z.object({ series, cast }),
-      async (a) => {
-        const r = await compareVariants({ dataDir: svc.dataDir, store: store(), series: a.series, cast: a.cast })
-        return withImage(r.file, { variants: r.variants, missing: r.missing, record: (await readVariants(store(), a.series, a.cast)).variants })
-      }
-    ),
-    def(
-      'cts_rig_choose',
-      'Choose the variant (a or c) that becomes the character\'s rig: copies variants/<v>/rig.json, parts/ and rig-sheet.png up to cast/<id>/ and runs cts_rig_check on it. Returns the check.',
-      z.object({ series, cast, variant }),
-      async (a) => ({ chosen: a.variant, check: await chooseVariant(store(), a.series, a.cast, a.variant) })
     ),
 
     // ---------------------------------------------------------------- sets

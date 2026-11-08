@@ -6,7 +6,7 @@ import { SeriesStore } from '../series/service'
 import type { CtsService } from '../service'
 import type { Pipeline } from './run'
 import { optionsOf, briefOf } from './run'
-import { runRoleTask, loadStyleGuide } from './tasks'
+import { runRoleTask } from './tasks'
 import type { RoleTask, RoleTaskResult, RunTaskOptions } from './tasks'
 
 /** What a step handler gets (CTS-07): the service, the store, the job, and the run's brief and options. */
@@ -65,8 +65,6 @@ export async function requireChosen(e: Env): Promise<Bible> {
 export function ask<T = unknown>(e: Env, task: RoleTask, o: RunTaskOptions = {}): Promise<RoleTaskResult<T>> {
   return runRoleTask<T>(e.ctx, e.store, e.series, task, o)
 }
-
-export { loadStyleGuide }
 
 /** A short stable number from a string (seeds). */
 export function seedOf(s: string): number {

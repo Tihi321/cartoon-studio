@@ -4,7 +4,6 @@ import { z } from 'zod'
 import { readMd } from '../store/atomic'
 import { fillWorkflow, loadCustomWorkflow, workflowDirs, workflowKind } from './custom-workflow'
 import {
-  buildRemoveBackground,
   ENGINES,
   INIT_BUILDERS,
   mergeFiles,
@@ -431,8 +430,6 @@ export interface ComfyResult {
 /** What asset generation needs from ComfyUI. Tests pass a fake. */
 export interface ComfyClient {
   generate(req: ComfyRequest): Promise<ComfyResult>
-  /** Cuts out the background (alpha PNG). Null when ComfyUI has no usable removal model. */
-  removeBackground(image: Buffer, opts?: { onProgress?: (p: ComfyProgress) => void; signal?: AbortSignal }): Promise<Buffer | null>
 }
 
 export interface ComfyClientOptions {
@@ -459,16 +456,6 @@ function extOf(filename: string, kind: EngineKind): string {
 export function availableEngines(config: ComfyConfig): string[] {
   const all = Object.keys(ENGINES)
   return config.enabledEngines.length > 0 ? all.filter((id) => config.enabledEngines.includes(id)) : all
-}
-
-/** Names of the background-removal models ComfyUI can load (core `LoadBackgroundRemovalModel` node). Empty when none. */
-export function removalModelsOf(info: ObjectInfo | undefined): string[] {
-  const spec = info?.LoadBackgroundRemovalModel?.input?.required?.bg_removal_name as unknown[] | undefined
-  if (!spec) return []
-  const first = spec[0]
-  if (Array.isArray(first)) return first.map(String)
-  const options = (spec[1] as { options?: unknown[] } | undefined)?.options
-  return Array.isArray(options) ? options.map(String) : []
 }
 
 export function createComfyClient(opts: ComfyClientOptions): ComfyClient {
@@ -704,21 +691,5 @@ export function createComfyClient(opts: ComfyClientOptions): ComfyClient {
     return infoCache
   }
 
-  async function removeBackground(image: Buffer, o: { onProgress?: ComfyRequest['onProgress']; signal?: AbortSignal } = {}): Promise<Buffer | null> {
-    const info = await getInfo()
-    const listed = removalModelsOf(info ?? undefined)
-    const wanted = config.backgroundRemovalModel?.trim()
-    // The exact file name comes from ComfyUI's own list; a configured name that is not listed falls back to the first.
-    const model = wanted && listed.includes(wanted) ? wanted : listed[0]
-    if (!info?.RemoveBackground || !model) return null
-    const lane = await chooseLane(o.signal)
-    const uploaded = await uploadImage(lane, image, { name: `cts_rmbg_${Date.now().toString(36)}.png` })
-    const graph = buildRemoveBackground({ image: uploaded.filename, model, filenamePrefix: 'cts_cutout' })
-    const { promptId, collected } = await runGraph(lane, graph, o)
-    const item = collected.images[0]
-    if (!item) throw new Error(`ComfyUI job ${promptId} finished without image output`)
-    return downloadOutput(lane, item)
-  }
-
-  return { generate, removeBackground }
+  return { generate }
 }

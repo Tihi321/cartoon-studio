@@ -67,7 +67,7 @@ export function App() {
       <aside className="rail">
         <div className="brand" data-testid="brand">
           <span className="brand-name">Cartoon Studio</span>
-          <span className="brand-sub">cutout cartoons for children</span>
+          <span className="brand-sub">cartoons for children</span>
         </div>
         <Pickers episodes={info.data?.episodes ?? []} />
         <nav aria-label="Studio">

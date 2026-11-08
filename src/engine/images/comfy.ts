@@ -7,7 +7,7 @@ import { saveBytes } from './provider'
 
 /**
  * Local ComfyUI: $0. The model comes from `config/providers.md` `comfy.imageModel` (z-image-turbo by default); a reference image switches to the
- * Qwen-Image 2.1 edit graph, and `init` (a start picture, optional `mask`) runs Z-Image image-to-image / masked inpaint. `removeBackground` is BiRefNet (alpha PNG). Both go through the Edu `ComfyClient` (`comfy/client.ts`, `comfy/graphs.ts`).
+ * Qwen-Image 2.1 edit graph, and `init` (a start picture, optional `mask`) runs Z-Image image-to-image / masked inpaint. It goes through the Edu `ComfyClient` (`comfy/client.ts`, `comfy/graphs.ts`).
  * UNTESTED against a live ComfyUI in CTS-08: the pilot exercises it.
  */
 
@@ -47,11 +47,4 @@ export function comfyProvider(ctx: ImageContext): ImageProvider {
       return { file: await saveBytes(req.out, r.ext || 'png', r.bytes), costUsd: 0, provider: 'comfy', model: engine }
     }
   }
-}
-
-/** BiRefNet through ComfyUI: a PNG with the background cut out. Null when ComfyUI has no removal model. */
-export async function removeBackground(ctx: Pick<ImageContext, 'svc'>, input: Buffer, signal?: AbortSignal): Promise<Buffer | null> {
-  await comfyKindSwitch('image', { dataDir: ctx.svc.dataDir })
-  const comfy = await ctx.svc.comfy({ autoStart: true })
-  return comfy.removeBackground(input, { signal })
 }

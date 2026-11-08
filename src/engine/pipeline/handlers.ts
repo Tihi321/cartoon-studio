@@ -19,12 +19,9 @@ import { INTRO_ID, OUTRO_ID, badClipIds, buildScreenplay, clipBeats, missingClip
 import { lintSeries } from '../series/lint'
 import { ask, castView, makeEnv, relTo, requireChosen } from './env'
 import type { Env } from './env'
-import { buildRig, clipsStep, finalRenderStep, castSheetStep, makeClip, previewRenderStep, reviewClip, rigStep, setStep, timelineStep, voiceStep, frameReviews } from './media'
+import { clipsStep, finalRenderStep, makeClip, previewRenderStep, reviewClip, timelineStep, voiceStep, frameReviews } from './media'
 import { assembleStep, characterStep, ensureStyle3d, facts3d, scriptProblems3d, set3dStep } from './media3d'
 import type { Facts3d } from './media3d'
-import { poseJob, posesStep } from './poses'
-import { RIG_PATHS } from './rig'
-import type { RigPath } from './rig'
 import { Pipeline } from './run'
 import { ALL_STEPS, emptyState, taskOf } from './steps'
 import type { StepDef } from './steps'
@@ -32,7 +29,7 @@ import type { bibleAnswer, clipShotAnswer, musicAnswer, pitchesAnswer, reviewAns
 import { OMNIVOICE_TAGS } from '../voice/providers/comfy'
 
 /**
- * The job handlers of the pipeline (CTS-07): one per step (`steps.ts`), plus the handlers of the long tool calls (`rig_build`, `clip_generate`,
+ * The job handlers of the pipeline (CTS-07): one per step (`steps.ts`), plus the handlers of the long tool calls (`clip_generate`,
  * `clip_review`). A step handler does its work, then marks its step done and advances the pipeline, which enqueues the next step's job. The
  * request of every job is the JSON `{episode, step}` in its body; everything else is read from the series folder, so a job that is run again
  * (a restart, a retry) finds what the earlier try left and goes on.
@@ -560,16 +557,23 @@ async function frameReviewStep(e: Env): Promise<string> {
 
 type StepFn = (e: Env) => Promise<StepResult>
 
+/** The cutout authoring steps of a `canvas` series (CTS-28): a finished pilot keeps them done, a run that would make them again is refused. */
+const retired =
+  (what: string): StepFn =>
+  async () => {
+    throw new Error(`E_RETIRED: cutout authoring was retired in CTS-28 (${what}). Make the series with renderer "blender" (character specs and set specs built in Blender); a canvas series can still be linted, previewed and rendered.`)
+  }
+
 const STEP_FNS: Record<string, StepFn> = {
   pitch: pitchStep,
   bible: bibleStep,
-  cast_sheet: castSheetStep,
+  cast_sheet: retired('the Z-Image character sheet'),
   character: characterStep,
   set3d: set3dStep,
   assemble: assembleStep,
-  rig: rigStep,
-  poses: posesStep,
-  set: setStep,
+  rig: retired('the raster and SVG rigs'),
+  poses: retired('the pose images'),
+  set: retired('the 2D set art'),
   script: scriptStep,
   safety: safetyStep,
   voice_cast: voiceCastStep,
@@ -599,33 +603,6 @@ export function registerPipeline(engine: Engine): void {
   }
 
   // ---- the long tool calls ----
-  engine.queue.register(
-    'rig_build',
-    async (ctx) => {
-      const series = ctx.job.book as string
-      const req = requestOf(ctx.jobBody)
-      const episode = String(req.episode)
-      const state = await pipe.read(series, episode)
-      const e = makeEnv({ svc, pipe, ctx, series, episode, stepId: 'rig', state: state ?? (await emptyFor(svc, series, episode)) })
-      const bible = await requireChosen(e)
-      const rp = String(req.path) as RigPath
-      if (!(RIG_PATHS as readonly string[]).includes(rp)) throw new Error(`unknown rig path "${rp}" (${RIG_PATHS.join(', ')})`)
-      const r = await buildRig(e, bible, String(req.cast), rp)
-      return { result: `${req.cast} variant ${r.variant} (${rp}): ${r.status} in ${r.wallSeconds} s${r.note ? ` - ${r.note}` : ''}` }
-    },
-    {}
-  )
-  engine.queue.register(
-    'pose_make',
-    async (ctx) => {
-      const series = ctx.job.book as string
-      const req = requestOf(ctx.jobBody)
-      const episode = String(req.episode)
-      const e = makeEnv({ svc, pipe, ctx, series, episode, stepId: 'rig', state: (await pipe.read(series, episode)) ?? (await emptyFor(svc, series, episode)) })
-      return { result: await poseJob(e, String(req.cast), String(req.gesture), req.facePlates === true) }
-    },
-    {}
-  )
   engine.queue.register(
     'clip_generate',
     async (ctx) => {

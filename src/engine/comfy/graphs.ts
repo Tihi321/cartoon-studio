@@ -391,24 +391,6 @@ export function buildMiniMaxMusic(o: BuildOpts): Graph {
   return graph
 }
 
-/**
- * Background removal with ComfyUI's core nodes: `LoadBackgroundRemovalModel` + `RemoveBackground` give a mask, which
- * `JoinImageWithAlpha` (it inverts the mask it is given) turns into the image's alpha channel.
- */
-export function buildRemoveBackground(o: { image: string; model: string; filenamePrefix: string; invertMask?: boolean }): Graph {
-  const maskSource = o.invertMask === false ? ref(3) : ref(5)
-  const graph: Graph = {
-    1: { class_type: 'LoadImage', inputs: { image: o.image } },
-    2: { class_type: 'LoadBackgroundRemovalModel', inputs: { bg_removal_name: o.model } },
-    3: { class_type: 'RemoveBackground', inputs: { bg_removal_model: ref(2), image: ref(1) } },
-    5: { class_type: 'InvertMask', inputs: { mask: ref(3) } },
-    6: { class_type: 'JoinImageWithAlpha', inputs: { image: ref(1), alpha: maskSource } },
-    7: { class_type: 'SaveImage', inputs: { images: ref(6), filename_prefix: o.filenamePrefix } }
-  }
-  if (o.invertMask === false) delete graph[5]
-  return graph
-}
-
 export type EngineKind = 'image' | 'audio'
 
 export interface EngineDef {
