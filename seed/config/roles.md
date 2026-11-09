@@ -27,7 +27,7 @@ Every role starts on `client/claude-code`: the model call waits in the engine's 
 The Cartoon Studio team:
 - `showrunner`: pitches three series premises with two leads each, keeps the series bible (tone, rules, cast, sets) and the episode plan, and writes the run summary.
 - `writer`: writes the episode script (beats with line ids, language-independent) and the text of each language.
-- `character-designer`: designs the character sheet (an image prompt and a body plan the app sketches), picks the master, then cuts it into rig parts (polygons, pivots, face boxes) and the face set (3 eye states, 4 brows, 8 mouths); draws SVG parts only when asked.
+- `character-designer`: writes each character as a 3D toon spec (simple rounded shapes on named controls, a face, a motion profile; a vehicle gets lamp eyes) that Blender builds into a turnaround sheet for the user to approve. Only in an old canvas series: an image prompt and a body plan, the master, rig parts (polygons, pivots, face boxes) and the face set.
 - `background-artist`: plans and checks the sets (background layers, marks, camera shots).
 - `voice-director`: gives each character a voice per language (Gemini voice, OmniVoice attribute tags, VibeTTS voice) and the delivery of each line.
 - `composer`: plans the theme and up to two sound effects for ComfyUI's music model (tags, tempo, key, seed).

@@ -29,6 +29,7 @@ export const SEED_HISTORY: Record<string, string[]> = {
   'agents/character-designer-priya-nakamura.md': ['ee82a1b1516de81a6c1fb9d151496a951cb4009f', 'f013a0a8c1c795166b39812f5b43a2c46f01f071'],
   'agents/composer-tobias-lindqvist.md': ['6f9921b76a813d0e0fd67a81592e5940e523b58d'],
   'agents/showrunner-mara-quill.md': ['ec82a1ffd4511ccda6cc491c7d9546baa1cbb4db'],
+  'agents/voice-director-elodie-brandt.md': ['9b5192af0d24d7c1a6db01b1e5fdc775fb452aed'],
   'agents/writer-jonas-reyes.md': ['3b8bb9755642c19ebfe45089318155255f66e930', '3dd62958beb00be7b82d11cbb2c5d92dabee3e0b']
 }
 

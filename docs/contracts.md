@@ -39,7 +39,7 @@ an optional reference clip `ref` with its transcript `refText`, and a `seed`. HU
 the character sheet `cast/<id>/sheet.png`: `approvedAt` (local ISO time) and the `seed`, `denoise` and image `model` the master `cast/<id>/ref.png` was made with. It is absent until the approval
 (and for characters made before the sheet step); the pipeline stops at the gate `sheet_review` until every cast member has one. For a 3D character the approval holds `approvedAt` and `specHash` (see below) instead.
 
-`renderer` (HUB-30) is `canvas` (default: the frozen cutout player; a cast member has `rig`) or `blender` (3D: a cast member has `character`, the bible's optional `style3d` names the look file); see "3D series" below.
+`renderer` (HUB-30) is `canvas` (the frozen cutout player, and what an old bible file without the field means; a cast member has `rig`) or `blender` (the default of a new run; 3D: a cast member has `character`, the bible's optional `style3d` names the look file); see "3D series" below.
 
 ```json
 {
@@ -50,10 +50,10 @@ the character sheet `cast/<id>/sheet.png`: `approvedAt` (local ISO time) and the
   "logline": { "hr": "Mia i Bobo otkrivaju park.", "en": "Mia and Bobo discover a park." },
   "tone": ["gentle humour", "no peril beyond mild", "every episode ends warm"],
   "style": {
-    "look": "flat paper cutout, solid colours, 6 px black outline",
+    "look": "toon 3D, soft rounded shapes, flat two-tone cel shading, a thin dark outline, a bright simple world",
     "palette": ["#f4d35e", "#ee964b", "#0d3b66", "#faf0ca", "#222222"],
-    "outlinePx": 6,
-    "refPrompt": "a child in a flat paper cutout style, arms held away from the body"
+    "outlinePx": 2,
+    "refPrompt": "a toon 3D character, soft rounded shapes, flat cel shading, a thin dark outline"
   },
   "languages": ["hr", "en"],
   "cast": [
