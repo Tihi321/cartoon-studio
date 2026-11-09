@@ -211,13 +211,22 @@ function spread(toks: Tok[], a: number, b: number, out: Timed[]): void {
   }
 }
 
-/** Words method: every script word gets a window, its heard times or its share of the gap between the heard words around it. */
-function wordsTimed(text: string, lang: Lang, al: Alignment, seconds: number): Timed[] {
+/**
+ * Words method: every script word gets a window, its heard times or its share of the gap between the heard words around it. CTS-40: a gap between two
+ * heard words that is shorter than a held shape (MIN_HOLD frames) is no pause: the first word's window reaches the next one (connected speech does
+ * not shut the mouth for one frame; ElevenLabs word ends leave such gaps between most words).
+ */
+function wordsTimed(text: string, lang: Lang, al: Alignment, seconds: number, fps: number): Timed[] {
   const script = scriptWords(text)
   const toks = script.map((w) => tokensOf(w, lang))
   const wt = (i: number): number => toks[i]!.reduce((s, t) => s + weight(t), 0)
   const win: ([number, number] | null)[] = script.map(() => null)
   al.index.forEach((si, k) => (win[si] = [al.words[k]!.t0, al.words[k]!.t1]))
+  for (let k = 0; k + 1 < win.length; k++) {
+    const a = win[k]
+    const b = win[k + 1]
+    if (a && b && b[0] > a[1] && b[0] - a[1] < MIN_HOLD / fps) a[1] = b[0]
+  }
   const out: Timed[] = []
   let i = 0
   while (i < script.length) {
@@ -341,8 +350,26 @@ function toFrames(timed: Timed[], seconds: number, fps: number): Viseme[] {
     // the silence at either end stays rest however short; a short closure was already stretched
     const i = runs.findIndex((r, idx) => r.n < MIN_HOLD && r.v !== 'MBP' && !(r.v === 'rest' && (idx === 0 || idx === runs.length - 1)))
     if (i < 0 || runs.length === 1) break
-    const into = runs[i - 1] ?? runs[i + 1]!
-    into.n += runs[i]!.n
+    const r = runs[i]!
+    const prev = runs[i - 1]
+    const next = runs[i + 1]
+    // CTS-40: a short spoken run never turns into rest: it joins a spoken neighbour, or between two rests it takes a frame of the longer one
+    if (r.v !== 'rest' && (prev?.v ?? 'rest') === 'rest' && (next?.v ?? 'rest') === 'rest') {
+      const from = !prev ? next : !next ? prev : next.n >= prev.n ? next : prev
+      if (!from || from.n < 2) {
+        // nothing to take: the old rule (into the run before)
+        const into = prev ?? next!
+        into.n += r.n
+        runs.splice(i, 1)
+      } else {
+        from.n--
+        r.n++
+      }
+      collect(runs.flatMap((x) => Array<Viseme>(x.n).fill(x.v)))
+      continue
+    }
+    const into = r.v !== 'rest' && prev?.v === 'rest' && next ? next : (prev ?? next!)
+    into.n += r.n
     runs.splice(i, 1)
     collect(runs.flatMap((r) => Array<Viseme>(r.n).fill(r.v)))
   }
@@ -368,7 +395,7 @@ export function visemeTrack(i: VisemeInput): Lipsync {
   const al = i.words?.length ? alignWords(i.text, i.words) : null
   if (al && al.coverage >= ALIGN_FLOOR) {
     const end = Math.max(seconds, ...al.words.map((w) => w.t1))
-    return { schema: 'cts.lipsync/1', method: `words-${i.lang}`, fps, shapes: toFrames(wordsTimed(i.text, i.lang, al, end), end, fps) }
+    return { schema: 'cts.lipsync/1', method: `words-${i.lang}`, fps, shapes: toFrames(wordsTimed(i.text, i.lang, al, end, fps), end, fps) }
   }
   const timed = i.samples ? textTimed(i.text, i.lang, voicedSegments(i.samples)) : []
   return { schema: 'cts.lipsync/1', method: `text-${i.lang}`, fps, shapes: toFrames(timed, seconds, fps) }

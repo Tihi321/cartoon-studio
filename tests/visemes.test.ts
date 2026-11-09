@@ -101,6 +101,16 @@ describe('six-viseme lip-sync', () => {
     expect(runs(track.shapes).filter((r) => r.startsWith('MBP')).every((r) => Number(r.split('*')[1]) >= 2)).toBe(true)
   })
 
+  it('CTS-40: ElevenLabs word times of pilot 4 en l12 keep the mouth moving between words (not flat), the sentence pause stays rest, "I" keeps a frame', () => {
+    const text = 'Left is clear. Right is clear. Now I go!'
+    const words = [['Left', 0, 0.267], ['is', 0.313, 0.383], ['clear', 0.441, 0.743], ['Right', 1.242, 1.474], ['is', 1.509, 1.579], ['clear', 1.637, 1.916], ['Now', 2.113, 2.264], ['I', 2.334, 2.357], ['go', 2.45, 2.624]].map(([w, t0, t1]) => ({ w: w as string, t0: t0 as number, t1: t1 as number }))
+    const track = visemeTrack({ text, lang: 'en', words, seconds: 2.761 })
+    expect(track.method).toBe('words-en')
+    expect(track.shapes.filter((s) => s !== 'rest').length / track.shapes.length).toBeGreaterThan(0.6)
+    expect(track.shapes.slice(20, 28).every((s) => s === 'rest')).toBe(true) // 0.74-1.24 s: the pause after "Left is clear."
+    expect(track.shapes[56]).not.toBe('rest') // 2.33-2.36 s: "I"
+  })
+
   it('ElevenLabs words follow the trimmed lead silence: 0.4 s of silence, words from 0.42 s, stored from about 0.17 s (0.15 s kept)', async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'cts-eleven-words-'))
     const raw = path.join(dir, 'raw.wav')
