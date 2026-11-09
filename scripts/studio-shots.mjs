@@ -262,9 +262,10 @@ function bridge({ fix, origin, engine, engineOrigin }) {
   const emit = (e) => setTimeout(() => listeners.forEach((l) => l(e)), 0)
   window.__emit = emit
   const at = new Date().toISOString()
-  const state = { run: 'waiting-on-user', chosen: null, cap: null, renders: [], approved: { mia: '2026-11-08 09:30' }, redo: {} }
+  const state = { run: 'waiting-on-user', chosen: null, cap: null, renders: [], approved: { mia: '2026-11-08 09:30' }, redo: {}, voiceReview: 'waiting', voiceCalls: [] }
   const rigCheck = (cast, variant) => ({ cast, ...(variant ? { variant } : {}), ok: variant !== 'c', parts: fix.rigs[cast]?.parts.length ?? 0, issues: variant === 'c' ? [{ code: 'E_RIG_PART', severity: 'error', message: 'missing mouth shape "MBP"', file: `cast/${cast}/variants/c/rig.json`, where: 'face.mouth' }] : [] })
   const built = (s) => ({ path: s, status: 'built', startedAt: '2026-11-07T10:00:00.000', endedAt: '2026-11-07T10:20:00.000', wallSeconds: s === 'raster' ? 2410 : 1260, spendUsd: 0, spendCredits: 0, note: s === 'raster' ? 'keyed from the reference' : 'parts drawn by Claude as SVG from the reference' })
+  window.__voiceCalls = () => state.voiceCalls
   const tools = {
     cts_series_get: () => ({
       bible: { ...fix.bible, chosenPitch: state.chosen },
@@ -327,7 +328,12 @@ function bridge({ fix, origin, engine, engineOrigin }) {
       stats: { lines: [], minShare: 0.72 }
     }),
     cts_timeline_build: () => ({ built: ['hr', 'en'] }),
-    cts_status: () => ({ series: 'mini', jobs: { queued: 1, running: 1, done: 4, failed: 1 }, running: [{ id: 'mini--rig_build--mia-claude-svg--r1', task: 'rig_build', unit: 'mia-claude-svg' }], failed: [{ id: 'mini--image--set-garden--r1', failure: 'ComfyUI did not answer on :8188' }], clientTasks: { waiting: 2, leased: 1 } }),
+    cts_voice_approve: (a) => {
+      state.voiceCalls.push({ ok: a.ok, note: a.note ?? null })
+      state.voiceReview = a.ok ? 'approved' : 'waiting'
+      return { ok: a.ok, resumed: [] }
+    },
+    cts_status: () => ({ series: 'mini', pipelines: [{ episode: 'ep00-mini', state: state.voiceReview === 'waiting' ? 'waiting-on-user' : 'running', step: state.voiceReview === 'waiting' ? 'voice_review' : 'voice' }], jobs: { queued: 1, running: 1, done: 4, failed: 1 }, running: [{ id: 'mini--rig_build--mia-claude-svg--r1', task: 'rig_build', unit: 'mia-claude-svg' }], failed: [{ id: 'mini--image--set-garden--r1', failure: 'ComfyUI did not answer on :8188' }], clientTasks: { waiting: 2, leased: 1 } }),
     cts_pause_all: () => ({ paused: true }),
     cts_resume_all: () => ({ paused: false }),
     cts_stop_now: () => ({ paused: true, stopped: true }),
@@ -633,6 +639,19 @@ async function main() {
       if (!(await page.isDisabled(T('cast-redo')))) fail('Redo should be off while the note is empty')
       await page.click(T('cast-approve'))
       await page.waitForFunction(() => /approved/.test(document.querySelector('[data-testid="cast-approval"]')?.textContent ?? ''), null, { timeout: 5000 }).catch(() => fail('Approve did not change the state'))
+    }
+    if (!ENGINE) {
+      // CTS-44: the voice review panel shows while the pipeline waits at voice_review; a send-back needs a note, Approve calls cts_voice_approve and hides the waiting pill
+      await must('voice review panel', T('voice-review'))
+      if (!(await page.isDisabled(T('voice-redo')))) fail('Send back should be off while the voice note is empty')
+      await page.fill(T('voice-redo-note'), 'Pip: higher')
+      await page.click(T('voice-redo'))
+      await page.waitForFunction(() => /Sent back/.test(document.querySelector('[data-testid="voice-review-done"]')?.textContent ?? ''), null, { timeout: 5000 }).catch(() => fail('Send back did not answer'))
+      await page.click(T('voice-approve'))
+      await page.waitForFunction(() => /approved/.test(document.querySelector('[data-testid="voice-review-done"]')?.textContent ?? ''), null, { timeout: 5000 }).catch(() => fail('Approve did not answer'))
+      await page.waitForSelector(T('voice-review-waiting'), { state: 'detached', timeout: 5000 }).catch(() => fail('the voice review still waits after Approve'))
+      const calls = await page.evaluate(() => window.__voiceCalls())
+      if (calls.length !== 2 || calls[0].ok !== false || calls[0].note !== 'Pip: higher' || calls[1].ok !== true) fail(`cts_voice_approve calls are wrong: ${JSON.stringify(calls)}`)
     }
     if (!ENGINE) {
       await must('variant c check', T('variant-c-check'))
