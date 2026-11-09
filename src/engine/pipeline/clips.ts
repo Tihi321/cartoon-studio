@@ -226,7 +226,7 @@ export async function renderKeyframe(svc: CtsService, store: SeriesStore, series
   return stillFrame({ dataDir: svc.dataDir, series, timeline, out: path.join(store.paths(series).root, 'clips', 'keyframes', `${shot.id}.png`), width: STILL_SIZE.width, height: STILL_SIZE.height })
 }
 
-export function videoPrompt(shot: ClipShots[number], renderer: 'canvas' | 'blender' = 'canvas'): string {
+export function videoPrompt(shot: ClipShots[number], renderer: 'canvas' | 'blender' = 'blender'): string {
   const action = shot.action.replace(/\s+/g, ' ').trim().replace(/[.!?]*$/, '.')
   const camera = `Camera: ${shot.framing}${shot.move && shot.move !== 'static' ? `, ${shot.move}` : ', static'}.`
   if (renderer === 'blender') return `${action} Keep the toon 3D look of the first frame; the characters move gently and stay on model. ${camera} No speech, no text.`

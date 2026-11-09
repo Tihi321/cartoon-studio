@@ -7,6 +7,7 @@ import { MockProvider } from '../src/engine/models/mock'
 import { initDataFolder } from '../src/engine/store/dataFolder'
 import { parseMd } from '../src/shared/md'
 import { ROLES } from '../src/shared/schemas'
+import { SeriesStore } from '../src/engine/series/service'
 import { seedDir } from './helpers'
 
 /** The seed makes a data folder the engine starts on: the eight roles, no paid model, $0 caps, the voice chain, and the empty series list. */
@@ -18,6 +19,20 @@ afterEach(async () => {
 })
 
 describe('the seed', () => {
+  it('CTS-47: the 3D wording leads: no cutout or paper in the personas or in the prompts before their old-canvas section, and a new series starts with the toon 3D style', async () => {
+    const files = ['agents/background-artist-mira-castellan.md', 'agents/character-designer-priya-nakamura.md', 'agents/writer-jonas-reyes.md', 'agents/showrunner-mara-quill.md', 'prompts/showrunner/bible.md', 'prompts/showrunner/pitches.md', 'prompts/showrunner/clip-shots.md', 'prompts/frame-critic/clip-review.md', 'prompts/writer/script.md']
+    for (const f of files) {
+      const text = await readFile(path.join(seedDir, f), 'utf8')
+      const head = f.startsWith('agents/') ? text.split(/In an old canvas series|Only an old canvas series|In a canvas series/)[0]! : text.split(/## An old canvas series/)[0]!
+      expect(head, f).not.toMatch(/cut-?out|paper|puppet/i)
+    }
+    dir = await mkdtemp(path.join(os.tmpdir(), 'cts-seed-'))
+    const store = new SeriesStore(dir)
+    expect((await store.createSeries('new3d', { title: 'New' })).style).toMatchObject({ outlinePx: 2, look: expect.stringContaining('toon 3D') })
+    expect((await store.createSeries('old', { title: 'Old', renderer: 'canvas' })).style.look).toContain('paper cutout')
+  })
+
+
   it('starts an engine: eight roles on client/claude-code, strata, lmstudio; no paid alias; $0 budget; hr voice chain; no series', async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'cts-seed-'))
     await initDataFolder(dir, seedDir)

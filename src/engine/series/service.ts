@@ -75,6 +75,8 @@ export interface SeriesBrief {
   ageMin?: number
   ageMax?: number
   languages?: Lang[]
+  /** `canvas` gives the stub the old flat-cutout style; anything else (the default) the 3D toon style of `seed/style/toon-3d.md`. */
+  renderer?: 'canvas' | 'blender'
 }
 
 const loc = (v: SeriesBrief['title'], fallback: string): { hr: string; en: string } => {
@@ -178,7 +180,10 @@ export class SeriesStore {
       audience: { ageMin: brief.ageMin ?? 4, ageMax: brief.ageMax ?? 8 },
       logline: loc(brief.logline, ''),
       tone: ['gentle humour', 'no peril beyond mild', 'every episode ends warm'],
-      style: { look: 'flat paper cutout, solid colours, 6 px black outline', palette: ['#f4d35e', '#ee964b', '#0d3b66', '#faf0ca', '#222222'], outlinePx: 6, refPrompt: '' },
+      style:
+        brief.renderer === 'canvas'
+          ? { look: 'flat paper cutout, solid colours, 6 px black outline', palette: ['#f4d35e', '#ee964b', '#0d3b66', '#faf0ca', '#222222'], outlinePx: 6, refPrompt: '' }
+          : { look: 'toon 3D, soft rounded shapes, flat two-tone cel shading, a thin dark outline, a bright simple world', palette: ['#f4d35e', '#ee964b', '#0d3b66', '#faf0ca', '#222222'], outlinePx: 2, refPrompt: 'a toon 3D character, soft rounded shapes, flat cel shading, a thin dark outline' },
       languages: brief.languages ?? ['hr', 'en'],
       cast: [],
       sets: [],
