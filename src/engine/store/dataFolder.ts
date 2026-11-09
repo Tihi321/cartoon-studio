@@ -1,7 +1,7 @@
 import { existsSync, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { loadSeedState, saveSeedState, syncSeedFile } from './seedRefresh'
+import { loadSeedState, refreshStarterAgents, saveSeedState, syncSeedFile } from './seedRefresh'
 import type { SeedState } from './seedRefresh'
 import { applySeedMigrations } from './seedMigrations'
 
@@ -118,6 +118,7 @@ export async function initDataFolder(dataDir: string, seedDir: string | undefine
   if (seedDir && existsSync(seedDir)) {
     const state = await loadSeedState(dataDir)
     await copyTree(seedDir, dataDir, dataDir, result, skipDirs, state)
+    if (skipDirs.has('agents')) result.updated.push(...(await refreshStarterAgents(seedDir, dataDir)))
     result.migrated = await applySeedMigrations(dataDir, seedDir, state)
     await saveSeedState(dataDir, state)
     result.updateAvailable = [...state.updateAvailable].sort()

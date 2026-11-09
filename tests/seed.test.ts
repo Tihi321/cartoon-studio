@@ -1,10 +1,11 @@
-import { readFile, readdir, rm, mkdtemp } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, mkdtemp, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Engine } from '../src/engine/engine'
 import { MockProvider } from '../src/engine/models/mock'
 import { initDataFolder } from '../src/engine/store/dataFolder'
+import { refreshStarterAgents, seedHash } from '../src/engine/store/seedRefresh'
 import { parseMd } from '../src/shared/md'
 import { ROLES } from '../src/shared/schemas'
 import { SeriesStore } from '../src/engine/series/service'
@@ -32,6 +33,19 @@ describe('the seed', () => {
     expect((await store.createSeries('old', { title: 'Old', renderer: 'canvas' })).style.look).toContain('paper cutout')
   })
 
+
+  it('CTS-48: a starter agent still as an earlier seed gets the new text; an edited one stays and a fired one does not come back', async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'cts-agents-'))
+    await mkdir(path.join(dir, 'agents'))
+    const old = ['old writer, cutout-puppet', ''].join(String.fromCharCode(13, 10))
+    await writeFile(path.join(dir, 'agents', 'writer-jonas-reyes.md'), old)
+    await writeFile(path.join(dir, 'agents', 'showrunner-mara-quill.md'), 'my own showrunner')
+    const updated = await refreshStarterAgents(seedDir, dir, { 'agents/writer-jonas-reyes.md': [seedHash(old)], 'agents/showrunner-mara-quill.md': [seedHash('old showrunner')] })
+    expect(updated).toEqual(['agents/writer-jonas-reyes.md'])
+    expect(await readFile(path.join(dir, 'agents', 'writer-jonas-reyes.md'), 'utf8')).toBe(await readFile(path.join(seedDir, 'agents', 'writer-jonas-reyes.md'), 'utf8'))
+    expect(await readFile(path.join(dir, 'agents', 'showrunner-mara-quill.md'), 'utf8')).toBe('my own showrunner')
+    expect((await readdir(path.join(dir, 'agents'))).sort()).toEqual(['showrunner-mara-quill.md', 'writer-jonas-reyes.md'])
+  })
 
   it('starts an engine: eight roles on client/claude-code, strata, lmstudio; no paid alias; $0 budget; hr voice chain; no series', async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'cts-seed-'))
