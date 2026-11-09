@@ -705,11 +705,11 @@ async function runStep(svc: Engine['cts'], pipe: Pipeline, step: StepDef, fn: St
   e.progress(null, `${step.label}`)
   try {
     const r = await fn(e)
-    if (typeof r === 'string') await pipe.markDone(series, episode, step.id, r)
+    if (typeof r === 'string') await pipe.markDone(series, episode, step.id, r, ctx.job.id)
     await pipe.advanceQuietly(series, episode)
     return { result: typeof r === 'string' ? r : r.reopened }
   } catch (err) {
-    if (!isAbortError(err) && !ctx.signal.aborted) await pipe.noteFailure(series, episode, step.id, (err as Error).message)
+    if (!isAbortError(err) && !ctx.signal.aborted) await pipe.noteFailure(series, episode, step.id, (err as Error).message, ctx.job.id)
     throw err
   }
 }

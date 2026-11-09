@@ -334,6 +334,21 @@ describe('the 3D pipeline', () => {
     expect(env.logs.join(' ')).toContain(stale)
   })
 
+  it('CTS-50: the result of a job that was running while a run reset its step is dropped, not marked done', async () => {
+    env = await makeEnv({ paused: true })
+    const pipe = new Pipeline(env.engine.cts)
+    await pipe.run({ series: 'fresh', episode: 'ep01', brief: { idea: 'a car and a train' }, options: { renderer: 'blender' } })
+    const state = (await pipe.read('fresh', 'ep01'))!
+    state.steps.final_render = { state: 'running', job: 'fresh--final_render--ep01--r1' }
+    await new SeriesStore(env.dir).writePipeline('fresh', 'ep01', state)
+
+    await pipe.run({ series: 'fresh', episode: 'ep01', from: 'assemble' }) // resets final_render while r1 still runs
+    await pipe.markDone('fresh', 'ep01', 'final_render', 'stale video', 'fresh--final_render--ep01--r1')
+    await pipe.noteFailure('fresh', 'ep01', 'final_render', 'stale failure', 'fresh--final_render--ep01--r1')
+    expect((await pipe.read('fresh', 'ep01'))!.steps.final_render).toMatchObject({ state: 'pending', detail: 'redo' })
+    expect(env.logs.join(' ')).toContain('dropped the result of job fresh--final_render--ep01--r1')
+  })
+
   it('CTS-39: two sheet redos in a row make one character job that redoes each character once', async () => {
     const { fake, seen, pipe } = await startMiniVehicles()
     await pauseOf(pipe, 'the pause at sheet_review')
