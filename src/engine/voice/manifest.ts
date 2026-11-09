@@ -12,7 +12,10 @@ import type { ClipVoice } from './providers/types'
 
 /** What makes the sound of a clip, as one string: the voices of every provider (a clip is kept whatever provider made it, so all of them count). */
 export function voiceKey(v: ClipVoice): string {
-  return JSON.stringify([v.gemini, v.vibetts, v.comfy.engine, v.comfy.instruct, v.comfy.ref ?? '', v.comfy.refText ?? '', v.comfy.seed])
+  const base = [v.gemini, v.vibetts, v.comfy.engine, v.comfy.instruct, v.comfy.ref ?? '', v.comfy.refText ?? '', v.comfy.seed]
+  // HUB-31: the ElevenLabs voice counts only when the bible has one, so the hashes of the series made before it stay the same
+  const e = v.elevenlabs
+  return JSON.stringify(e ? [...base, e.voiceId, e.model, e.settings ? [e.settings.stability, e.settings.similarity_boost, e.settings.style, e.settings.speed] : null] : base)
 }
 
 /** `sha1` of text + language + voice + speed + style, as Edu's `clipHash` (the voice here is the speaker's whole `voiceKey`). */

@@ -46,7 +46,9 @@ export const LINT_CODES = [
   'W_VISEME_FLAT',
   'W_LANG_DRIFT',
   'W_PLACEHOLDER',
-  'W_MIX_MUSIC_LOUD'
+  'W_MIX_MUSIC_LOUD',
+  'W_VOICE_MIXED',
+  'W_VOICE_ID_CHANGED'
 ] as const
 export type LintCode = (typeof LINT_CODES)[number]
 
@@ -669,7 +671,15 @@ async function lintEpisode(
         if (!(await exists(abs))) issues.add('E_LINE_NO_AUDIO', `${lang} audio file ${e.file} for line "${l.id}" is missing`, { file: manifestRel, where: l.id, lang })
         if (e.status === 'placeholder') issues.add('W_PLACEHOLDER', `line "${l.id}" (${lang}) is a silent placeholder`, { file: manifestRel, where: l.id, lang })
         if (e.seconds > MAX_LINE_SECONDS) issues.add('W_LINE_LONG', `line "${l.id}" (${lang}) lasts ${e.seconds.toFixed(1)} s (over ${MAX_LINE_SECONDS} s)`, { file: manifestRel, where: l.id, lang })
+        // HUB-31: an ElevenLabs line keeps the voice id the bible gives its speaker
+        const eleven = e.status === 'ok' && e.provider === 'elevenlabs' ? bible.cast.find((c) => c.id === l.speaker)?.voice[lang]?.elevenlabs : undefined
+        if (eleven && e.voice && e.voice !== eleven.voiceId)
+          issues.add('W_VOICE_ID_CHANGED', `line "${l.id}" (${lang}) was spoken by ElevenLabs voice ${e.voice}, but the bible gives ${l.speaker} ${eleven.voiceId}`, { file: manifestRel, where: l.id, lang })
       }
+      // HUB-31: a language is spoken by one provider; ElevenLabs stopping mid-run (its quota) moves the rest on and mixes the voices
+      const spokenBy = new Set(lines.map((l) => m.lines[l.id]).filter((e) => e?.status === 'ok').map((e) => e!.provider))
+      if (spokenBy.has('elevenlabs') && spokenBy.size > 1)
+        issues.add('W_VOICE_MIXED', `the ${lang} lines mix ElevenLabs with ${[...spokenBy].filter((x) => x !== 'elevenlabs').join(', ')} (ElevenLabs stopped in the middle of the language)`, { file: manifestRel, lang })
     } else if (opts.requireAudio) {
       for (const l of lines) issues.add('E_LINE_NO_AUDIO', `line "${l.id}" has no ${lang} audio (no voice manifest)`, { file: manifestRel, where: l.id, lang })
     }

@@ -13,6 +13,9 @@ A voice is `{"provider":"auto","gemini":"<Gemini voice name>","comfy":{...},"vib
 ## English (en): Kokoro through VibeTTS
 `vibetts` is a Kokoro voice id from `kokoroVoices`; every character gets a DIFFERENT one that matches gender and age. `style`: two or three words for the delivery ("bright, quick", "slow, warm").
 
+## ElevenLabs (when the input has `elevenVoices`)
+ElevenLabs is the first choice when the free credits allow. If the input lists `elevenVoices` (the account's premade voices with their labels), add `"elevenlabs":{"voiceId":"<voiceId>","name":"<name>"}` to each voice, chosen from the labels (gender, age, description) to fit the character, and use the SAME voiceId for hr and en so the character keeps one voice. Give each character a different voice. The user picks the final one by ear (`cts_voice_audition`), so name your choice in `notes` with one or two alternatives per character. Without `elevenVoices`, leave `elevenlabs` out.
+
 ## Gemini
 `gemini` is a name from `geminiVoices` that fits the character (used only if the free daily quota allows). Different for each character. Put it in both the hr and the en voice.
 

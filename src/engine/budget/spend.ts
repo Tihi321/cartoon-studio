@@ -490,3 +490,17 @@ export async function charge<T>(args: ChargeArgs, run: () => Promise<T>, opts: C
   })
   return { value, amount, currency, entry }
 }
+
+/**
+ * HUB-31: appends a free-tier ElevenLabs entry (`currency: "eleven-credits"`) to spend.json. There is no cap check here: the quota guard is
+ * flow-music-mcp's (it refuses past `remaining - reserve` and any paid tier), and these credits never cost money, so `capUsd` is not touched.
+ */
+export async function recordElevenCredits(args: { store: SeriesStore; series: string; episode: string; model: string; what: string; amount: number }): Promise<LedgerEntry> {
+  const { store, series, episode } = args
+  const entry: LedgerEntry = { t: localIso(new Date()), provider: 'elevenlabs', model: args.model, what: args.what, currency: 'eleven-credits', amount: round(Math.max(0, args.amount)) }
+  await withLock(`${store.dataDir}|${series}|${episode}`, async () => {
+    const spend = await store.readSpend(series, episode)
+    await store.writeSpend(series, episode, { schema: 'cts.spend/1', entries: [...spend.entries, entry] })
+  })
+  return entry
+}

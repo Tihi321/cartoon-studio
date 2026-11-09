@@ -11,8 +11,8 @@ export const LANGS: readonly string[] = BUILTIN_LANGUAGES.map((l) => l.code)
 export const langSchema = z.string().regex(/^[a-z]{2,3}(-[a-z0-9]{2,8})?$/, 'a language code such as en, hr, de or pt-br')
 export type Lang = z.infer<typeof langSchema>
 
-/** The voice providers of a character (`auto` is the hub's allocation rule: Gemini within the free quota, else local). */
-export const VOICE_PROVIDERS = ['auto', 'gemini', 'vibetts', 'comfy'] as const
+/** The voice providers of a run (`auto` is the hub's allocation rule: ElevenLabs within its free credits, then Gemini within the free quota, else local). */
+export const VOICE_PROVIDERS = ['auto', 'elevenlabs', 'gemini', 'vibetts', 'comfy'] as const
 export type VoiceProvider = (typeof VOICE_PROVIDERS)[number]
 
 /** The chips of Chiptune Studio. */

@@ -17,6 +17,8 @@ export interface ClipVoice {
   vibetts: string
   /** OmniVoice (or another ComfyUI engine): the attribute tags, the reference clip as an ABSOLUTE path (or null), its transcript and the seed. */
   comfy: { engine: string; instruct: string; ref: string | null; refText: string | null; seed: number }
+  /** HUB-31: the character's ElevenLabs voice in this language (the model resolved with the series default), or absent when the bible has none. */
+  elevenlabs?: { voiceId: string; model: string; settings?: { stability: number; similarity_boost: number; style: number; speed: number } }
 }
 
 /** A clip to speak (one script line in one language), as the runner prepared it. */
@@ -46,6 +48,10 @@ export interface Spoken {
   /** The voice or the tags it spoke with. */
   voice?: string
   seed?: number
+  /** ElevenLabs: word times in seconds from the start of `file` (before the runner trims it), from the alignment of the script text. */
+  words?: { w: string; t0: number; t1: number }[]
+  /** ElevenLabs: the free-tier credits the clip cost (recorded in spend.json as `eleven-credits`). */
+  credits?: number
 }
 
 export interface SpeakIO {

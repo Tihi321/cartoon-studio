@@ -1,7 +1,7 @@
 import type { VoiceProvider } from '../../shared/media'
 
 /** The providers the allocation chains. `paid` is never in a chain: a character that asks for it is handled by the runner (CTS-06). */
-export type VoiceProviderUsed = 'gemini' | 'vibetts' | 'comfy'
+export type VoiceProviderUsed = 'elevenlabs' | 'gemini' | 'vibetts' | 'comfy'
 
 /** The allocation of one language: who speaks it, in which order the providers are tried, and why. */
 export interface VoiceAllocationEntry {
@@ -12,6 +12,8 @@ export interface VoiceAllocationEntry {
   provider: VoiceProviderUsed | 'none'
   chain: VoiceProviderUsed[]
   reason: string
+  /** HUB-31: the ElevenLabs credits the language's clips are estimated at (characters x the model's multiplier), when known. */
+  credits?: number
   /** Filled by the runner: clips made per provider, and placeholders. */
   made?: Partial<Record<VoiceProviderUsed, number>>
   placeholders?: number
@@ -26,6 +28,12 @@ const FALLBACK_ORDER: readonly ('vibetts' | 'comfy')[] = ['vibetts', 'comfy']
 
 /**
  * The hub's voice allocation rule (EGS-17), pure so it can be unit-tested without a provider:
+ *
+ *   - HUB-31: ElevenLabs' free tier comes first. A language goes to ElevenLabs when every one of its clips has a voice id in the bible, the model
+ *     reads it, and the language's credit estimate fits in `remaining - reserve` (what is left after the languages before it); else the rule below
+ *     applies to it. A run forced to `gemini`, `vibetts` or `comfy` never uses ElevenLabs; `elevenlabs` allocates like `auto`. An ElevenLabs
+ *     language's chain goes on to Gemini (when it is up and the clips fit in what Gemini has left) and then local, so a mid-run quota stop moves
+ *     the rest of the language on (lint `W_VOICE_MIXED`).
  *
  *   - Google's free Gemini TTS allows 10 requests a day. `remaining = limit - used` (the counter is `quota.ts`).
  *   - Languages are allocated WHOLE (a language never mixes providers in one run), Croatian first, then English, then the rest by code:
@@ -67,6 +75,15 @@ export interface AllocationInput {
   localOnly?: readonly string[]
   /** The local chain per language (`config/voice.md` `localOrder`); default `DEFAULT_LOCAL_ORDER`. */
   localOrder?: LocalOrder
+  /**
+   * HUB-31: the ElevenLabs free tier as `flow_elevenlabs_status` read it. `left` is `remaining - reserve` (never below 0). Missing: ElevenLabs
+   * is not considered at all (the rule of EGS-17 unchanged).
+   */
+  eleven?: { up: boolean; reason?: string; left: number }
+  /** The ElevenLabs credit estimate of each language's clips that need speaking. */
+  credits?: Record<string, number>
+  /** Why a language cannot go to ElevenLabs whatever the credits (a speaker without a voice id, a model that does not read it). */
+  elevenBlocked?: Record<string, string>
 }
 
 /** Croatian first (the hub prefers the free Gemini voices for it), then English, then the others by code. */
@@ -95,7 +112,9 @@ const whyNoLocal = (lang: string, avail: VoiceAvailability): string => {
 export function allocateVoice(input: AllocationInput): Record<string, VoiceAllocationEntry> {
   const out: Record<string, VoiceAllocationEntry> = {}
   let left = Math.max(0, input.quota.limit - input.quota.used)
-  const useGemini = input.provider === 'auto' || input.provider === 'gemini'
+  let elevenLeft = Math.max(0, Math.floor(input.eleven?.left ?? 0))
+  const useEleven = !!input.eleven && (input.provider === 'auto' || input.provider === 'elevenlabs')
+  const useGemini = input.provider === 'auto' || input.provider === 'gemini' || input.provider === 'elevenlabs'
   for (const lang of orderLanguages(Object.keys(input.need))) {
     const need = input.need[lang] ?? 0
     const local = localChain(lang, input.provider, input.avail, input.localOrder)
@@ -103,6 +122,22 @@ export function allocateVoice(input: AllocationInput): Record<string, VoiceAlloc
       out[lang] = { lang, need: 0, provider: 'none', chain: [], reason: 'nothing to speak: every clip is up to date' }
       continue
     }
+    let elevenWhy = ''
+    const credits = input.credits?.[lang]
+    if (useEleven && !input.localOnly?.includes(lang)) {
+      const blocked = input.elevenBlocked?.[lang]
+      if (!input.eleven!.up) elevenWhy = `ElevenLabs is not available${input.eleven!.reason ? ` (${input.eleven!.reason})` : ''}`
+      else if (blocked) elevenWhy = `ElevenLabs cannot speak it (${blocked})`
+      else if (credits === undefined) elevenWhy = 'no ElevenLabs credit estimate'
+      else if (credits > elevenLeft) elevenWhy = `${credits} ElevenLabs credit(s) do not fit in the ${elevenLeft} left above the reserve`
+      else {
+        elevenLeft -= credits
+        const geminiNext = useGemini && input.avail.gemini.up && !input.localOnly?.includes(lang) && need <= left ? (['gemini'] as VoiceProviderUsed[]) : []
+        out[lang] = { lang, need, provider: 'elevenlabs', chain: ['elevenlabs', ...geminiNext, ...local], credits, reason: `${need} clip(s), about ${credits} ElevenLabs credit(s), fit in the free credits (${elevenLeft} left above the reserve after them)` }
+        continue
+      }
+    }
+    const withEleven = (entry: VoiceAllocationEntry): VoiceAllocationEntry => (elevenWhy ? { ...entry, reason: `${elevenWhy}; ${entry.reason}`, ...(credits !== undefined ? { credits } : {}) } : entry)
     let why = ''
     if (useGemini && input.localOnly?.includes(lang)) why = 'this language is spoken by the local voices only'
     else if (useGemini) {
@@ -110,16 +145,16 @@ export function allocateVoice(input: AllocationInput): Record<string, VoiceAlloc
       else if (need > left) why = `${need} clip(s) do not fit in the ${left} Gemini request(s) left today`
       else {
         left -= need
-        out[lang] = { lang, need, provider: 'gemini', chain: ['gemini', ...local], reason: `${need} clip(s) fit in the Gemini quota (${left} request(s) left after them)` }
+        out[lang] = withEleven({ lang, need, provider: 'gemini', chain: ['gemini', ...local], reason: `${need} clip(s) fit in the Gemini quota (${left} request(s) left after them)` })
         continue
       }
     }
     if (local.length === 0) {
-      out[lang] = { lang, need, provider: 'none', chain: [], reason: `nothing can speak ${lang}: ${whyNoLocal(lang, input.avail) || 'no provider'}; the clips become placeholders` }
+      out[lang] = withEleven({ lang, need, provider: 'none', chain: [], reason: `nothing can speak ${lang}: ${whyNoLocal(lang, input.avail) || 'no provider'}; the clips become placeholders` })
       continue
     }
     const forced = input.provider === 'vibetts' || input.provider === 'comfy'
-    out[lang] = { lang, need, provider: local[0]!, chain: local, reason: `${forced ? `the course asks for ${input.provider}` : why ? `${why}: local voice` : 'local voice'} (${local[0] === 'vibetts' ? 'VibeTTS' : 'ComfyUI TTS'})` }
+    out[lang] = withEleven({ lang, need, provider: local[0]!, chain: local, reason: `${forced ? `the course asks for ${input.provider}` : why ? `${why}: local voice` : 'local voice'} (${local[0] === 'vibetts' ? 'VibeTTS' : 'ComfyUI TTS'})` })
   }
   return out
 }

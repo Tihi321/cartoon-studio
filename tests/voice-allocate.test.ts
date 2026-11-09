@@ -161,3 +161,15 @@ describe('the local chain from config/voice.md localOrder (CTS-06)', () => {
     expect(alloc({ need: { hr: 14 }, localOrder: { hr: ['vibetts', 'comfy'] } }).hr!.chain).toEqual(['vibetts', 'comfy'])
   })
 })
+
+describe('ElevenLabs first (HUB-31)', () => {
+  it('credits for hr only: hr goes to ElevenLabs, en to Gemini when it fits, else local; with 0 credits the old rule is unchanged', () => {
+    const eleven = (left: number) => ({ eleven: { up: true, left }, credits: { hr: 700, en: 650 } })
+    const onlyHr = alloc({ need: { hr: 13, en: 3 }, ...eleven(1000) })
+    expect(providers(onlyHr)).toEqual({ hr: 'elevenlabs', en: 'gemini' })
+    expect(onlyHr.hr).toMatchObject({ credits: 700, chain: ['elevenlabs', 'comfy', 'vibetts'] }) // 13 do not fit in Gemini: straight to local after
+    expect(onlyHr.en!.reason).toMatch(/650 ElevenLabs credit\(s\) do not fit in the 300 left/)
+    expect(providers(alloc({ need: { hr: 13, en: 13 }, ...eleven(1000) }))).toEqual({ hr: 'elevenlabs', en: 'vibetts' })
+    for (const need of [{ hr: 4, en: 3 }, { hr: 6, en: 5 }, { hr: 14, en: 14 }]) expect(providers(alloc({ need, ...eleven(0) }))).toEqual(providers(alloc({ need })))
+  })
+})

@@ -8,12 +8,14 @@ import type { VoiceProvider } from '../../shared/media'
 import type { ComfyClient } from '../comfy/client'
 import { SeriesFileError } from '../series/service'
 import type { SeriesStore } from '../series/service'
-import type { FlowClient } from '../studios/flow'
+import type { ElevenModelInfo, ElevenStatus, FlowClient } from '../studios/flow'
+import { recordElevenCredits } from '../budget/spend'
 import type { VibeTtsClient, VibeVoices } from '../studios/vibetts'
 import { allocateVoice, DEFAULT_LOCAL_ORDER, localChain, voiceReads } from './allocate'
 import type { LocalOrder, VoiceAllocationEntry, VoiceAvailability, VoiceProviderUsed } from './allocate'
-import { normaliseWav, placeholderSeconds, silenceWav } from './audio'
+import { normaliseWav, placeholderSeconds, shiftWords, silenceWav } from './audio'
 import { clipFile, clipHash, emptyManifest, isCurrent, readManifest, voiceKey, writeManifest } from './manifest'
+import { elevenSpeaker } from './providers/elevenlabs'
 import { comfySpeaker, checkOmniInstruct, resolveVoiceEngine } from './providers/comfy'
 import { geminiSpeaker, DEFAULT_GEMINI_VOICE } from './providers/gemini'
 import { paidSpeaker } from './providers/paid'
@@ -25,12 +27,15 @@ import { GeminiQuota, DEFAULT_GEMINI_DAILY_LIMIT, DEFAULT_GEMINI_RESET_TZ } from
 /**
  * Speaks the lines of an episode (CTS-06). Clips = the script's lines x the series' languages. A clip is made again only when its hash changes
  * (text + language + the speaker's voice + speed + style), whatever provider made it; a clip that only got a placeholder is tried again on the next
- * run. Languages are allocated whole by the hub's rule (`allocate.ts`: Gemini within the free 10 a day, Croatian first, else the local chain of
- * `config/voice.md` `localOrder`); a clip that fails everywhere becomes a silent placeholder (2.5 words a second) and a warning, never a failed run.
+ * run. Languages are allocated whole by the hub's rule (`allocate.ts`: HUB-31 ElevenLabs within its free credits, then Gemini within the free 10
+ * a day, Croatian first, else the local chain of `config/voice.md` `localOrder`); a clip that fails everywhere becomes a silent placeholder (2.5 words a second) and a warning, never a failed run.
  * Every clip is normalised to a 44.1 kHz mono WAV with the silence at both ends trimmed, and the manifest is saved after each one (resumable).
  */
 
 // ---- config/voice.md ----
+
+export const DEFAULT_ELEVEN_MODEL = 'eleven_multilingual_v2'
+export const DEFAULT_ELEVEN_RESERVE = 200
 
 export const voiceConfigSchema = z.object({
   format: z.enum(['mp3', 'wav']).default('wav'),
@@ -39,7 +44,11 @@ export const voiceConfigSchema = z.object({
   geminiDailyLimit: z.number().int().min(0).default(DEFAULT_GEMINI_DAILY_LIMIT),
   geminiResetTz: z.string().default(DEFAULT_GEMINI_RESET_TZ),
   localOrder: z.record(z.string(), z.array(z.enum(['comfy', 'vibetts']))).default({}),
-  engine: z.string().default('omnivoice')
+  engine: z.string().default('omnivoice'),
+  /** HUB-31: the ElevenLabs model of a character whose bible voice names none, and the credits never spent (the larger of this and flow-music-mcp's reserve counts). */
+  elevenlabs: z
+    .object({ model: z.string().min(1).default(DEFAULT_ELEVEN_MODEL), reserve: z.number().int().min(0).default(DEFAULT_ELEVEN_RESERVE) })
+    .default({ model: DEFAULT_ELEVEN_MODEL, reserve: DEFAULT_ELEVEN_RESERVE })
 })
 export type VoiceConfig = Omit<z.infer<typeof voiceConfigSchema>, 'localOrder'> & { localOrder: LocalOrder }
 
@@ -134,7 +143,8 @@ export async function planClips(q: ClipsQuery): Promise<{ clips: PlannedClip[]; 
       const voice: ClipVoice = {
         gemini: spec?.gemini ?? DEFAULT_GEMINI_VOICE,
         vibetts: spec?.vibetts ?? '',
-        comfy: { engine: spec?.comfy?.engine ?? config.engine, instruct: spec?.comfy?.instruct ?? '', ref, refText: spec?.comfy?.refText ?? null, seed: spec?.comfy?.seed ?? seedOf(`${line.speaker}:${lang}`) }
+        comfy: { engine: spec?.comfy?.engine ?? config.engine, instruct: spec?.comfy?.instruct ?? '', ref, refText: spec?.comfy?.refText ?? null, seed: spec?.comfy?.seed ?? seedOf(`${line.speaker}:${lang}`) },
+        ...(spec?.elevenlabs ? { elevenlabs: { voiceId: spec.elevenlabs.voiceId, model: spec.elevenlabs.model ?? config.elevenlabs.model, ...(spec.elevenlabs.settings ? { settings: spec.elevenlabs.settings } : {}) } } : {})
       }
       const speed = Math.round((spec?.speed ?? 1) * config.speed * 1000) / 1000
       const style = (entry?.delivery ?? spec?.style ?? '').trim()
@@ -142,7 +152,8 @@ export async function planClips(q: ClipsQuery): Promise<{ clips: PlannedClip[]; 
       const have = manifest?.lines[line.id]
       const fileOk = have ? await fs.stat(path.join(paths.episodeDir(episode), have.file)).then((s) => s.isFile(), () => false) : false
       const state: ClipState = q.force ? 'forced' : !have ? 'new' : have.hash !== hash ? 'changed' : isCurrent(have, hash) && fileOk ? 'current' : 'redo'
-      const pinned = spec && spec.provider !== 'auto' && spec.provider !== 'gemini' ? (spec.provider as VoiceProviderName) : undefined
+      // a character pinned to ElevenLabs or Gemini still goes through the allocation (the free quotas apply)
+      const pinned = spec && spec.provider !== 'auto' && spec.provider !== 'gemini' && spec.provider !== 'elevenlabs' ? (spec.provider as VoiceProviderName) : undefined
       clips.push({ id: line.id, lang, speaker: line.speaker, text: said, style, speed, voice, hash, state, ...(pinned ? { pinned } : {}) })
     }
   }
@@ -180,10 +191,57 @@ interface Probe {
   avail: VoiceAvailability
   vibe: VibeVoices | null
   notes: string[]
+  /** HUB-31: the ElevenLabs free tier, or null when this run does not use it (forced provider, or a flow client without the method). */
+  eleven: ElevenProbe | null
+}
+
+export interface ElevenProbe {
+  up: boolean
+  reason?: string
+  /** `remaining - reserve`, never below 0. */
+  left: number
+  reserve: number
+  status: ElevenStatus
+}
+
+/** The ElevenLabs account as the allocation sees it: up only when ready, on a tier that cannot bill money, with a credit count. */
+export async function probeEleven(flow: FlowClient, config: VoiceConfig, signal?: AbortSignal): Promise<ElevenProbe | null> {
+  if (!flow.elevenStatus) return null
+  const status = await flow.elevenStatus(signal)
+  const reserve = Math.max(config.elevenlabs.reserve, status.reserve ?? 0)
+  const left = Math.max(0, (status.remaining ?? 0) - reserve)
+  const reason = !status.ready
+    ? `${status.code ? `${status.code}: ` : ''}${status.hint ?? 'not ready'}`
+    : status.paidRisk
+      ? 'E_ELEVEN_PAID_TIER: the account could bill money, so it is not used'
+      : status.remaining === undefined
+        ? 'the remaining credits could not be read'
+        : undefined
+  return { up: !reason, ...(reason ? { reason: reason.split('\n')[0]!.slice(0, 200) } : {}), left, reserve, status }
+}
+
+/** The credit estimate of each language's clips (characters x the model's multiplier, rounded up per clip, as flow-music-mcp counts) and why a language cannot go to ElevenLabs. */
+export function elevenNeed(clips: readonly PlannedClip[], models: readonly ElevenModelInfo[]): { credits: Record<string, number>; blocked: Record<string, string> } {
+  const credits: Record<string, number> = {}
+  const blocked: Record<string, string> = {}
+  for (const c of clips) {
+    if (c.pinned) continue
+    const e = c.voice.elevenlabs
+    if (!e) {
+      blocked[c.lang] ??= `${c.speaker} has no ElevenLabs voice id for ${c.lang} in the bible`
+      continue
+    }
+    const m = models.find((x) => x.id === e.model)
+    if (m && (!m.tts || (c.lang === 'hr' && !m.hr) || (c.lang === 'en' && !m.en))) blocked[c.lang] ??= `${e.model} does not read ${c.lang}`
+    credits[c.lang] = (credits[c.lang] ?? 0) + Math.ceil(c.text.length * (m?.multiplier ?? 1))
+  }
+  return { credits, blocked }
 }
 
 async function probe(deps: VoiceRunDeps, config: VoiceConfig, provider: VoiceProvider, langs: string[], signal?: AbortSignal): Promise<Probe> {
   const notes: string[] = []
+  const eleven = provider === 'auto' || provider === 'elevenlabs' ? await probeEleven(deps.flow, config, signal) : null
+  if (eleven && !eleven.up) notes.push(`ElevenLabs: ${eleven.reason}`)
   let gemini: VoiceAvailability['gemini'] = { up: false, reason: 'this run does not use Gemini' }
   if (provider === 'auto' || provider === 'gemini') {
     try {
@@ -216,7 +274,45 @@ async function probe(deps: VoiceRunDeps, config: VoiceConfig, provider: VoicePro
     vibetts: { up: !!vibe, reads: (l) => !!vibe && vibe.voices.some((v) => voiceReads(v, l)), ...(vibe ? {} : { reason: vibeWhy }) },
     comfy: { up: true, reads: (l) => comfyReads.has(l), ...(comfyWhy.length ? { reason: comfyWhy[0] } : {}) }
   }
-  return { avail, vibe, notes }
+  return { avail, vibe, notes, eleven }
+}
+
+/** The allocation's ElevenLabs inputs of a probe and the clips to speak. */
+const elevenInput = (p: Probe, todo: readonly PlannedClip[]) => {
+  if (!p.eleven) return {}
+  const n = elevenNeed(todo, p.eleven.status.models)
+  return { eleven: { up: p.eleven.up, left: p.eleven.left, ...(p.eleven.reason ? { reason: p.eleven.reason } : {}) }, credits: n.credits, elevenBlocked: n.blocked }
+}
+
+/**
+ * HUB-31 `W_VOICE_ID_CHANGED`: a character's ElevenLabs voice id in the bible differs from the one its lines were first made with (the first
+ * episode in the bible's order with an ElevenLabs line of that character and language: the voice the user approved).
+ */
+export async function voiceIdChanges(store: SeriesStore, series: string): Promise<string[]> {
+  const bible = await store.readBible(series)
+  const first = new Map<string, { voiceId: string; episode: string }>()
+  for (const ep of bible.episodes) {
+    const script = await store.readScript(series, ep.id).catch(() => null)
+    if (!script) continue
+    const speaker = new Map<string, string>()
+    for (const sc of script.scenes) for (const b of sc.beats) if (b.type === 'line') speaker.set(b.line, b.speaker)
+    for (const lang of bible.languages) {
+      const m = await readManifest(store, series, ep.id, lang)
+      for (const [id, l] of Object.entries(m?.lines ?? {})) {
+        const who = speaker.get(id)
+        const k = `${who}|${lang}`
+        if (who && l.status === 'ok' && l.provider === 'elevenlabs' && l.voice && !first.has(k)) first.set(k, { voiceId: l.voice, episode: ep.id })
+      }
+    }
+  }
+  const out: string[] = []
+  for (const c of bible.cast)
+    for (const [lang, spec] of Object.entries(c.voice)) {
+      const was = first.get(`${c.id}|${lang}`)
+      if (spec?.elevenlabs && was && was.voiceId !== spec.elevenlabs.voiceId)
+        out.push(`W_VOICE_ID_CHANGED ${c.id} (${lang}): the bible's ElevenLabs voice ${spec.elevenlabs.voiceId} differs from ${was.voiceId}, first used in ${was.episode}`)
+    }
+  return out
 }
 
 /** How many clips of each language want a provider chosen by the rule (clips the character pins to one provider do not count against Gemini). */
@@ -232,6 +328,9 @@ export interface VoicePlanReport {
   allocation: Record<string, VoiceAllocationEntry>
   quota: { limit: number; used: number; remaining: number; day: string; tz: string }
   availability: { gemini: { up: boolean; reason?: string }; vibetts: { up: boolean; reason?: string }; comfy: { up: boolean; reason?: string } }
+  /** HUB-31: the ElevenLabs free tier (null when the run does not use it) and the credit estimate per language. */
+  elevenlabs: { ready: boolean; reason?: string; tier?: string; remaining?: number; reserve: number; left: number; resetAt?: string | null } | null
+  credits: Record<string, number>
   warnings: string[]
 }
 
@@ -250,13 +349,28 @@ export async function planVoice(inp: PlanInput): Promise<VoicePlanReport> {
   const provider = inp.provider ?? 'auto'
   const p = await probe(inp.deps, inp.config, provider, langs, inp.signal)
   const q = await inp.deps.quota.read()
-  const allocation = allocateVoice({ need, provider, quota: { limit: q.limit, used: q.used }, avail: p.avail, localOrder: inp.config.localOrder })
+  const ei = elevenInput(p, todo)
+  const allocation = allocateVoice({ need, provider, quota: { limit: q.limit, used: q.used }, avail: p.avail, localOrder: inp.config.localOrder, ...ei })
+  warnings.push(...(await voiceIdChanges(inp.store, inp.series)))
+  const e = p.eleven
   return {
     clips: clips.map((c) => ({ lang: c.lang, id: c.id, speaker: c.speaker, state: c.state, ...(c.pinned ? { pinned: c.pinned } : {}), text: c.text })),
     need,
     allocation,
     quota: q,
     availability: { gemini: p.avail.gemini, vibetts: { up: p.avail.vibetts.up, ...(p.avail.vibetts.reason ? { reason: p.avail.vibetts.reason } : {}) }, comfy: { up: p.avail.comfy.up, ...(p.avail.comfy.reason ? { reason: p.avail.comfy.reason } : {}) } },
+    elevenlabs: e
+      ? {
+          ready: e.up,
+          ...(e.reason ? { reason: e.reason } : {}),
+          ...(e.status.tier !== undefined ? { tier: e.status.tier } : {}),
+          ...(e.status.remaining !== undefined ? { remaining: e.status.remaining } : {}),
+          reserve: e.reserve,
+          left: e.left,
+          ...(e.status.resetAt !== undefined ? { resetAt: e.status.resetAt } : {})
+        }
+      : null,
+    credits: ei.credits ?? {},
     warnings: [...warnings, ...p.notes]
   }
 }
@@ -278,6 +392,8 @@ export interface VoiceRunReport {
   warnings: string[]
   /** Seconds spoken per language (the manifest's lines, all of them). */
   seconds: Record<string, number>
+  /** HUB-31: the ElevenLabs free-tier credits this run spent (also in spend.json as `eleven-credits`). */
+  elevenCredits: number
 }
 
 const key = (lang: string, id: string): string => `${lang}/${id}`
@@ -287,7 +403,7 @@ export async function runVoice(inp: VoiceRunInput): Promise<VoiceRunReport> {
   const provider = inp.provider ?? 'auto'
   const paths = store.paths(series)
   const epDir = paths.episodeDir(episode)
-  const report: VoiceRunReport = { allocation: {}, made: [], kept: [], placeholders: [], warnings: [], seconds: {} }
+  const report: VoiceRunReport = { allocation: {}, made: [], kept: [], placeholders: [], warnings: [], seconds: {}, elevenCredits: 0 }
   const { clips, warnings, langs } = await planClips(inp)
   report.warnings.push(...warnings, ...(await checkVoices(store, series)))
   report.kept.push(...clips.filter((c) => c.state === 'current').map((c) => ({ lang: c.lang, id: c.id })))
@@ -321,6 +437,7 @@ export async function runVoice(inp: VoiceRunInput): Promise<VoiceRunReport> {
           const al = alignWords(said, heard.words)
           line.words = al.words
           line.wordsCoverage = Math.round(al.coverage * 1000) / 1000
+          line.wordsFrom = 'whisper'
           log(`voice ${lang} ${id}: whisper heard ${heard.words.length} word(s), ${al.words.length}/${al.total} aligned (${Math.round(al.coverage * 100)} %)`)
           await save(lang)
         } catch (e) {
@@ -342,7 +459,7 @@ export async function runVoice(inp: VoiceRunInput): Promise<VoiceRunReport> {
   try {
     const p = await probe(deps, config, provider, [...new Set(jobs.map((j) => j.lang))], inp.signal)
     const q = await deps.quota.read()
-    const allocation = allocateVoice({ need: needOf(jobs), provider, quota: { limit: q.limit, used: q.used }, avail: p.avail, localOrder: config.localOrder })
+    const allocation = allocateVoice({ need: needOf(jobs), provider, quota: { limit: q.limit, used: q.used }, avail: p.avail, localOrder: config.localOrder, ...elevenInput(p, jobs) })
     report.allocation = allocation
     for (const a of Object.values(allocation)) log(`voice ${a.lang}: ${a.need} clip(s) -> ${a.provider} (${a.reason})`)
 
@@ -356,6 +473,7 @@ export async function runVoice(inp: VoiceRunInput): Promise<VoiceRunReport> {
     const chains = new Map(jobs.map((j) => [key(j.lang, j.id), chainOf(j)]))
 
     const speakers: Record<VoiceProviderName, Speaker> = {
+      elevenlabs: elevenSpeaker({ flow: deps.flow }),
       gemini: geminiSpeaker({ flow: deps.flow, quota: deps.quota, pauseMs: deps.flowPauseMs, retries: deps.flowRetries, sleep: deps.sleep }),
       vibetts: vibettsSpeaker({ client: deps.vibetts, voices: p.vibe ?? { voices: [], languages: [], languageVoices: {}, readLanguage: 'auto', supertonicInstalled: false, higgsInstalled: false } }),
       comfy: comfySpeaker({ comfy: deps.comfy, defaultEngine: config.engine, dataDir: inp.dataDir, series, chunkChars: config.chunkChars, kindSwitch: deps.kindSwitch, warn: (m) => report.warnings.push(m) }),
@@ -372,19 +490,30 @@ export async function runVoice(inp: VoiceRunInput): Promise<VoiceRunReport> {
       onSpoken: async (job: ClipJob, s: Spoken) => {
         const k = key(job.lang, job.id)
         try {
+          if (s.credits !== undefined && s.credits > 0) {
+            // spent whatever happens to the audio next
+            report.elevenCredits += s.credits
+            await recordElevenCredits({ store, series, episode, model: s.engine ?? 'elevenlabs', what: `voice ${job.lang} ${job.id}`, amount: s.credits }).catch((e: unknown) =>
+              report.warnings.push(`spend.json: the ${s.credits} ElevenLabs credit(s) of ${job.lang} ${job.id} were not recorded: ${(e as Error).message}`)
+            )
+          }
           const rel = clipFile(job.lang, job.id)
-          const seconds = await normaliseWav(s.file, path.join(epDir, rel))
+          const norm = await normaliseWav(s.file, path.join(epDir, rel))
+          const seconds = Math.round(norm.seconds * 1000) / 1000
           if (seconds < 0.2) throw new Error(`the audio is ${seconds.toFixed(2)} s long (silent or empty)`)
           const m = manifests.get(job.lang)!
+          // HUB-31: ElevenLabs gives word times of the script text itself; they move with the trimmed lead silence (whisper is for the other providers)
+          const words = s.provider === 'elevenlabs' && s.words?.length ? shiftWords(s.words, norm.leadTrimS, seconds) : null
           const line: VoiceLine = {
             file: rel,
-            seconds: Math.round(seconds * 1000) / 1000,
+            seconds,
             provider: s.provider,
             ...(s.engine ? { engine: s.engine } : {}),
             ...(s.voice ? { voice: s.voice } : {}),
             speed: job.speed,
             hash: job.hash,
-            words: null,
+            words,
+            ...(words ? { wordsCoverage: 1, wordsFrom: 'elevenlabs' as const } : {}),
             status: 'ok'
           }
           m.lines[job.id] = line
@@ -449,6 +578,11 @@ export async function runVoice(inp: VoiceRunInput): Promise<VoiceRunReport> {
       const a = allocation[lang]
       const m = manifests.get(lang)!
       const made = madeBy.get(lang) ?? {}
+      if (made.elevenlabs && Object.keys(made).length > 1) {
+        const w = `W_VOICE_MIXED ${lang}: ElevenLabs stopped in the middle of the language, so it mixes voices (${Object.entries(made).map(([k2, n]) => `${n} by ${k2}`).join(', ')})`
+        report.warnings.push(w)
+        log(`voice: ${w}`)
+      }
       if (a) {
         a.made = made
         a.placeholders = report.placeholders.filter((x) => x.lang === lang).length

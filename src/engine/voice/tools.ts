@@ -1,3 +1,5 @@
+import { promises as fs } from 'node:fs'
+import path from 'node:path'
 import { z } from 'zod'
 import { VOICE_PROVIDERS } from '../../shared/media'
 import type { VoiceProvider } from '../../shared/media'
@@ -7,8 +9,11 @@ import { generateTheme } from '../music/comfy'
 import type { CtsService } from '../service'
 import { SeriesStore } from '../series/service'
 import { comfyKindSwitch } from '../comfy/kind-switch'
+import { recordElevenCredits } from '../budget/spend'
+import { elevenCodeOf } from '../studios/flow'
+import { normaliseWav } from './audio'
 import { readManifest } from './manifest'
-import { loadVoiceConfig, planVoice, quotaFor, runVoice } from './run'
+import { DEFAULT_ELEVEN_MODEL, loadVoiceConfig, planVoice, probeEleven, quotaFor, runVoice } from './run'
 import type { VoiceRunDeps } from './run'
 
 /**
@@ -88,7 +93,7 @@ export function voiceTools(svc: CtsService, def: ToolDef): Tool[] {
   return [
     def(
       'cts_voice_plan',
-      'What the voice step would do now, without speaking anything: the clips (script lines x languages) with their state (current, new, changed, redo, forced), which language goes to which provider (Gemini only within the free 10 requests a day, Croatian first; else the local chain from config/voice.md localOrder: hr OmniVoice then Supertonic, en Kokoro then OmniVoice), what is left of the Gemini quota, what is up, and warnings (bad OmniVoice tags, missing texts or voices).',
+      'What the voice step would do now, without speaking anything: the clips (script lines x languages) with their state (current, new, changed, redo, forced), which language goes to which provider and why (whole languages, Croatian first: ElevenLabs when every speaker has an ElevenLabs voice id and the credit estimate fits in its free credits minus the reserve; else Gemini within the free 10 requests a day; else the local chain from config/voice.md localOrder: hr OmniVoice then Supertonic, en Kokoro then OmniVoice), the ElevenLabs credit estimate per language (credits) and account (elevenlabs: ready, tier, remaining, reserve, left), what is left of the Gemini quota, what is up, and warnings (bad OmniVoice tags, missing texts or voices, W_VOICE_ID_CHANGED when a character\'s ElevenLabs voice id differs from the one its first episode used).',
       z.object({ series, episode, lang, provider: z.enum(VOICE_PROVIDERS).optional().describe('Force a provider for the whole run (default auto = the hub rule)') }),
       async (a) => {
         const { deps, config } = await voiceDeps(svc, { autoStart: false })
@@ -97,7 +102,7 @@ export function voiceTools(svc: CtsService, def: ToolDef): Tool[] {
     ),
     def(
       'cts_voice_generate',
-      'Speak the lines of an episode: every line in every language of the series (or one lang / some line ids). Returns a job id at once (cts_wait, cts_voice_status). A clip is made again only when its text, language, voice, speed or style changed (force: true makes all again); a clip no provider can speak becomes a silent placeholder and a warning, never a failed run. Writes episodes/<ep>/voice/<lang>/<line>.wav (44.1 kHz mono) and manifest.json. Costs nothing: Gemini counts against the free daily quota, the rest is local.',
+      'Speak the lines of an episode: every line in every language of the series (or one lang / some line ids). Returns a job id at once (cts_wait, cts_voice_status). A clip is made again only when its text, language, voice, speed or style changed (force: true makes all again); a clip no provider can speak becomes a silent placeholder and a warning, never a failed run. Writes episodes/<ep>/voice/<lang>/<line>.wav (44.1 kHz mono) and manifest.json; ElevenLabs lines carry their word times (wordsFrom elevenlabs), the others get whisper times on a 3D series. Costs no money: ElevenLabs spends free-tier credits only (recorded in spend.json as eleven-credits; flow-music-mcp refuses past the free quota), Gemini counts against the free daily quota, the rest is local.',
       z.object({ series, episode, lang, ids: z.array(z.string()).optional().describe('Only these line ids'), force: z.boolean().optional(), provider: z.enum(VOICE_PROVIDERS).optional().describe('Force a provider for the whole run (default auto)') }),
       async (a) => {
         if (!(await svc.seriesExists(a.series))) throw new Error(`no series "${a.series}"`)
@@ -138,12 +143,91 @@ export function voiceTools(svc: CtsService, def: ToolDef): Tool[] {
     ),
     def(
       'cts_voice_quota',
-      "Today's Gemini TTS counter (the free tier allows 10 requests a day; the day ends at midnight Pacific): limit, used, remaining. reset: true sets today's count back to 0 (a manual fix).",
+      "The free voice quotas. gemini: today's Gemini TTS counter (the free tier allows 10 requests a day; the day ends at midnight Pacific): limit, used, remaining; reset: true sets today's count back to 0 (a manual fix). elevenlabs: the ElevenLabs free tier read live through flow-music-mcp: ready, tier, remaining credits, reserve (never spent), resetAt, and reason when not ready.",
       z.object({ reset: z.boolean().optional() }),
       async (a) => {
         const config = await loadVoiceConfig(svc.dataDir)
         const q = quotaFor(svc.dataDir, config, svc.deps.voiceRuntime?.now)
-        return a.reset ? q.reset() : q.read()
+        const gemini = a.reset ? await q.reset() : await q.read()
+        const { flow } = await svc.studios()
+        const e = await probeEleven(flow, config)
+        const elevenlabs = e
+          ? { ready: e.up, tier: e.status.tier ?? null, remaining: e.status.remaining ?? null, reserve: e.reserve, resetAt: e.status.resetAt ?? null, ...(e.reason ? { reason: e.reason } : {}) }
+          : { ready: false, tier: null, remaining: null, reserve: config.elevenlabs.reserve, resetAt: null, reason: 'this flow client has no ElevenLabs status' }
+        return { gemini, elevenlabs }
+      }
+    ),
+    def(
+      'cts_voice_audition',
+      "Audition ElevenLabs voices for a character: speaks one line (text, else the character's first catchphrase in lang) with each voiceId (from flow_elevenlabs_voices, premade on the free tier) and writes cast/<id>/voice/audition-<lang>-<voiceId>.wav (with -<model> added when model is not eleven_multilingual_v2, e.g. eleven_flash_v2_5 with language hr, so both can be heard side by side). Spends free-tier credits only: the whole estimate is checked against the remaining credits minus the reserve before anything is sent (E_ELEVEN_QUOTA otherwise). Pass episode so the credits go in that episode's spend.json (currency eleven-credits; the pilot's API delta is checked against it). Returns per voice the file, seconds and credits, the total and the credits left.",
+      z.object({
+        series,
+        cast: z.string().describe('The cast member id'),
+        lang: z.string().describe('The language of the line (hr, en)'),
+        provider: z.literal('elevenlabs'),
+        voiceIds: z.array(z.string().min(1)).min(1).max(8).describe('ElevenLabs voice ids to audition'),
+        model: z.string().optional().describe('The model (default: the character\'s bible model, else config/voice.md elevenlabs.model)'),
+        text: z.string().min(2).max(400).optional().describe('The audition line'),
+        language: z.string().optional().describe('The language code sent to ElevenLabs (default lang); taken by eleven_flash_v2_5'),
+        episode: z.string().optional().describe('The episode whose spend.json records the credits')
+      }),
+      async (a) => {
+        const st = store()
+        const bible = await st.readBible(a.series)
+        const member = bible.cast.find((c) => c.id === a.cast)
+        if (!member) throw new Error(`no cast member "${a.cast}" in ${a.series}`)
+        const text = (a.text ?? (a.lang === 'hr' || a.lang === 'en' ? member.catchphrases?.[a.lang]?.[0] : undefined) ?? '').trim()
+        if (!text) throw new Error(`${a.cast} has no ${a.lang} catchphrase: pass text`)
+        const config = await loadVoiceConfig(svc.dataDir)
+        const model = a.model ?? (member.voice as Record<string, { elevenlabs?: { model?: string } } | undefined>)[a.lang]?.elevenlabs?.model ?? config.elevenlabs.model
+        const { flow } = await svc.studios()
+        const e = await probeEleven(flow, config)
+        if (!e) throw new Error('E_ELEVEN_API: this flow-music-mcp client has no ElevenLabs status')
+        if (!e.up) throw new Error(e.reason?.startsWith('E_ELEVEN_') ? e.reason : `E_ELEVEN_KEY: ElevenLabs is not ready (${e.reason})`)
+        const mult = e.status.models.find((m) => m.id === model)?.multiplier ?? 1
+        const estimate = a.voiceIds.length * Math.ceil(text.length * mult)
+        if (estimate > e.left) throw new Error(`E_ELEVEN_QUOTA: ${a.voiceIds.length} audition(s) need about ${estimate} credit(s); ${e.left} are left above the reserve of ${e.reserve}. Nothing was sent.`)
+        const dir = path.join(st.paths(a.series).castDir(a.cast), 'voice')
+        const tmp = path.join(svc.dataDir, 'state', 'tmp', `audition-${a.series}-${a.cast}-${process.pid}`)
+        await fs.mkdir(tmp, { recursive: true })
+        const clips: { voiceId: string; file: string; seconds: number; credits: number }[] = []
+        let credits = 0
+        let remainingAfter: number | null = null
+        let error: string | undefined
+        try {
+          for (const voiceId of a.voiceIds) {
+            const name = `audition-${a.lang}-${voiceId.replace(/[^A-Za-z0-9_-]/g, '_')}${model !== DEFAULT_ELEVEN_MODEL ? `-${model.replace(/[^A-Za-z0-9_-]/g, '_')}` : ''}`
+            try {
+              const r = await flow.narrate({ text, engine: 'elevenlabs', voice: voiceId, model, language: a.language ?? a.lang, timestamps: false, out: tmp, name, format: 'wav' })
+              const spent = r.creditsEstimate ?? Math.ceil(text.length * mult)
+              credits += spent
+              remainingAfter = r.remainingAfter ?? remainingAfter
+              if (a.episode) await recordElevenCredits({ store: st, series: a.series, episode: a.episode, model: r.model ?? model, what: `audition ${a.cast} ${a.lang} ${voiceId}`, amount: spent })
+              const out = path.join(dir, `${name}.wav`)
+              const norm = await normaliseWav(r.file, out)
+              await fs.rm(r.file, { force: true }).catch(() => undefined)
+              clips.push({ voiceId, file: path.relative(st.paths(a.series).root, out).split(path.sep).join('/'), seconds: Math.round(norm.seconds * 100) / 100, credits: spent })
+            } catch (err) {
+              const msg = (err as Error).message
+              error = `${voiceId}: ${msg.split('\n')[0]!.slice(0, 240)}`
+              if (elevenCodeOf(msg)) break
+            }
+          }
+        } finally {
+          await fs.rm(tmp, { recursive: true, force: true }).catch(() => undefined)
+        }
+        return {
+          cast: a.cast,
+          lang: a.lang,
+          model,
+          text,
+          clips,
+          credits,
+          remainingAfter,
+          ledger: a.episode ? `episodes/${a.episode}/spend.json` : null,
+          ...(a.episode ? {} : { hint: 'no episode given: the credits are not in any spend.json; add them to the run log' }),
+          ...(error ? { error } : {})
+        }
       }
     ),
     def(

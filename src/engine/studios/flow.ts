@@ -77,14 +77,82 @@ export interface FlowVideo {
 
 export interface NarrateArgs {
   text: string
-  engine: 'gemini' | 'windows'
+  /** `gemini` and `windows` are free; `elevenlabs` spends free-tier credits (flow-music-mcp refuses past the free quota and any paid tier). Never the paid `flow`. */
+  engine: 'gemini' | 'windows' | 'elevenlabs'
+  /** A Gemini or Windows voice name, or an ElevenLabs voiceId. */
   voice: string
   style?: string
+  /** Engine elevenlabs: the model (flow-music-mcp's default `eleven_multilingual_v2`), the voice settings, the line's language, word times (default on). */
+  model?: string
+  voiceSettings?: { stability?: number; similarity_boost?: number; style?: number; speed?: number; use_speaker_boost?: boolean }
+  language?: string
+  timestamps?: boolean
   /** Absolute output folder and file stem. */
   out: string
   name: string
   format: 'mp3' | 'wav' | 'ogg' | 'm4a'
   signal?: AbortSignal
+}
+
+/** What `flow_narrate` returned. The ElevenLabs fields are set for engine `elevenlabs` only. */
+export interface Narration {
+  file: string
+  durationSec?: number
+  /** ElevenLabs: the model that spoke. */
+  model?: string
+  /** ElevenLabs: word times in seconds from the start of `file` (the file is loudnormed, 48 kHz stereo, not trimmed). */
+  words?: { w: string; t0: number; t1: number }[]
+  characters?: number
+  /** ElevenLabs: the credits the line cost (characters x the model's multiplier). */
+  creditsEstimate?: number
+  /** ElevenLabs: the credits left after the line, when known. */
+  remainingAfter?: number | null
+}
+
+/** An ElevenLabs model as `flow_elevenlabs_status` reads it: does text to speech, reads hr / en, credits per character. */
+export interface ElevenModelInfo {
+  id: string
+  tts: boolean
+  hr: boolean
+  en: boolean
+  multiplier: number
+}
+
+/**
+ * `flow_elevenlabs_status` (FMM-17): the free-tier account. `ready: false` with `hint` (and `code` when the API refused) when there is no key,
+ * the key is refused, or flow-music-mcp is not running. The key itself never appears.
+ */
+export interface ElevenStatus {
+  ready: boolean
+  /** Where the key was found: `env`, `env:ELEVEN_CREATOR_KEY` or `file` (shown as is; the key value never). */
+  source?: string
+  tier?: string
+  used?: number
+  limit?: number
+  remaining?: number
+  reserve?: number
+  resetAt?: string | null
+  paidRisk?: boolean
+  models: ElevenModelInfo[]
+  code?: string
+  hint?: string
+}
+
+/** A voice of `flow_elevenlabs_voices`; free API users pick `category: "premade"`. */
+export interface ElevenVoiceInfo {
+  voiceId: string
+  name: string
+  category: string
+  labels: { gender?: string; age?: string; accent?: string; description?: string }
+}
+
+/** The ElevenLabs error codes flow-music-mcp puts at the start of a tool error (`E_ELEVEN_QUOTA: ...`). */
+export const ELEVEN_CODES = ['E_ELEVEN_KEY', 'E_ELEVEN_QUOTA', 'E_ELEVEN_PAID_TIER', 'E_ELEVEN_LANG', 'E_ELEVEN_BLOCKED', 'E_ELEVEN_MODEL', 'E_ELEVEN_API'] as const
+export type ElevenCode = (typeof ELEVEN_CODES)[number]
+/** The ElevenLabs code in an error message, or undefined. */
+export function elevenCodeOf(message: string): ElevenCode | undefined {
+  const m = /\b(E_ELEVEN_(?:KEY|QUOTA|PAID_TIER|LANG|BLOCKED|MODEL|API))\b/.exec(message)
+  return m ? (m[1] as ElevenCode) : undefined
 }
 
 export interface SongArgs {
@@ -127,7 +195,11 @@ export interface FlowClient {
   /** Optional so older fakes still type-check: a video scene (`flow_generate` `type: "video"`). The callers check it exists. */
   generateVideo?(args: FlowVideoArgs): Promise<FlowVideo>
   voices(signal?: AbortSignal): Promise<FlowVoices>
-  narrate(args: NarrateArgs): Promise<{ file: string; durationSec?: number }>
+  narrate(args: NarrateArgs): Promise<Narration>
+  /** Optional so older fakes still type-check (HUB-31): the ElevenLabs free-tier account (`flow_elevenlabs_status`). Never throws: down is `ready: false`. */
+  elevenStatus?(signal?: AbortSignal): Promise<ElevenStatus>
+  /** Optional (HUB-31): the account's ElevenLabs voices (`flow_elevenlabs_voices`). */
+  elevenVoices?(signal?: AbortSignal): Promise<ElevenVoiceInfo[]>
   song(args: SongArgs): Promise<FlowSong>
   /** Optional so older fakes still type-check: whisper word times of a local audio file (`flow_transcribe`, local and free). The language is always passed (auto misdetects Croatian). */
   transcribe?(file: string, language: string, signal?: AbortSignal): Promise<FlowTranscript>
@@ -298,10 +370,75 @@ export function createFlowClient(opts: FlowClientOptions): FlowClient {
 
     async narrate(a) {
       // never the paid engine `flow`
-      const r = await call('flow_narrate', { text: a.text, engine: a.engine, voice: a.voice, ...(a.style ? { style: a.style } : {}), out: a.out, name: a.name, format: a.format }, 120_000, a.signal)
+      const eleven =
+        a.engine === 'elevenlabs'
+          ? { ...(a.model ? { model: a.model } : {}), ...(a.voiceSettings ? { voice_settings: a.voiceSettings } : {}), ...(a.language ? { language: a.language } : {}), timestamps: a.timestamps ?? true }
+          : {}
+      const r = await call('flow_narrate', { text: a.text, engine: a.engine, voice: a.voice, ...(a.style && a.engine !== 'elevenlabs' ? { style: a.style } : {}), ...eleven, out: a.out, name: a.name, format: a.format }, 120_000, a.signal)
       const file = String(r.output ?? r.file ?? '')
       if (!file) throw new FlowError('flow_narrate returned no file', 'tool')
-      return { file, ...(typeof r.duration === 'number' ? { durationSec: r.duration } : {}) }
+      const dur = typeof r.durationSec === 'number' ? r.durationSec : typeof r.duration === 'number' ? r.duration : undefined
+      const words = Array.isArray(r.words)
+        ? (r.words as { w?: unknown; t0?: unknown; t1?: unknown }[])
+            .filter((x) => typeof x.w === 'string' && typeof x.t0 === 'number' && typeof x.t1 === 'number')
+            .map((x) => ({ w: x.w as string, t0: x.t0 as number, t1: x.t1 as number }))
+        : undefined
+      return {
+        file,
+        ...(dur !== undefined ? { durationSec: dur } : {}),
+        ...(typeof r.model === 'string' ? { model: r.model } : {}),
+        ...(words ? { words } : {}),
+        ...(typeof r.characters === 'number' ? { characters: r.characters } : {}),
+        ...(typeof r.credits_estimate === 'number' ? { creditsEstimate: r.credits_estimate } : {}),
+        ...(a.engine === 'elevenlabs' ? { remainingAfter: typeof r.remaining_after === 'number' ? r.remaining_after : null } : {})
+      }
+    },
+
+    async elevenStatus(signal) {
+      let r: Record<string, unknown>
+      try {
+        r = await call('flow_elevenlabs_status', {}, timeoutMs, signal)
+      } catch (e) {
+        const msg = (e as Error).message
+        return { ready: false, models: [], hint: e instanceof FlowError && e.kind === 'unreachable' ? msg : `flow_elevenlabs_status failed: ${msg.split('\n')[0]!.slice(0, 200)}` }
+      }
+      const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+      const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined)
+      const models = ((r.models as Partial<ElevenModelInfo>[] | undefined) ?? [])
+        .filter((m) => typeof m.id === 'string')
+        .map((m) => ({ id: m.id!, tts: m.tts !== false, hr: m.hr === true, en: m.en === true, multiplier: num(m.multiplier) ?? 1 }))
+      const st: ElevenStatus = { ready: r.ready === true, models }
+      if (typeof r.source === 'string') st.source = r.source
+      if (str(r.tier) !== undefined) st.tier = str(r.tier)
+      if (num(r.used) !== undefined) st.used = num(r.used)
+      if (num(r.limit) !== undefined) st.limit = num(r.limit)
+      if (num(r.remaining) !== undefined) st.remaining = num(r.remaining)
+      if (num(r.reserve) !== undefined) st.reserve = num(r.reserve)
+      if (typeof r.resetAt === 'string' || r.resetAt === null) st.resetAt = r.resetAt
+      if (typeof r.paidRisk === 'boolean') st.paidRisk = r.paidRisk
+      if (str(r.code) !== undefined) st.code = str(r.code)
+      if (str(r.hint) !== undefined) st.hint = str(r.hint)
+      return st
+    },
+
+    async elevenVoices(signal) {
+      let res: { text: string; json: Record<string, unknown> | null }
+      try {
+        res = await mcp.callTool('flow_elevenlabs_voices', {}, { timeoutMs, signal })
+      } catch (e) {
+        throw flowError(e, eo)
+      }
+      let list: unknown = res.json?.result
+      if (!Array.isArray(list)) {
+        try {
+          list = JSON.parse(res.text)
+        } catch {
+          list = []
+        }
+      }
+      return (Array.isArray(list) ? (list as Partial<ElevenVoiceInfo>[]) : [])
+        .filter((v) => typeof v.voiceId === 'string')
+        .map((v) => ({ voiceId: v.voiceId!, name: String(v.name ?? ''), category: String(v.category ?? ''), labels: { ...(v.labels ?? {}) } }))
     },
 
     async song(a) {

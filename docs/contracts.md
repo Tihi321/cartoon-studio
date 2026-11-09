@@ -35,7 +35,7 @@ The series: title and logline in both languages, audience, tone, style (palette,
 waits (state `waiting-on-user`) until `chosenPitch` is the id of one of them, set by the user (`cts_pitch_choose` or the studio). A cast
 member's `voice` has one entry per language: `provider` (`auto` follows the allocation rule), a Gemini voice name, a VibeTTS voice, and for
 the local OmniVoice engine `comfy`: `engine`, `instruct` (attribute tags such as "female, child, high pitch", not free style words),
-an optional reference clip `ref` with its transcript `refText`, and a `seed`. A cast member's optional `sheet` (CTS-12) is set by `cts_sheet_approve` when the user approved
+an optional reference clip `ref` with its transcript `refText`, and a `seed`. HUB-31: an optional `elevenlabs` voice `{ voiceId, name, model?, settings?: { stability, similarity_boost, style, speed } }` (a premade voice of the account, picked by audition; `model` defaults to `config/voice.md` `elevenlabs.model`); a language goes to ElevenLabs only when every speaker has one, and `provider: "elevenlabs"` still obeys the free credits. A cast member's optional `sheet` (CTS-12) is set by `cts_sheet_approve` when the user approved
 the character sheet `cast/<id>/sheet.png`: `approvedAt` (local ISO time) and the `seed`, `denoise` and image `model` the master `cast/<id>/ref.png` was made with. It is absent until the approval
 (and for characters made before the sheet step); the pipeline stops at the gate `sheet_review` until every cast member has one. For a 3D character the approval holds `approvedAt` and `specHash` (see below) instead.
 
@@ -219,13 +219,18 @@ One entry per line. `status`: `ok`, `placeholder` (silence of the estimated leng
 `W_PLACEHOLDER`) or `failed`. `words` is `[{ "w": "...", "t0": 0.1, "t1": 0.4 }]` when a provider or whisper gives them, else `null`. A Blender series fills it after voicing from `flow_transcribe` (whisper.cpp, language always passed): the script words that whisper heard, in the script's spelling with whisper's times, and `wordsCoverage` (0..1, aligned words / script words; under 0.7 the lip-sync uses the text method).
 `file` is relative to the episode folder. A clip is re-made only when its `hash` changes.
 
+HUB-31: a line spoken by ElevenLabs has `provider: "elevenlabs"`, `engine` the model, `voice` the voiceId, and `words` from ElevenLabs' alignment of the script text, moved onto the trimmed clip (`t - leadTrimS`, clamped to `[0, seconds]`; `leadTrimS` is the lead silence the trim cut), with `wordsCoverage: 1` and `wordsFrom: "elevenlabs"`. Whisper words carry `wordsFrom: "whisper"`. Lint warns `W_VOICE_MIXED` when a language mixes ElevenLabs with another provider (ElevenLabs stopped mid-run) and `W_VOICE_ID_CHANGED` when an ElevenLabs line's `voice` is not the speaker's bible voiceId.
+
 ```json
 {
   "schema": "cts.voice/1", "episode": "ep00-pilot", "lang": "hr",
   "allocation": { "provider": "comfy", "reason": "14 clips > 10 left of the Gemini quota (Croatian first)" },
   "lines": {
     "l01": { "file": "voice/hr/l01.wav", "seconds": 2.31, "provider": "comfy", "engine": "omnivoice", "voice": "female, child, high pitch", "speed": 1.0,
-             "hash": "3f2a9c", "words": null, "status": "ok" }
+             "hash": "3f2a9c", "words": null, "status": "ok" },
+    "l02": { "file": "voice/hr/l02.wav", "seconds": 1.42, "provider": "elevenlabs", "engine": "eleven_multilingual_v2", "voice": "voice-id-of-mia", "speed": 1.0,
+             "hash": "9b1e44", "words": [ { "w": "Vau", "t0": 0.15, "t1": 0.48 }, { "w": "kakav", "t0": 0.55, "t1": 0.86 }, { "w": "park", "t0": 0.9, "t1": 1.27 } ],
+             "wordsCoverage": 1, "wordsFrom": "elevenlabs", "status": "ok" }
   },
   "costUsd": 0
 }
@@ -539,7 +544,8 @@ critic's verdict; `fallback: true` drops the clip (the beat renders the cutout f
 ## Budget and spend `episodes/<ep>/budget.json`, `spend.json`
 
 No `budget.json` means both caps are 0, so nothing paid runs. `capUsd` caps money, `flowCreditsCap` caps Flow credits. `spend.json` is
-the ledger, one entry per paid call, appended after it (`currency` `usd` or `credits`).
+the ledger, one entry per paid call, appended after it (`currency` `usd` or `credits`). HUB-31: ElevenLabs free-tier lines and auditions are
+recorded too, as `currency: "eleven-credits"` (never money, no cap here: flow-music-mcp refuses past the free quota).
 
 ```json
 { "schema": "cts.budget/1", "capUsd": 0, "flowCreditsCap": 50, "approvedBy": "user", "approvedAt": "2026-11-07T10:00:00Z", "note": "pilot: no paid images, 50 Flow credits" }
@@ -548,7 +554,10 @@ the ledger, one entry per paid call, appended after it (`currency` `usd` or `cre
 ```json
 {
   "schema": "cts.spend/1",
-  "entries": [ { "t": "2026-11-07T11:30:00Z", "provider": "flow", "model": "veo-3-fast", "what": "intro clip", "currency": "credits", "amount": 12 } ]
+  "entries": [
+    { "t": "2026-11-07T11:30:00Z", "provider": "flow", "model": "veo-3-fast", "what": "intro clip", "currency": "credits", "amount": 12 },
+    { "t": "2026-11-09T10:05:00Z", "provider": "elevenlabs", "model": "eleven_multilingual_v2", "what": "voice hr l02", "currency": "eleven-credits", "amount": 15 }
+  ]
 }
 ```
 
@@ -607,6 +616,8 @@ Errors fail a step; warnings are listed. Every issue has `code`, `message`, `fil
 | `W_OFF_FRAME` | a speaking actor's feet point is outside the camera rectangle |
 | `W_LANG_DRIFT` | the languages' durations differ by more than 25 % |
 | `W_PLACEHOLDER` | a voice line is a silent placeholder |
+| `W_VOICE_MIXED` | a language's voice lines mix ElevenLabs with another provider (ElevenLabs ran out in the middle of the language) |
+| `W_VOICE_ID_CHANGED` | an ElevenLabs line's `voice` differs from its speaker's bible `elevenlabs.voiceId` (`cts_voice_plan` also warns when the bible's id differs from the one the character's first episode used) |
 
 The result also carries `rigs` (one `cts_rig_check` result per cast member of the episode) and `stats.lines`: per line and language the
 share of animation frames whose mouth is not `rest` (acceptance A9: at least 0.6).

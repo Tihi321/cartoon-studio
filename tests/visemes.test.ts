@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { decodeMono16k } from '../src/engine/anim/lipsync'
 import { alignWords, visemeTrack } from '../src/engine/anim/visemes'
+import { normaliseWav, shiftWords } from '../src/engine/voice/audio'
 
 let dir: string | undefined
 afterEach(async () => {
@@ -98,5 +99,17 @@ describe('six-viseme lip-sync', () => {
     expect(track.shapes.find((s) => s !== 'rest')).toBe('MBP')
     expect(new Set(track.shapes)).toEqual(new Set(['rest', 'MBP', 'E', 'U', 'O']))
     expect(runs(track.shapes).filter((r) => r.startsWith('MBP')).every((r) => Number(r.split('*')[1]) >= 2)).toBe(true)
+  })
+
+  it('ElevenLabs words follow the trimmed lead silence: 0.4 s of silence, words from 0.42 s, stored from about 0.17 s (0.15 s kept)', async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'cts-eleven-words-'))
+    const raw = path.join(dir, 'raw.wav')
+    await writeFile(raw, wav([[0.4, 0], [1.0, 0.5], [0.3, 0]]))
+    const norm = await normaliseWav(raw, path.join(dir, 'clip.wav'))
+    expect(norm.leadTrimS).toBeCloseTo(0.25, 1)
+    const words = shiftWords([{ w: 'Bruno', t0: 0.42, t1: 0.8 }, { w: 'čekaj', t0: 0.85, t1: 1.38 }, { w: 'malo', t0: 1.38, t1: 9 }], norm.leadTrimS, norm.seconds)
+    expect(words[0]!.t0).toBeGreaterThan(0.12)
+    expect(words[0]!.t0).toBeLessThan(0.22)
+    expect(words.every((x) => x.t0 >= 0 && x.t1 <= norm.seconds && x.t0 <= x.t1)).toBe(true)
   })
 })

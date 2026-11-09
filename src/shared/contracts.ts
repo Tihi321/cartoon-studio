@@ -66,9 +66,31 @@ export const comfyVoiceSchema = z.strictObject({
   seed: z.number().int()
 })
 
-export const VOICE_PROVIDERS = ['auto', 'gemini', 'comfy', 'vibetts', 'paid'] as const
+/**
+ * ElevenLabs (HUB-31 decision 5): a premade voice of the account (`flow_elevenlabs_voices`), its model and settings, the same in every episode.
+ * `voiceId` is what the manifest line's `voice` holds; `name` is for people.
+ */
+export const elevenVoiceSchema = z.strictObject({
+  voiceId: z.string().min(1),
+  name: z.string(),
+  /** Missing: the series default (`config/voice.md` `elevenlabs.model`, `eleven_multilingual_v2`). */
+  model: z.string().min(1).optional(),
+  settings: z
+    .strictObject({
+      stability: z.number().min(0).max(1),
+      similarity_boost: z.number().min(0).max(1),
+      style: z.number().min(0).max(1),
+      speed: z.number().min(0.7).max(1.2)
+    })
+    .optional()
+})
+export type ElevenVoice = z.infer<typeof elevenVoiceSchema>
+
+export const VOICE_PROVIDERS = ['auto', 'elevenlabs', 'gemini', 'comfy', 'vibetts', 'paid'] as const
 export const voiceSpecSchema = z.strictObject({
   provider: z.enum(VOICE_PROVIDERS),
+  /** HUB-31: the character's ElevenLabs voice in this language; without it the language's lines cannot go to ElevenLabs. */
+  elevenlabs: elevenVoiceSchema.optional(),
   gemini: z.string().optional(),
   comfy: comfyVoiceSchema.optional(),
   vibetts: z.string().optional(),
@@ -351,6 +373,8 @@ export const voiceLineSchema = z.strictObject({
   words: z.array(z.strictObject({ w: z.string(), t0: z.number(), t1: z.number() })).nullable(),
   /** Share of the script words in `words` (0..1), set with them; under 0.7 the lip-sync uses the text method. */
   wordsCoverage: z.number().min(0).max(1).optional(),
+  /** Where `words` came from (HUB-31): `elevenlabs` (the alignment of the script text, shifted by the trimmed lead silence; coverage 1) or `whisper`. */
+  wordsFrom: z.enum(['elevenlabs', 'whisper']).optional(),
   status: z.enum(VOICE_STATUSES)
 })
 export type VoiceLine = z.infer<typeof voiceLineSchema>
@@ -797,7 +821,8 @@ export const spendEntrySchema = z.strictObject({
   provider: z.string(),
   model: z.string(),
   what: z.string(),
-  currency: z.enum(['usd', 'credits']),
+  /** `usd` money, `credits` Flow credits, `eleven-credits` ElevenLabs free-tier credits (HUB-31: recorded, never money). */
+  currency: z.enum(['usd', 'credits', 'eleven-credits']),
   amount: z.number().nonnegative()
 })
 /** episodes/<ep>/spend.json: the ledger, appended after each paid call. */

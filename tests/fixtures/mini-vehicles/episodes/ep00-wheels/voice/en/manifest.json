@@ -2,7 +2,7 @@
   "schema": "cts.voice/1",
   "episode": "ep00-wheels",
   "lang": "en",
-  "allocation": { "provider": "elevenlabs", "reason": "fixture: a fake ElevenLabs line with alignment word times" },
+  "allocation": { "provider": "elevenlabs", "reason": "fixture: fake ElevenLabs lines with alignment word times" },
   "lines": {
     "l01": {
       "file": "voice/en/l01.wav",
@@ -18,17 +18,25 @@
         { "w": "Bruno", "t0": 0.68, "t1": 0.95 }
       ],
       "wordsCoverage": 1,
+      "wordsFrom": "elevenlabs",
       "status": "ok"
     },
     "l02": {
       "file": "voice/en/l02.wav",
       "seconds": 0.8,
-      "provider": "vibetts",
-      "engine": "fixture",
-      "voice": "tone",
+      "provider": "elevenlabs",
+      "engine": "eleven_multilingual_v2",
+      "voice": "fixture-voice-bruno",
       "speed": 1,
       "hash": "fixture-en-l02",
-      "words": null,
+      "words": [
+        { "w": "Oh", "t0": 0.04, "t1": 0.18 },
+        { "w": "Good", "t0": 0.24, "t1": 0.4 },
+        { "w": "morning", "t0": 0.4, "t1": 0.62 },
+        { "w": "Pip", "t0": 0.64, "t1": 0.78 }
+      ],
+      "wordsCoverage": 1,
+      "wordsFrom": "elevenlabs",
       "status": "ok"
     }
   },
