@@ -8,6 +8,7 @@
     torus      [R, r, sx?]  (a ring around z; sx stretches x)
     arc        [R, r, sweep degrees?]  (a tube along an arc in the XZ plane, default 140, bulging down like a smile, centred on its middle)
     spines     [rx, ry, rz]  (the radii of the surface the spines grow from; see `spines_mesh`)
+    cylinder   [radius, length]  (HUB-31: along z, centred; one number: length = 2 x radius; three: rx, ry, length) for wheels, chimneys, buffers
 
 z is up, -y is the front of a character; `_L` parts sit at -x (the viewer's left when the character faces the camera).
 """
@@ -19,7 +20,7 @@ from mathutils import Euler, Matrix, Vector
 
 from .io import CtsError
 
-SHAPES = ("ellipsoid", "cone", "box", "capsule", "torus", "arc", "spines")
+SHAPES = ("ellipsoid", "cone", "box", "capsule", "torus", "arc", "spines", "cylinder")
 
 
 def _radii3(size):
@@ -137,6 +138,15 @@ def spines_mesh(size, count, length, rad, keep, lean):
     return bm
 
 
+def _cyl3(size):
+    """A cylinder part size as (rx, ry, length): [r] is r, r, 2r; [r, length]; [rx, ry, length]."""
+    if len(size) == 1:
+        return (size[0], size[0], 2 * size[0])
+    if len(size) == 2:
+        return (size[0], size[0], size[1])
+    return tuple(size[:3])
+
+
 def mesh_for(part):
     """The bmesh of a character part dict (`shape`, `size`, `spines`)."""
     shape, size = part["shape"], part["size"]
@@ -152,6 +162,8 @@ def mesh_for(part):
         return torus(size)
     if shape == "arc":
         return arc(size)
+    if shape == "cylinder":
+        return cylinder(_cyl3(size))
     if shape == "spines":
         sp = part.get("spines")
         if not sp:
@@ -172,6 +184,9 @@ def extent(part):
     if shape == "torus":
         sx = size[2] if len(size) > 2 else 1.0
         return (size[0] * sx + size[1], size[0] + size[1], size[1])
+    if shape == "cylinder":
+        rx, ry, length = _cyl3(size)
+        return (rx, ry, length / 2)
     return (size[0], size[1], size[0])
 
 
@@ -230,3 +245,24 @@ def add_ellipsoid(bm, radii, loc=(0, 0, 0), seg=20):
 
 def new_bm():
     return bmesh.new()
+
+
+def rounded_slab(half_w, half_d, half_h, radius, seg=6):
+    """A rounded rectangle in the XZ plane (half width, half height, corner radius) extruded along y (half depth): a vehicle's bumper-mouth slot."""
+    radius = max(1e-5, min(radius, half_w * 0.999, half_h * 0.999))
+    ring = []
+    for cx, cz, a0 in ((half_w - radius, half_h - radius, 0), (-half_w + radius, half_h - radius, 90), (-half_w + radius, -half_h + radius, 180), (half_w - radius, -half_h + radius, 270)):
+        for i in range(seg + 1):
+            a = math.radians(a0 + 90 * i / seg)
+            ring.append((cx + radius * math.cos(a), cz + radius * math.sin(a)))
+    bm = bmesh.new()
+    front = [bm.verts.new((x, -half_d, z)) for x, z in ring]
+    back = [bm.verts.new((x, half_d, z)) for x, z in ring]
+    n = len(ring)
+    bm.faces.new(front)
+    bm.faces.new(list(reversed(back)))
+    for i in range(n):
+        j = (i + 1) % n
+        bm.faces.new((front[i], back[i], back[j], front[j]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return bm

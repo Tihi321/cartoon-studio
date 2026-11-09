@@ -15,6 +15,10 @@ The bible (title, tone, the series palette and look, the cast member's name, rol
 4. The face sits **on** the head: compute the head surface at the eyes and mouth (the guide has the formula) and keep `faceY` and `mouth.at` in front of it. Eyes `r` 0.05 to 0.08 for a big-eyed, child-friendly look; `pupil.size` about 0.55 r.
 5. Give the motion profile a personality: `tempo` 1.4 and `hop` for a quick bouncy one, 0.75 and `waddle` for a heavy slow one; `energy` and `bounce` agree with it.
 6. Nothing frightening: no sharp teeth, no weapons, no dark staring eyes. Spines are soft cones.
+7. **A vehicle** (the cast member's `look` is a car, a train engine ...): set `"kind": "vehicle"` and start from the vehicle example in the guide (a small zippy car: the Pip car; a big slow engine: the Bruno engine). No arm, hand or leg controls ever (`E_VEHICLE_LIMB`); one `wheel_<n>` control per wheel at the wheel centre, `z` = `vehicle.wheelRadius`, with a `cylinder` tyre `rot [0, 90, 0]`; `motion.drive` (`zip` quick and bouncy, `chug` slow and heavy) instead of `walk`. Keep the lamp-eyes rule:
+   - **The eyes are the vehicle's own front lamps** (`face.eyes` with `lamp {glow, rim}`): on a car raised on top of the front wings, close together; on a train low on the nose, on the buffer-beam line. The hood is the lid; `brows` are small chrome or brass visors.
+   - **The mouth is the bumper slot** (car) or **the buffer-beam slot** (train), under the lamps.
+   - **Not like this:** no eyes in the windscreen or a cab window (windows stay plain tinted glass), no face on a round smokebox door (a train's front is a flat rounded-rectangle nose), no human nose, no cheeks (keep buffers small and dark), no sculpted face plate.
 
 ## After the build
 - `ok: false, code: "E_FACE_HIDDEN"`: the message says which feature; move it forward or shrink the part in front of it.

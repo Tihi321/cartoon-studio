@@ -5,6 +5,8 @@ Character sheet (`sheet.png`, 2048 x 1024, the pieces in `sheet/`):
     row 1  front, three-quarter, side, back (1024 x 1024 each in `sheet/`, shown at 512)
     row 2  the six mouths (REST A E O U MBP), blink, half lid        (512 x 512 each, shown at 256)
     row 3  neutral, happy, sad, surprised, look left, look right      (512 x 512 each, shown at 256)
+A vehicle (HUB-31) gets a fourth row and a 2048 x 1280 sheet:
+    row 4  squash, stretch, lean left, lean right, nose up, honk (a car) or puff (a train with a chimney)   (the whole vehicle, 512 shown at 256)
 Set sheet: see `set_sheet` (four views).
 """
 import os
@@ -15,7 +17,7 @@ import numpy as np
 from mathutils import Vector
 
 from . import command, materials as M
-from .build_character import SLOTS, find_rig, lid_pose, show_mouth
+from .build_character import LAMP_PROP, SLOTS, find_rig, lid_pose, show_mouth
 from .io import CtsError, progress
 
 BACKDROP = {"top": "#f1ece0", "horizon": "#f1ece0"}
@@ -119,6 +121,7 @@ class Posing:
         self.rig = rig
         self.rest = {n: (ob.location.copy(), ob.rotation_euler.copy(), ob.scale.copy()) for n, ob in rig["controls"].items()}
         self.slots = {k: ob.scale.copy() for k, ob in rig["slots"].items()}
+        self.puffs = {ob.name: (ob.location.copy(), ob.scale.copy()) for obs in (rig.get("puffs") or {}).values() for ob in obs}
 
     def reset(self):
         for n, (loc, rot, sc) in self.rest.items():
@@ -126,6 +129,19 @@ class Posing:
             ob.location, ob.rotation_euler, ob.scale = loc.copy(), rot.copy(), sc.copy()
         for k, s in self.slots.items():
             self.rig["slots"][k].scale = s.copy()
+        for obs in (self.rig.get("puffs") or {}).values():
+            for ob in obs:
+                loc, sc = self.puffs[ob.name]
+                ob.location, ob.scale = loc.copy(), sc.copy()
+        if self.rig.get("lamp") is not None:
+            self.glow(0.0)
+
+    def glow(self, amount):
+        """Sets the lamp glow (0..1) of a vehicle; the driver of the lamp material follows on the next depsgraph update."""
+        lamp = self.rig.get("lamp")
+        if lamp is not None:
+            lamp[LAMP_PROP] = float(amount)
+            lamp.update_tag()
 
     def move(self, name, dx=0.0, dy=0.0, dz=0.0, rot=(0, 0, 0), scale=None):
         ob = self.rig["controls"].get(name)
@@ -158,6 +174,7 @@ def expressions(spec, posing):
             posing.move(f"pupil_{side}", dx=dx * r * 0.45)
 
     out = {}
+    nod = 0.5 if rig.get("kind") == "vehicle" else 1.0  # a vehicle's front block tilts less
 
     def neutral():
         pass
@@ -166,13 +183,13 @@ def expressions(spec, posing):
         show_mouth(rig, "A")
         lids(0.3)
         brows(0.012, 0)
-        posing.move("head", rot=(-6, 0, 0))
+        posing.move("head", rot=(-6 * nod, 0, 0))
 
     def sad():
         show_mouth(rig, "rest", frown=True)
         lids(0.45)
         brows(0.0, -18)
-        posing.move("head", rot=(14, 0, 0))
+        posing.move("head", rot=(14 * nod, 0, 0))
         for side, sx in (("L", -1), ("R", 1)):
             posing.move(f"ear_{side}1", rot=(0, sx * -14, 0))
 
@@ -192,6 +209,53 @@ def expressions(spec, posing):
     out["blink"] = lambda: lids(1.0)
     out["half_lid"] = lambda: lids(0.5)
     return out
+
+
+def vehicle_motions(posing):
+    """The vehicle motion strip: (name, label, yaw of the view, pose). The acting library has the real moves; these show the controls work."""
+    rig = posing.rig
+
+    def squash():
+        posing.move("squash", scale=(1.1, 1.1, 0.84))
+
+    def stretch():
+        posing.move("squash", scale=(0.93, 0.93, 1.14))
+
+    def lean(sign):
+        posing.move("body", rot=(0, sign * 5, 0))
+        posing.move("head", rot=(0, sign * 3, 0))
+
+    def nose_up():
+        posing.move("body", rot=(-5, 0, 0))
+        posing.move("head", rot=(-4, 0, 0))
+        posing.move("squash", scale=(0.98, 0.98, 1.03))
+
+    def honk():
+        posing.move("squash", scale=(0.96, 0.96, 1.06))
+        posing.move("head", rot=(-4, 0, 0), scale=(1.06, 0.94, 1.08))
+        show_mouth(rig, "O")
+        posing.glow(1.0)
+
+    def puff():
+        posing.move("chimney", scale=(0.9, 0.9, 1.22))
+        show_mouth(rig, "O")
+        posing.glow(0.5)
+        obs = rig["puffs"]["chimney"]
+        rp = puff_radius(obs[0])
+        for i, ob in enumerate(obs[:5]):
+            loc, _sc = posing.puffs[ob.name]
+            ob.location = (loc.x + 0.1 * rp * i, loc.y + 0.45 * rp * i, loc.z + 0.4 * rp + 0.9 * rp * i)
+            k = 0.7 + 0.1 * i
+            ob.scale = (k, k, k)
+
+    last = ("puff", "PUFF", 35, puff) if "chimney" in (rig.get("puffs") or {}) else ("honk", "HONK", 35, honk)
+    return [("squash", "SQUASH", 35, squash), ("stretch", "STRETCH", 35, stretch), ("lean_left", "LEAN LEFT", 0, lambda: lean(-1)),
+            ("lean_right", "LEAN RIGHT", 0, lambda: lean(1)), ("nose_up", "NOSE UP", 90, nose_up), last]
+
+
+def puff_radius(ob):
+    """The radius of a puff: the largest half extent of its mesh."""
+    return max(max(abs(c) for c in corner) for corner in ob.bound_box) or 0.1
 
 
 def _bbox_of(rig):
@@ -216,13 +280,15 @@ def character_sheet(rig, spec, style, out_dir):
     bpy.context.view_layer.update()
     lo, hi = _bbox_of(rig)
     radius = max(abs(lo.x), abs(hi.x), abs(lo.y), abs(hi.y))
-    frame = max(hi.z - lo.z, 2 * radius) * 1.18
+    vehicle = rig.get("kind") == "vehicle"
+    frame = max(hi.z - lo.z, 2 * radius) * (1.08 if vehicle else 1.18)
     centre = (0.0, 0.0, (lo.z + hi.z) / 2)
     root = rig["controls"]["root"]
     eyes, mouth = spec["face"]["eyes"], spec["face"]["mouth"]
     head = rig["controls"]["head"]
     tiles = {}
-    total = 4 + len(SLOTS) + 8  # views, mouths, the other face poses
+    motions = vehicle_motions(posing) if vehicle else []
+    total = 4 + len(SLOTS) + 8 + len(motions)  # views, mouths, the other face poses, the vehicle motion strip
     step = [0]
 
     def tick(stage):
@@ -239,7 +305,7 @@ def character_sheet(rig, spec, style, out_dir):
         tick(f"sheet {name}")
     posing.reset()
 
-    face_frame = max(2 * eyes["x"] * 3.4, abs(eyes["z"] - mouth["at"][2]) * 3.9)
+    face_frame = max(2 * eyes["x"] * (2.6 if vehicle else 3.4), abs(eyes["z"] - mouth["at"][2]) * (2.6 if vehicle else 3.9))
     expr = expressions(spec, posing)
 
     def face_shot(name, pose):
@@ -257,9 +323,19 @@ def character_sheet(rig, spec, style, out_dir):
         face_shot(f"mouth_{slot}", lambda s=slot: show_mouth(rig, s))
     for name in ("blink", "half_lid", "neutral", "happy", "sad", "surprised", "look_left", "look_right"):
         face_shot(name, expr[name])
+    for name, _label, yaw, pose in motions:
+        posing.reset()
+        pose()
+        root.rotation_euler.z = posing.rest["root"][1].z + np.radians(yaw)
+        bpy.context.view_layer.update()
+        aim_front(cam, centre, frame)
+        path = os.path.join(parts_dir, f"motion_{name}.png")
+        render_to(sc, path, 512)
+        tiles[f"motion_{name}"] = path
+        tick(f"sheet {name}")
     posing.reset()
 
-    canvas = np.ones((1024, 2048, 4), dtype=np.float32)
+    canvas = np.ones((1280 if motions else 1024, 2048, 4), dtype=np.float32)
     canvas[..., :3] = np.array([0.945, 0.925, 0.878])
     labels = {"front": "FRONT", "three_quarter": "3/4", "side": "SIDE", "back": "BACK", "blink": "BLINK", "half_lid": "HALF LID",
               "neutral": "NEUTRAL", "happy": "HAPPY", "sad": "SAD", "surprised": "SURPRISED", "look_left": "LOOK LEFT", "look_right": "LOOK RIGHT"}
@@ -268,7 +344,9 @@ def character_sheet(rig, spec, style, out_dir):
         draw_label(canvas, labels[name], i * 512 + 10, 10)
     row2 = [f"mouth_{s}" for s in SLOTS] + ["blink", "half_lid"]
     row3 = ["neutral", "happy", "sad", "surprised", "look_left", "look_right"]
-    for y0, row in ((512, row2), (768, row3)):
+    row4 = [f"motion_{m[0]}" for m in motions]
+    labels.update({f"motion_{m[0]}": m[1] for m in motions})
+    for y0, row in ((512, row2), (768, row3), (1024, row4)):
         for i, name in enumerate(row):
             canvas[y0 : y0 + 256, i * 256 : (i + 1) * 256] = shrink(load_pixels(tiles[name]), 2)
             draw_label(canvas, labels.get(name, name.replace("mouth_", "")), i * 256 + 6, y0 + 6, scale=2)

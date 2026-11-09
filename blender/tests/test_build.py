@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""B1: the character builder on the mini3d fixture: every standard control, six mouth slots, outlines; a buried mouth is E_FACE_HIDDEN; the same spec builds to the same hashes."""
+"""B1: the character builder on the mini3d fixture: every standard control, six mouth slots, outlines; a buried mouth is E_FACE_HIDDEN; the same spec builds to the same hashes.
+B1v (HUB-31): the mini-vehicles car: wheel controls, lamp eyes, six mouth slots, outlines, no limb control; a lamp buried in the body is E_FACE_HIDDEN."""
 import copy
 import os
 import unittest
@@ -8,12 +9,13 @@ import bpy
 
 from cts_blender import materials as M
 from cts_blender import build_set as bs
-from cts_blender.build_character import SLOTS, build_character, read_spec, reset_scene
+from cts_blender.build_character import LAMP_PROP, LIMB_RE, SLOTS, build_character, read_spec, reset_scene
 from cts_blender.fingerprint import fingerprint
 from cts_blender.io import CtsError
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 TILLY = os.path.join(ROOT, "tests", "fixtures", "mini3d", "cast", "tilly", "character.json")
+CAR = os.path.join(ROOT, "tests", "fixtures", "mini-vehicles", "cast", "pip", "character.json")
 STANDARD = ["root", "squash", "body", "head", "arm_L", "arm_R", "leg_L", "leg_R", "ear_L1", "ear_R1", "lid_L", "lid_R", "pupil_L", "pupil_R", "mouth"]
 
 
@@ -48,6 +50,33 @@ class Build(unittest.TestCase):
         a = fingerprint(build(spec)["rig"]["objects"])
         b = fingerprint(build(spec)["rig"]["objects"])
         self.assertEqual(a, b)
+
+    def test_vehicle_has_wheels_lamp_eyes_mouth_slots_outlines_and_no_limbs(self):
+        spec = read_spec(CAR)
+        built = build(spec)
+        rig = built["rig"]
+        wheels = {w["control"]: w for w in built["vehicle"]["wheels"]}
+        self.assertEqual(sorted(wheels), sorted(spec["vehicle"]["wheels"]))
+        for w in wheels.values():
+            self.assertIn(w["control"], rig["controls"])
+            self.assertEqual((w["axis"], w["index"], w["radius"]), ("x", 0, spec["vehicle"]["wheelRadius"]))
+        self.assertFalse([n for n in rig["controls"] if LIMB_RE.match(n)])
+        lamps = [o for o in rig["objects"] if "cts_lamp" in o]
+        self.assertEqual(len(lamps), 2)
+        self.assertIs(rig["lamp"], rig["controls"]["head"])
+        self.assertIn(LAMP_PROP, rig["lamp"])
+        self.assertTrue(lamps[0].active_material.node_tree.animation_data.drivers)
+        self.assertEqual(sorted(rig["slots"]), sorted(SLOTS))
+        self.assertEqual([k for k, ob in rig["slots"].items() if ob.scale.x > 0.5], ["rest"])
+        self.assertEqual(len(rig["puffs"]["exhaust"]), 8)
+        self.assertTrue(all(ob.scale.x < 0.01 for ob in rig["puffs"]["exhaust"]))
+        outlined = [o for o in rig["objects"] if "cts_part" in o or "cts_lamp" in o]
+        self.assertTrue(all(any(m.type == "SOLIDIFY" for m in o.modifiers) for o in outlined))
+        bad = copy.deepcopy(spec)
+        bad["face"]["eyes"]["faceY"] += 0.3
+        with self.assertRaises(CtsError) as e:
+            build(bad)
+        self.assertEqual(e.exception.code, "E_FACE_HIDDEN")
 
 
 class BuildSet(unittest.TestCase):
