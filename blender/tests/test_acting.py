@@ -2,7 +2,8 @@
 """B2: the acting library. The registry names equal library.json; each gesture's keys stay inside [t0, t1 + settle] and come back to the rest pose;
 in a 3 m walk each planted foot moves less than 2 cm in world space during its contact phase; a tail spring settles within 1 s after the root stops.
 B2v (HUB-31, vehicles): the registry's bodies equal library.json and each vehicle action keys only its parts; in a 5 m drive the wheels roll the
-distance the root travels (within 2 %) and stay on the ground (within 1 cm); in a chug the wheels stay on the track; honk and bounce settle to rest."""
+distance the root travels (within 2 %) and stay on the ground (within 1 cm); a turn ends on the road's line (within 1 cm, CTS-41); in a chug the
+wheels stay on the track; honk and bounce settle to rest."""
 import copy
 import json
 import re
@@ -189,6 +190,15 @@ class Vehicles(unittest.TestCase):
         body = actor.mix.value("body", "rotation_euler", ("base",))
         self.assertGreater(math.degrees(float(np.abs(body[:, 0]).max())), 1.0, "no squat, nose lift or nose dip")
         self.assertGreater(math.degrees(float(np.abs(body[:, 1]).max())), 0.3, "no roll in the bend")
+
+    def test_turn_ends_on_the_path(self):
+        # CTS-41: a car on a road along x (facing +x) turns round on a short arc and ends on the road's line, not half a metre beside it
+        for facing in ("left", "front"):
+            ctx, actor = fresh_vehicle("pip", 4.0, yaw=90.0)
+            compose.build(ctx, {"pip": {"actions": [{"action": "turn", "t0": 1.0, "t1": 1.6, "params": {"facing": facing}}]}})
+            _x, y, _z, yaw = actor.root(ctx.n - 1)
+            self.assertLess(abs(y), 0.01, f"turn {facing} ends {y:.3f} m off the road")
+            self.assertAlmostEqual(math.degrees(yaw) % 360, {"left": 270.0, "front": 0.0}[facing], delta=0.5)
 
     def test_chug_keeps_the_wheels_on_the_track(self):
         ctx, actor = fresh_vehicle("bruno", 12.0, yaw=31.0)

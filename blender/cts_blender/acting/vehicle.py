@@ -356,7 +356,9 @@ def chug(ctx, actor, t0, t1, params):
 
 
 def turn(ctx, actor, t0, t1, params):
-    """A car turns on a short arc on the ground (wheels rolling); a train cannot turn (it follows its track): nothing happens."""
+    """A car turns on a short arc on the ground (wheels rolling); a train cannot turn (it follows its track): nothing happens. CTS-41: the arc is
+    bent back so the car ends on the line it stood on (its road): the sideways part of the arc's chord is taken out as the turn goes on, only the
+    forward part stays."""
     rig, vi = actor.rig, vinfo(actor.rig)
     f0, f1 = ctx.f(t0), ctx.f(t1)
     clip = Clip(f0, f1)
@@ -376,6 +378,9 @@ def turn(ctx, actor, t0, t1, params):
     ds = np.diff(prog, prepend=0.0) * radius * abs(delta)
     mid = yaw - 0.5 * np.diff(yaw, prepend=yaw[0])
     xy = np.array([x0, y0]) + np.cumsum(np.stack([np.sin(mid), -np.cos(mid)], axis=1) * ds[:, None], axis=0)
+    side = np.array([math.cos(yaw0), math.sin(yaw0)])  # the start heading's right: off the road
+    off = float((xy[-1] - np.array([x0, y0])) @ side)
+    xy = xy - np.outer(prog, side * off)
     _carry(ctx, actor, clip, f0, xy, yaw, np.full(m, z0), A, 0.6)
     clip.meta.update(yaw0=yaw0, yaw1=yaw0 + delta, arc=radius * abs(delta))
     return clip

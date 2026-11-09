@@ -505,7 +505,15 @@ class Clip:
 class Actor:
     def __init__(self, ctx, aid, spec, start):
         self.ctx, self.id, self.rig = ctx, aid, Rig(spec)
+        self.start = dict(start)
+        self.reset()
+
+    def reset(self):
+        """The actor as it was added: standing on its start, no clips, not moving, not seated, not parked (CTS-41: `compose.build` starts from
+        here, so building the same Ctx twice gives the same channels)."""
+        ctx, start = self.ctx, self.start
         self.mix = Mix(ctx.n, self.rig)
+        self.vpark = None
         x, y = start["xy"]
         yaw = math.radians(start.get("yaw", 0.0))
         z = float(start.get("z", 0.0))  # a vehicle stands on the road top or the rail top (HUB-31); a creature on the ground

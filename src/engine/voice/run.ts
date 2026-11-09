@@ -498,7 +498,8 @@ export async function runVoice(inp: VoiceRunInput): Promise<VoiceRunReport> {
             )
           }
           const rel = clipFile(job.lang, job.id)
-          const norm = await normaliseWav(s.file, path.join(epDir, rel))
+          // the lead silence is measured only when word times must move with it (ElevenLabs alignment)
+          const norm = await normaliseWav(s.file, path.join(epDir, rel), { measureLead: s.provider === 'elevenlabs' && !!s.words?.length })
           const seconds = Math.round(norm.seconds * 1000) / 1000
           if (seconds < 0.2) throw new Error(`the audio is ${seconds.toFixed(2)} s long (silent or empty)`)
           const m = manifests.get(job.lang)!

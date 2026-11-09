@@ -577,6 +577,15 @@ def check_face(spec, ctl, part_objs):
             hit, inside = _front_hit(part_objs, pod_low - down * 0.2 * r, down, inside=True)
             if not inside and (hit is None or hit > 1.4 * r):
                 warnings.append(f"the {side} lamp floats above the body: lower it (face.eyes.z) or raise the wing or nose under it")
+        # CTS-41: the visors (face.brows) get the same ray test as the lamps and the mouth, as a warning: a visor inside the nose cannot be seen
+        b = f.get("brows")
+        if b:
+            half = 0.5 * 0.11 * b["length"]
+            for side, sx in (("L", -1), ("R", 1)):
+                centre = _world_pos(head, Vector((sx * abs(b["at"][0]), b["at"][1], b["at"][2])))
+                hit = _front_hit(part_objs, centre - direction * 5.0, direction)
+                if hit is not None and hit - (5.0 - half) < MIN_PROTRUDE * 2 * half:
+                    warnings.append(f"the {side} visor is buried in the body: its front is {(hit - (5.0 - half)) * 1000:.0f} mm in front of the surface; move face.brows.at forward (more negative y) or up")
     return warnings
 
 

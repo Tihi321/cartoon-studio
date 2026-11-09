@@ -14,7 +14,9 @@ Vehicles (HUB-31 CTS-35): a car or a train is long, its root is the middle of th
 When a shot holds a vehicle, the group's width is the ground extent of each body (its rest box, `rig.box`, turned with its yaw), so a 4.4 m
 engine is framed whole; `cu-<vehicle>` frames the face (the lamp eyes and the bumper mouth) from in front of it, turned a little toward the
 -y side (a three-quarter view), never from the side or behind; `ots-<a>-<b>` with a vehicle `a` stands beside a's face, not inside its body.
-A shot of creatures only is computed as before (pilot 3 re-renders unchanged).
+A shot of creatures only is computed as before (pilot 3 re-renders unchanged). CTS-41: the vehicle `wide` checks that no vehicle body stands
+between the camera and another actor's face or top (a ray against each body box); if one does, the camera rises (0.5, 0.75, 1.05 of the distance)
+until both are seen.
 """
 import math
 
@@ -110,6 +112,46 @@ def _frames(ctx, f0, f1):
     return list(range(max(f0, 0), min(max(f1, f0), ctx.n - 1) + 1, 2)) or [max(f0, 0)]
 
 
+def _seen_points(actor, f):
+    """What must stay visible of an actor: a vehicle's face and the top middle of its body, a creature's head."""
+    if not _is_vehicle(actor):
+        return [actor.head_point(f)]
+    x, y, z, _yaw = actor.root(f)
+    _lo, hi = _box(actor)
+    return [_face(actor, f)[0], np.array([x, y, z + 0.9 * float(hi[2])])]
+
+
+def _blocks(actor, f, a, b):
+    """True when the segment a -> b (world points) passes through the body box of a vehicle at frame f (a slab test in the body's own frame)."""
+    x, y, z, yaw = actor.root(f)
+    lo, hi = _box(actor)
+    c, s = math.cos(yaw), math.sin(yaw)
+    inv = lambda p: np.array([c * (p[0] - x) + s * (p[1] - y), -s * (p[0] - x) + c * (p[1] - y), p[2] - z])
+    p, q = inv(a), inv(b)
+    d = q - p
+    t0, t1 = 0.0, 0.98  # the end point itself (on the target's own surface) does not count
+    for k in range(3):
+        if abs(d[k]) < 1e-9:
+            if p[k] < lo[k] or p[k] > hi[k]:
+                return False
+            continue
+        u, v = (lo[k] - p[k]) / d[k], (hi[k] - p[k]) / d[k]
+        t0, t1 = max(t0, min(u, v)), min(t1, max(u, v))
+        if t0 > t1:
+            return False
+    return True
+
+
+def _hidden(ctx, ids, frames, loc):
+    """How many (actor, point, frame) views from the camera `loc` a vehicle body in between blocks."""
+    n = 0
+    for f in frames:
+        for i in ids:
+            for pt in _seen_points(ctx.actors[i], f):
+                n += sum(1 for j in ids if j != i and _is_vehicle(ctx.actors[j]) and _blocks(ctx.actors[j], f, np.asarray(loc, dtype=float), pt))
+    return n
+
+
 def close_up_vehicle(ctx, who, f0, f1, aspect, lens=50.0):
     """The face of a vehicle: lamp eyes and bumper mouth at the middle of the frame, a little above the centre, from in front of the face turned
     toward the -y side (a three-quarter view when the vehicle faces sideways, straight on when it faces the default camera)."""
@@ -144,6 +186,9 @@ def over_shoulder_vehicle(ctx, a, b, f0, f1, aspect, lens=40.0):
     return {"loc": [float(cam[0]), float(cam[1]), float(pa[2]) + 0.35], "target": [float(pb[0]), float(pb[1]), float(pb[2])], "lens": lens}
 
 
+RISES = (0.3, 0.5, 0.75, 1.05)
+
+
 def wide(ctx, f0, f1, aspect, lens=32.0):
     ids = list(ctx.actors)
     tr = _track(ctx, ids, f0, f1)
@@ -163,8 +208,20 @@ def wide(ctx, f0, f1, aspect, lens=32.0):
     ymid = float(np.mean(np.concatenate([tr[i][:, 1] for i in ids])))
     tz = float(np.clip((zmin + zmax) / 2 + 0.08 * vis_h, zmax - 0.37 * vis_h, zmin + 0.37 * vis_h))
     # vehicles: a higher camera looks over a long body in front (an engine on a track toward the camera) onto the road and the rails
-    rise = 0.3 if any(_is_vehicle(ctx.actors[i]) for i in ids) else 0.16
-    return {"loc": [cx, ymid - d, tz + rise * d], "target": [cx, ymid, tz], "lens": lens}
+    if not any(_is_vehicle(ctx.actors[i]) for i in ids):
+        return {"loc": [cx, ymid - d, tz + 0.16 * d], "target": [cx, ymid, tz], "lens": lens}
+    # CTS-41: when a body near the camera still hides another actor's face or top, the camera rises until both are seen (the least hidden height
+    # wins when none is clear)
+    frames = _frames(ctx, f0, f1)
+    best = None
+    for rise in RISES:
+        loc = [cx, ymid - d, tz + rise * d]
+        hid = _hidden(ctx, ids, frames, loc)
+        if best is None or hid < best[0]:
+            best = (hid, loc)
+        if hid == 0:
+            break
+    return {"loc": best[1], "target": [cx, ymid, tz], "lens": lens}
 
 
 def two(ctx, a, b, f0, f1, aspect, lens=35.0):

@@ -40,8 +40,8 @@ def build(ctx, plan, camera=None):
     init = ctx.shots.get("wide") or (computed_shot(ctx, "wide", 0) if ctx.actors else None)
     if init is not None:
         ctx.camera.state[:] = vec7(init)
-    for actor in ctx.actors.values():
-        actor.clips = []
+    for actor in ctx.actors.values():  # CTS-41: every per-actor state (channels, clips, moving, seated, park) starts again
+        actor.reset()
     acts = {aid: sorted(p.get("actions") or [], key=lambda a: (a["t0"], a["t1"])) for aid, p in plan.items()}
     # 1. locomotion and posture (a state that holds): actors in plan order, actions in time order
     for aid, lst in acts.items():

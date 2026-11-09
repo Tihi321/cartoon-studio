@@ -55,7 +55,7 @@ export interface Normalised {
   seconds: number
   /**
    * HUB-31: how much of the input's start the trim cut (its lead silence minus the `SILENCE_KEEP_S` kept), so word times measured on the input
-   * map to the clip by `t - leadTrimS`.
+   * map to the clip by `t - leadTrimS`. CTS-41: measured only with `measureLead` (an extra ffmpeg pass); 0 otherwise.
    */
   leadTrimS: number
 }
@@ -64,10 +64,10 @@ export interface Normalised {
  * Converts any audio to a 44.1 kHz mono 16-bit WAV and trims the silence at the start and the end down to `SILENCE_KEEP_S`
  * (a pause inside the line is never touched: the end is trimmed by reversing the audio and trimming its start).
  */
-export async function normaliseWav(input: string, output: string): Promise<Normalised> {
+export async function normaliseWav(input: string, output: string, o: { measureLead?: boolean } = {}): Promise<Normalised> {
   const trim = `silenceremove=start_periods=1:start_duration=${SILENCE_MIN_S}:start_threshold=${SILENCE_DB}dB:start_silence=${SILENCE_KEEP_S}:detection=peak`
   await fs.mkdir(path.dirname(output), { recursive: true })
-  const lead = await leadSilenceSeconds(input)
+  const lead = o.measureLead ? await leadSilenceSeconds(input) : 0
   const tmp = `${output}.tmp-${process.pid}.wav`
   try {
     await run('ffmpeg', ['-y', '-v', 'error', '-i', input, '-vn', '-af', `${trim},areverse,${trim},areverse`, '-ar', String(SAMPLE_RATE), '-ac', '1', '-c:a', 'pcm_s16le', tmp])

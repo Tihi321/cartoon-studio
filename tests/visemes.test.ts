@@ -115,7 +115,7 @@ describe('six-viseme lip-sync', () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'cts-eleven-words-'))
     const raw = path.join(dir, 'raw.wav')
     await writeFile(raw, wav([[0.4, 0], [1.0, 0.5], [0.3, 0]]))
-    const norm = await normaliseWav(raw, path.join(dir, 'clip.wav'))
+    const norm = await normaliseWav(raw, path.join(dir, 'clip.wav'), { measureLead: true })
     expect(norm.leadTrimS).toBeCloseTo(0.25, 1)
     const words = shiftWords([{ w: 'Bruno', t0: 0.42, t1: 0.8 }, { w: 'čekaj', t0: 0.85, t1: 1.38 }, { w: 'malo', t0: 1.38, t1: 9 }], norm.leadTrimS, norm.seconds)
     expect(words[0]!.t0).toBeGreaterThan(0.12)

@@ -5,7 +5,9 @@ A chain is the controls `<stem>1..n` (`ear_L1`, `tail1`, `acc_scarf1`) with `spr
 otherwise). Each joint is a rod hanging on a pivot: when the pivot accelerates, the rod's tip lags (angular acceleration -(u x a) / length), a spring
 (stiffness k, damping c) pulls the joint back to its rest angle, and every joint after the first feels the pivot motion of the one before it. The
 base acceleration comes from the world motion of the chain's parent, taken from the composed channels (forward kinematics), so a walk, a hop or a nod shakes them.
-A vehicle's antenna (`antenna1..n`, HUB-31) is the same chain on `body`, with a lower gain and a smaller swing; wheels are never a chain.
+A vehicle's antenna (`antenna1..n`, HUB-31) is the same chain on `body`, with a lower gain and a smaller swing; wheels are never a chain. CTS-41:
+the antenna feels its input through a soft knee (`ANTENNA_ACC`) and meets a soft stop before its 40 degree limit, so a hard zoom swings it
+without pinning it there.
 """
 import math
 
@@ -16,6 +18,9 @@ from .core import FPS
 SUBSTEPS = 4
 MAX_ACC = 40.0
 MAX_ANGLE = math.radians(55)
+STOP_GAIN = 12.0  # CTS-41: the antenna's soft stop: the stiffness grows by this much at the limit (with the angle to the power STOP_POW)
+STOP_POW = 4
+ANTENNA_ACC = 6.0  # CTS-41: m/s2 where the antenna's input acceleration bends over (tanh)
 
 
 def _joint_axis(rig, name, nxt):
@@ -62,8 +67,13 @@ def bake_secondary(ctx, actor):
         out = np.zeros((nj, n, 3))
         gain = 0.9 * rig.energy
         max_angle = MAX_ANGLE
+        stop = False
         if stem == "antenna":  # HUB-31: a vehicle's whip antenna is a stiffer rod than an ear, and swings less
             gain, max_angle = 0.45 * rig.energy, math.radians(40)
+            stop = True
+            # CTS-41: a hard launch or stop is felt up to ANTENNA_ACC (a soft knee), not in full: the rod swings with the car, it does not slam
+            mag = np.linalg.norm(a_loc, axis=1, keepdims=True)
+            a_loc = a_loc * (ANTENNA_ACC * np.tanh(mag / ANTENNA_ACC) / np.maximum(mag, 1e-9))
         for f in range(n):
             for _ in range(SUBSTEPS):
                 a_piv = a_loc[f].copy()
@@ -73,7 +83,9 @@ def bake_secondary(ctx, actor):
                     drive = -np.cross(u, a_piv) / lens[i] * gain
                     th = psi[i] - (psi[i - 1] if i else 0.0)
                     thd = om[i] - (om[i - 1] if i else 0.0)
-                    ang_acc = drive - k * th - c * thd
+                    # CTS-41: the antenna meets a soft stop (the spring stiffens toward its limit), so a hard zoom swings it far but never pins it
+                    kk = k * (1.0 + STOP_GAIN * (float(np.linalg.norm(th)) / max_angle) ** STOP_POW) if stop else k
+                    ang_acc = drive - kk * th - c * thd
                     ang_acc -= u * float(ang_acc @ u)  # no twist about the rod
                     om[i] += ang_acc * dt
                     om[i] -= u * float(om[i] @ u)
