@@ -305,6 +305,17 @@ describe('the 3D pipeline', () => {
     expect(lint.warnings.map((i) => i.code)).toContain('W_SFX_MISSING')
   }, 180_000)
 
+  it('CTS-38: a budget set before the series does not make a series; the first run creates the bible and keeps the budget', async () => {
+    env = await makeEnv({ paused: true })
+    const store = new SeriesStore(env.dir)
+    await store.writeBudget('fresh', 'ep01', { schema: 'cts.budget/1', capUsd: 0, flowCreditsCap: 150, approvedBy: 'the user', approvedAt: '2026-11-09T10:00:00', note: '' })
+    expect(await store.seriesExists('fresh')).toBe(false)
+    const r = await new Pipeline(env.engine.cts).run({ series: 'fresh', episode: 'ep01', brief: { idea: 'a car and a train' }, options: { renderer: 'blender' } })
+    expect(r.state).toBe('running')
+    expect((await store.readBible('fresh')).renderer).toBe('blender')
+    expect((await store.readBudget('fresh', 'ep01'))?.flowCreditsCap).toBe(150)
+  })
+
   it('CTS-39: two sheet redos in a row make one character job that redoes each character once', async () => {
     const { fake, seen, pipe } = await startMiniVehicles()
     await pauseOf(pipe, 'the pause at sheet_review')

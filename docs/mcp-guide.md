@@ -36,7 +36,7 @@ A role or agent set to the model `client/claude-code` (in `config/roles.md`) par
 
 | Tool | What it does |
 |---|---|
-| `cts_budget_set {series, episode, capUsd, flowCreditsCap?, approvedBy, note?}` | Writes `episodes/<ep>/budget.json` (with `approvedAt`). Call it only after the user approved the amount. Without it both caps are 0 and every paid call is refused. |
+| `cts_budget_set {series, episode, capUsd, flowCreditsCap?, approvedBy, note?}` | Writes `episodes/<ep>/budget.json` (with `approvedAt`). Call it only after the user approved the amount. Without it both caps are 0 and every paid call is refused. It may come before the series exists (CTS-38): a series is a folder with a `bible.json`, so `cts_run_pipeline` or `cts_series_create` then creates the bible and keeps the budget. |
 | `cts_budget_get {series, episode}` | Caps, spent per currency (usd, credits), what is left, and the ledger `spend.json`. |
 | `cts_media_config {series?, episode?}` | Read-only: the image model (`comfy.imageModel`) and the fallback order (Z-Image at a lower denoise, Qwen edit, then Nano Banana only after the user's yes), the music engine (`comfy.musicModel`, the alternatives, the sound-effect engine) and the USD cap that gates Nano Banana. The Settings view shows it. |
 | `cts_image_generate {series, episode, provider?, prompt, width?, height?, format?, out?, refs?, model?, seed?}` | `comfy` (default, also `auto`): local, free; `refs` makes it an edit (Qwen). `gemini` (Nano Banana): paid, refused with `BUDGET_EXCEEDED` at cap $0 before any network call; needs the user's yes and a recorded cap. `fal`: paid, charged to the episode budget. No image goes through Flow. |

@@ -138,9 +138,10 @@ export class CtsService {
     return out.sort((a, b) => a.slug.localeCompare(b.slug))
   }
 
+  /** A series exists when it has a `bible.json` (CTS-38). */
   async seriesExists(slug: string): Promise<boolean> {
     assertSlug(slug)
-    return fs.stat(path.join(seriesDir(this.dataDir), slug)).then((s) => s.isDirectory(), () => false)
+    return fs.stat(path.join(seriesDir(this.dataDir), slug, 'bible.json')).then((s) => s.isFile(), () => false)
   }
 
   /** Waits until one job is done or failed. Returns early, with `clientTasks`, when it waits for a client to answer one of its model calls. */

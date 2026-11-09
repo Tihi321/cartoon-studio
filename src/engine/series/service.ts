@@ -146,8 +146,9 @@ export class SeriesStore {
 
   // ---- series ----
 
+  /** A series exists when it has a `bible.json` (CTS-38: a folder that only holds episode files, e.g. a budget set first, is not a series yet). */
   async seriesExists(slug: string): Promise<boolean> {
-    return fs.stat(this.paths(slug).root).then((s) => s.isDirectory(), () => false)
+    return fs.stat(this.paths(slug).bible).then((s) => s.isFile(), () => false)
   }
 
   /** The slugs of the series folders that have a `bible.json`. */
@@ -187,6 +188,7 @@ export class SeriesStore {
       pitches: [],
       chosenPitch: null
     })
+    // the folder may already hold episode files (a budget set before the series): they are kept
     await fs.mkdir(p.root, { recursive: true })
     await this.writeJson(p.bible, bibleSchema, bible)
     return bible
