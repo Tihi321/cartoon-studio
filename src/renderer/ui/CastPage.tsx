@@ -41,12 +41,84 @@ export function CastPage() {
                   </li>
                 ))}
               </ul>
+              <VoiceReview slug={slug} />
               {member && <CastMemberView key={`${slug}/${member.id}`} slug={slug} member={member} />}
             </>
           )}
         </ToolGate>
       )}
     </div>
+  )
+}
+
+/** The pipelines of a series as `cts_status` lists them (only what the voice review needs). */
+interface PipelineView {
+  episode: string
+  state: string
+  step: string | null
+}
+
+/**
+ * CTS-44: the voice review gate (`voice_review`, CTS-37). The pipeline of a 3D series stops after the voice casting and before a single line is spoken; this
+ * panel shows only while an episode waits there. "Approve" and "Send back" call `cts_voice_approve`, the tool an agent uses; a send-back needs a note (which
+ * voice, what to change), which the voice director gets with the next casting round. The auditions are in the Voice section of each character below.
+ */
+function VoiceReview({ slug }: { slug: string }) {
+  const t = useTool('cts_status', { series: slug }, (r) => ((r.pipelines as PipelineView[] | undefined) ?? []).filter((p) => p.step === 'voice_review' && p.state === 'waiting-on-user'))
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState<string | null>(null)
+  const verdict = async (ok: boolean) => {
+    setBusy(true)
+    setError(null)
+    setDone(null)
+    try {
+      await callTool('cts_voice_approve', { series: slug, ok, ...(note.trim() ? { note: note.trim() } : {}) })
+      setDone(ok ? 'Voices approved: the pipeline goes on.' : 'Sent back: the voices are cast again with your note.')
+      if (!ok) setNote('')
+      t.reload()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const waiting = t.data ?? []
+  if (waiting.length === 0 && !done && !error) return null
+  return (
+    <section className="panel" aria-labelledby="cast-voice-review" data-testid="voice-review">
+      <div className="row spread">
+        <h2 className="panel-title" id="cast-voice-review">
+          Voice review
+        </h2>
+        {waiting.length > 0 && (
+          <Pill tone="warn" testId="voice-review-waiting">
+            waiting for your ears: {waiting.map((p) => p.episode).join(', ')}
+          </Pill>
+        )}
+      </div>
+      <p className="dim">Listen to each character&apos;s voice below (the audition buttons), then approve the voices or send them back. No line is spoken before you approve.</p>
+      <div className="row">
+        <button className="primary" onClick={() => void verdict(true)} disabled={busy || waiting.length === 0} data-testid="voice-approve">
+          Approve the voices
+        </button>
+        <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Send back: which voice, what to change" aria-label="Voice review note" data-testid="voice-redo-note" />
+        <button onClick={() => void verdict(false)} disabled={busy || !note.trim()} data-testid="voice-redo">
+          Send back with this note
+        </button>
+      </div>
+      {done && (
+        <p className="dim" role="status" data-testid="voice-review-done">
+          {done}
+        </p>
+      )}
+      {error && (
+        <span className="bad-text" role="alert" data-testid="voice-review-error">
+          {error}
+        </span>
+      )}
+    </section>
   )
 }
 

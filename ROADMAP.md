@@ -81,6 +81,7 @@ Branch `CTS-30_vehicles-elevenlabs`, cut from `CTS-18_blender-3d`. The plan is `
 | **CTS-41** | Vehicle polish: the car `turn` ends on its road's line, the antenna swings without pinning on a hard `zoom`, the vehicle wide shot rises over a body that hides another actor, `compose.build` resets every actor, `normaliseWav` measures the lead silence only on request, the visor ray test (a warning). Creature output identical. | Done |
 | **CTS-42** | Docs: the MCP guide's intro and `cts_run_pipeline` row for the 3D route, the set sheet's plan row (2048 x 1728), `tiptoe` as a slow `walk`, these rows. | Done |
 | **CTS-43** | The ElevenLabs ledger reads the account counter around each voice phase (auditions, the voice run): `spend.json` `elevenReadings` `{phase, before, after, estimate}`, reconciled in `cts_budget_get` `eleven` (±10 % on the summed same-period phases, the after reading settled when the counter lags; a billing-period reset between the readings is reported apart unless the new period alone overspent; an unread status is not a mismatch). | Done |
+| **CTS-44** | The voice review in the studio UI: the Cast view shows a Voice review panel while an episode waits at `voice_review` (Approve the voices, or Send back with a note), calling `cts_voice_approve`; checked by `studio-shots` (mocked bridge). | Done |
 
 Pilot 4 (series `pip-bruno-wheels`, about 60 s, hr and en, ElevenLabs voices, $0 and 0 Flow credits) and its acceptance criteria are in the creative hub's `HUB-31` plan.
 
