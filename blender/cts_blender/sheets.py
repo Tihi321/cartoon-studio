@@ -374,7 +374,8 @@ def _dummy(name, at, yaw_deg):
 
 def set_sheet(spec, style, out_dir):
     """Four views of a set into `sheet.png` (2048 x 1152, pieces in `sheet/`): wide, two (stand-ins on the first two marks), and the first two
-    named cameras (a computed left and right view when the set has fewer). Returns {file, tiles, seconds}."""
+    named cameras (a computed left and right view when the set has fewer). Returns {file, tiles, seconds}. A set with `paths` then gets a third
+    row, the plan from above with the paths and the marks (`build_set.add_plan_view`), and the sheet is 2048 x 1728."""
     import math
 
     t0 = time.perf_counter()

@@ -159,7 +159,7 @@ The script is language-independent: scenes of beats with line ids; the words liv
 | Beat | Fields |
 |---|---|
 | `line` | `line` (id in the text catalog), `speaker`, `emotion?`, `gesture?`, `look?` (cast id), `pauseAfter?` |
-| `move` | `who`, `to` (a mark; `offL`/`offR` for enter and exit), `seconds`, `style?` (Blender series: `walk`, `hop`, `run` or `tiptoe` for a creature, `drive`, `zoom` or `reverse` for a car, `chug` for a train; default from the character: its walk style, a car drives, a train chugs) |
+| `move` | `who`, `to` (a mark; `offL`/`offR` for enter and exit), `seconds`, `style?` (Blender series: `walk`, `hop`, `run` or `tiptoe` for a creature (`tiptoe` is no action of its own: the library's `walk` at 0.6 of the walk speed), `drive`, `zoom` or `reverse` for a car, `chug` for a train; default from the character: its walk style, a car drives, a train chugs) |
 | `turn` | `who`, `facing` |
 | `emote` | `who`, `emotion` |
 | `gesture` | `who`, `gesture` (one of the rig's gestures; in a Blender series an action of the acting library), `target?` (Blender series: a cast id, a prop id of the set or a mark: point at, sit on, look at) |
