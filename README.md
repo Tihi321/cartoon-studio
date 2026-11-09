@@ -4,13 +4,17 @@ A desktop studio that makes **a series of 3D toon cartoons for children aged 4 t
 
 The older **Canvas puppet player** (flat paper-cutout puppets drawn by a headless Chromium) is **legacy and frozen**: it still renders the series made with it (`renderer: "canvas"`, the default of the bible field) and gets no new features. Its authoring path (Z-Image sheets, raster rigs, face patches, pose images, 2D sets) was retired in CTS-28.
 
+**Cars and trains (HUB-31):** a 3D character is a creature or a **vehicle**, a car or a train with no arms and no legs: its eyes are its own front lamps, its mouth is the bumper or buffer-beam slot, it drives or chugs along the roads and tracks of a set (a road-and-rail kit with level crossings), and it acts with its own library (honk, whistle, puff, rev, bounce, lean, point the nose...). See [docs/blender.md](docs/blender.md).
+
+**Voices:** the hub's voice rule picks per language, Croatian first: **ElevenLabs** on its free tier when the free credits allow, then Google's free Gemini voices, then the local voices (OmniVoice through ComfyUI, Kokoro and Supertonic through VibeTTS). ElevenLabs and Gemini are called through `flow-music-mcp` (the hub's cloud speech tool, `flow_narrate`), never from this app. **The ElevenLabs API key is set by the user only**, in the `ELEVENLABS_API_KEY` environment variable or `~/.flow-music-mcp/.env` of flow-music-mcp; no tool sets it and Cartoon Studio never holds it. flow-music-mcp refuses anything past the free quota or on a paid tier, so voices cost $0.
+
 **Requirement for 3D:** Blender 5.2 installed on the machine (not bundled, not downloaded). The default path is `C:/Program Files/Blender Foundation/Blender 5.2/blender.exe`; change it in Settings or `config/blender.md`. Any other major.minor is refused (`E_BLENDER_VERSION`).
 
 **Licences:** the repository is MIT, except the [`blender/`](blender) folder (the scripts that `import bpy`), which is **GPL-3.0-or-later** (see `blender/LICENSE`). The engine starts Blender as a separate program and talks to it through a JSON file and stdout lines. See [docs/blender.md](docs/blender.md).
 
 ## Status
 
-Phase 1 (CTS-01..09) is built: the engine, contracts, Canvas player, timeline, render, voices, pipeline and studio UI. Pilots 1 and 2 (cutout puppets) were judged not good by the user on 2026-11-08, so the project moved to 3D (CTS-18..29, see [ROADMAP.md](ROADMAP.md)): a Blender render backend, character and set builders, an acting library (walks with planted feet, gestures, springs), six-viseme lip-sync from text, audio and whisper word times, and a pipeline for `renderer: "blender"` series. The pilot 3 run (Pip and Bruno, 60 s, hr and en) is tracked in the creative hub's `HUB-30` plan. The pipeline order of a 3D series is pitch (skipped when `brief.pitch` is given) -> bible -> `character` -> `sheet_review` (pause) -> `set3d` -> script -> safety -> voice -> music -> clips -> timeline -> assemble -> preview -> frame review -> final render and mix check. Music comes from ComfyUI (ACE-Step) and sits at least 15 dB under the voice by measurement; Flow is used only for the intro and outro videos. See [docs/pipeline.md](docs/pipeline.md).
+Phase 1 (CTS-01..09) is built: the engine, contracts, Canvas player, timeline, render, voices, pipeline and studio UI. Pilots 1 and 2 (cutout puppets) were judged not good by the user on 2026-11-08, so the project moved to 3D (CTS-18..29, see [ROADMAP.md](ROADMAP.md)): a Blender render backend, character and set builders, an acting library (walks with planted feet, gestures, springs), six-viseme lip-sync from text, audio and whisper word times, and a pipeline for `renderer: "blender"` series. The pilot 3 run (Pip and Bruno, 60 s, hr and en) is tracked in the creative hub's `HUB-30` plan. HUB-31 (CTS-30..36) added ElevenLabs voices and vehicle characters (Pip the car and Bruno the train engine, pilot 4). The pipeline order of a 3D series is pitch (skipped when `brief.pitch` is given) -> bible -> `character` -> `sheet_review` (pause) -> `set3d` -> script -> safety -> voice -> music -> clips -> timeline -> assemble -> preview -> frame review -> final render and mix check. Music comes from ComfyUI (ACE-Step) and sits at least 15 dB under the voice by measurement; Flow is used only for the intro and outro videos. See [docs/pipeline.md](docs/pipeline.md).
 
 ## What is in the repository
 
@@ -46,7 +50,7 @@ Environment: `CTS_DATA`, `CTS_MCP_PORT`, `CTS_MCP_TOKEN`, `CTS_SEED`, `CTS_AUTOS
 
 ## Cost
 
-The pilot is a **$0** run: the agents use `client/claude-code` or local models, voices are local (OmniVoice through ComfyUI for Croatian, Kokoro for English) unless the free Gemini quota fits, characters and sets are built by code, ComfyUI only makes music (and optional concept art), and the render is local Blender plus ffmpeg. `config/budget.md` caps paid spending at 0. Nothing paid is called without a cap you set.
+The pilot is a **$0** run: the agents use `client/claude-code` or local models, voices come from ElevenLabs' free tier when its credits allow (recorded as `eleven-credits` in `spend.json`, always USD 0), else from the free Gemini quota, else local (OmniVoice through ComfyUI for Croatian, Kokoro for English), characters and sets are built by code, ComfyUI only makes music (and optional concept art), and the render is local Blender plus ffmpeg. `config/budget.md` caps paid spending at 0. Nothing paid is called without a cap you set.
 
 ## Origin
 

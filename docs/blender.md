@@ -1,4 +1,4 @@
-# The Blender backend (HUB-30, CTS-18..29)
+# The Blender backend (HUB-30, CTS-18..29; vehicles HUB-31, CTS-31..35)
 
 A series with `renderer: "blender"` (the bible field, default `canvas`) is drawn in 3D: characters and sets are **data** (JSON specs of simple shapes), Python scripts in [`blender/`](../blender) build them in a headless **Blender 5.2** and render the episode with EEVEE, and the engine encodes and mixes the frames with the same ffmpeg code as before. Nothing is an AI picture. The Canvas puppet player still renders `canvas` series (pilots 1 and 2, the `mini` fixture) and is frozen.
 
@@ -65,18 +65,54 @@ All of them live in `blender/cts_blender/api5.py` and nowhere else, so a Blender
 
 The look is one file per series, `style3d.json` (`cts.style3d/1`): the toon ramp, outline colour and scale, sky, sun, samples, `post: none | paper | posterize`, `stepped`. The guide the designer roles read is `seed/style/toon-3d.md`.
 
+## Vehicles: cars and trains (HUB-31)
+
+A character is a **creature** (the default: a body, a head, arms, maybe legs) or a **vehicle** (`kind: "vehicle"` in `cts.character3d/1`): a car or a train with **no arms and no legs**. The contract is in `docs/contracts.md`; the guide with the Pip-car and Bruno-engine example specs is `seed/style/toon-3d.md`.
+
+- **Controls.** `root` (on the running surface) > `squash` (the suspension) > `body` > `head` (the front block with the face), `lid_L/R`, `pupil_L/R`, `mouth`, and one `wheel_<n>` per wheel on `root`. Optional: `brow_L/R` (the lamp visors), `chimney` and `exhaust` (puff sources), `horn`, `antenna1..n` (a spring chain), `acc_<name>1..n`. An `arm_*`, `hand_*` or `leg_*` control is lint `E_VEHICLE_LIMB`.
+- **The face: lamp eyes and a bumper mouth.** The eyes are the vehicle's own two front lamps (a domed lens, a hood that is the lid, a pupil disc; the lens glows with `head["lamp_glow"]`, 0..1, keyed by the acting library), the mouth is the bumper slot (a car) or the buffer-beam slot (a train) with the six viseme shapes. No eyes in a windscreen or a cab window, no face on a round smokebox door, no nose and no cheeks. The builder ray-tests the lamps and the mouth against the body (`E_FACE_HIDDEN`).
+- **The `vehicle` block.** `{ type: "car" | "train", wheelRadius, wheels: [controls], track }`. A train has `track: true` and moves only along a `track` path. Its wheels run on the rails: their `x` is half the gauge (±0.48 m on a 1.6 m track).
+- **Motion.** `motion.drive { style: "zip" | "chug", topSpeed (m/s), accel (m/s2), suspension 0..1 }` instead of `motion.walk`.
+- **The builder** (`build_character.py`) makes cylinder wheels with hubs on their `wheel_<n>` controls, the lamp eyes, the bumper-mouth slots, a pool of 8 cloud puffs per `chimney` or `exhaust` (hidden at rest), and the antenna chain. Its `build.json` has a **vehicle block**: `{ type, track, wheelRadius, length, width, height, wheels: [{control, radius, axis: "x", forward: 1, side, at}], lampGlow: {control: "head", prop: "lamp_glow"}, puffs: {chimney|exhaust: {count, outlet, radius, objects}}, antenna: [...] }`. The sheet gets a fourth row, the **motion strip**: squash, stretch, lean left and right, nose up, honk (the lamps glowing) or puff.
+
+### Paths and the road-and-rail kit
+
+A `cts.set3d/1` set may have `paths: { <id>: { kind: "road" | "track", points: [[x, y], ...], width? } }` (default width: road 3 m, track 1.6 m). The set builder (`build_set.py`) makes each path a poly curve `path:<id>` at ground level with `cts_path`, `cts_path_kind`, `cts_path_width`, `cts_path_length` and `cts_path_surface` (the height a wheel bottom runs on: the asphalt top `ROAD_TOP` 0.012 m, the rail top `RAIL_TOP` 0.2 m). The kit adds `road` and `track` (built along their `path`), `crossing` (boards over the rails where a road meets a track, with a 0.7 m ramp at half height on each side, a raised barrier and a cross sign), `platform`, `signal` and `buffer_stop`. `build.json` lists `paths` (`{kind, points, width, length, surface, gauge?}`), `railTop` and `crossings` (`[{id, at, rot, top, track, road}]`). When a set has paths, the **set sheet** gets a third row: the set from above with the paths drawn over it and the marks labelled.
+
+Lint: `E_MARK_OFF_PATH` (a mark a vehicle moves from or to is more than 0.3 m from a path of its kind), `E_OFF_TRACK` (a train's two marks are not on one track), `E_PATH_BLOCKED` (a path runs through a prop's footprint), `E_ACTION_BODY` (an action the body cannot do).
+
+### The vehicle actions
+
+Every action in `library.json` names its `bodies` (`creature`, `vehicle` or both) and, for a vehicle action only a car or only a train does, `vehicleTypes`. The creature actions stay as they were (pilot 3 re-renders unchanged).
+
+| Kind | Actions |
+|---|---|
+| Automatic | `idle_engine` (a suspension bob and an engine shiver), `blink` (the lamp hoods), `look_at` (pupils lead, then the front block; a car's body turns only when stopped and past 60 degrees, a train never yaws), the talking and listening automation |
+| Locomotion | `drive`, `zoom`, `reverse` (a car), `chug` (a train), `turn` (a car only; a train never turns) |
+| Gestures | `nod`, `shake_head`, `bounce`, `lean`, `tilt`, `wiggle`, `rev`, `honk` (a car), `whistle` (a train), `puff`, `flash`, `wink`, `point_nose`, `spin_wheels`, `park`, `start_up` |
+| Reactions | `react_surprised`, `laugh`, `droop` |
+
+A move along a path takes `params = { path: [[x, y], ...], z, stop? }` (or `target`): an anticipation (the rear squats), then the move arrives at `t1` with the wheels rolling exactly distance / `wheelRadius`, the body pitching and rolling on the suspension and settling after the stop; a chug puffs every `puffEveryM` metres. `honk` and `whistle` are sounds: the writer pairs each with an `sfx` beat. `vehicle.nominal_seconds(spec, distance, style)` is the usual duration of a move.
+
+### Timeline and assembly of a vehicle series (CTS-35)
+
+- **Timeline** (`timeline3d.ts`): a `move` of a vehicle runs the beat's style (else `drive` for a car, `chug` for a train). When the vehicle and the end mark are on one path of its kind, the action gets `path` (the stretch of the path between them, `pathBetween` in `src/engine/blender/props.ts`) and `pathId`; a train whose end mark is off its track goes to the nearest point of its track (a warning; lint says `E_OFF_TRACK`), and a train's `turn` is dropped. The move lasts the beat's seconds, at least the vehicle's usual time over 1.25 (`vehicleSeconds`, the twin of `nominal_seconds`), within the library's min and max. A vehicle starts facing along its path, the way its first move goes.
+- **Assembly** (`assemble.py`): a vehicle stands on its start mark at the running surface of the nearest path of its kind (the road top for a car, the rail top for a train; the ground when there is none). A move gets `z` from its `pathId`. A car that crosses a track rides up over the crossing boards and their ramps (`ctx.surface`, the mean of what is under its front and rear axle). The blob shadow lies on what is under the vehicle (`floor`: the road, the sleepers, the boards). The puff pools, the lamp control and the objects of each vehicle go to the channel writer, which keys the puffs and the lamp glow.
+- **Framing** (`acting/framing.py`): with a vehicle in the shot, `wide` and `two` take each body's ground extent from its rest box (turned with its yaw, nearer corners counted wider for the perspective) and the wide camera sits higher, so a long engine is framed whole and seen over; `cu-<vehicle>` frames the face (the lamp eyes and the mouth) from in front of it, turned a little toward the default camera side (a three-quarter view); `ots-<a>-<b>` with a vehicle `a` stands beside its face. Shots of creatures only are computed as before.
+
 ## Tests
 
 - `yarn test:blender`: `blender -b --factory-startup --python-exit-code 1 --python blender/tests/run.py` (unittest in Blender's own Python, no pip installs). It fails, not skips, when Blender is missing. It covers the runtime shims, the character build (controls, mouth slots, outlines, `E_FACE_HIDDEN`, deterministic hashes), the look, and the acting library (the registry equals `library.json`, gestures return to rest, feet stay planted in a walk, a tail spring settles).
-- `yarn test:e2e`: `tests/blender.e2e.test.ts` builds `mini3d`, assembles 2 s and renders a small preview with real Blender, next to the canvas render e2e.
+- `yarn test:e2e`: `tests/blender.e2e.test.ts` builds the vehicle fixture `mini-vehicles` (a car and a train on a road-and-rail set), assembles it and renders 2 s of a small preview with real Blender, next to the canvas render e2e.
+- The Blender tests also cover the vehicles: B1v (the `mini-vehicles` car builds with wheels, lamp eyes, six mouth slots and no limb; a buried lamp is `E_FACE_HIDDEN`), B2v (the registry's `bodies` equal `library.json`; in a 5 m `drive` the wheels roll the root's path length within 2 % and stay on the ground; in a `chug` the wheels stay on the track; `honk` and `bounce` return to rest) and B3 (the paths are curves that follow the spec and carry their running surface, the crossing lies across the track).
 - `yarn test`: fast, no Blender (the runner and the pipeline use a fake runner).
 
 ## How to add an acting action
 
 The acting library is `blender/cts_blender/acting/`; `library.json` is the **single source of the names** (the engine reads it for lint, the writer prompt and the timeline, and test B2 fails when the Python registry and the file differ).
 
-1. Write the function in the family module (`gestures.py`, `gait.py` or `camera.py`): `@action("name") def name(ctx, actor, t0, t1, params): ...` returns a `Clip` of contributions to the actor's layers (`base`, `idle`, `gesture`, `head`, `look`, `face`, `secondary`). Follow the principles in `acting/__init__.py` and `core.py`: anticipation, slow in and out, overshoot and settle, overlap (the head lags the body), arcs (rotations about the shoulder), moving holds, scaled by the character's `tempo`. Keys must stay inside `[t0, t1 + settle]` and return to the rest pose.
-2. Add the entry to `library.json`: `name`, `kind` (`gesture | locomotion | react | camera`), `parts` (the controls it moves), `seconds {min, default, max}`, `overLine` (may it overlap a line of dialogue), `needsTarget`, `params`.
+1. Write the function in the family module (`gestures.py`, `gait.py`, `vehicle.py` or `camera.py`): `@action("name", bodies=...) def name(ctx, actor, t0, t1, params): ...` (`bodies` defaults to `("creature",)`; a name both bodies share is one function that branches on `vehicle.is_vehicle(actor)`) returns a `Clip` of contributions to the actor's layers (`base`, `idle`, `gesture`, `head`, `look`, `face`, `secondary`). Follow the principles in `acting/__init__.py` and `core.py`: anticipation, slow in and out, overshoot and settle, overlap (the head lags the body), arcs (rotations about the shoulder), moving holds, scaled by the character's `tempo`. Keys must stay inside `[t0, t1 + settle]` and return to the rest pose.
+2. Add the entry to `library.json`: `name`, `kind` (`gesture | locomotion | react | camera`), `bodies`, optional `vehicleTypes`, `parts` (the controls it moves; `wheel_*`, `antenna*`, `lamp_glow` for vehicles), `seconds {min, default, max}`, `overLine` (may it overlap a line of dialogue), `needsTarget`, `params`.
 3. If a script should be able to use it by name, it comes through the script's `gesture` beat (`gesture` names come from the manifest), and `move.style` for locomotion. No engine code changes are needed for a new gesture name.
 4. Run `yarn test:blender` (B2 checks the registry, the rest pose and the settle time) and look at the `reel` command's contact sheet.
 

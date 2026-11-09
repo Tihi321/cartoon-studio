@@ -8,6 +8,7 @@ Phase 1 is the scaffold and a **60-second pilot** the user watches (two characte
 
 - **Phase 1 (CTS-01..09) is done**: the engine, the contracts, the player, the timeline, the render, the voices, the pipeline, the studio UI and the Windows package.
 - **Pilots 1 and 2 (cutout puppets) were judged not good by the user on 2026-11-08.** Pilot 1 (series `pilot`, SVG rigs) had been called good before; pilot 2 (CTS-10..17, series `pip-bruno`, Z-Image raster rigs) changed the method and the user said changing models would not fix it. The method is **superseded by the 3D route**; the music, mix and Flow work of pilot 2 (CTS-15, CTS-16) is kept.
+- **HUB-31 (CTS-30..36)** adds ElevenLabs free-tier voices (through flow-music-mcp) and vehicle characters (cars and trains, roads and tracks); pilot 4 is tracked in the creative hub.
 - **The 3D route (CTS-18..29)** replaces the renderer: characters and sets are specs built by code in Blender 5.2, the episode is rendered with EEVEE and mixed with the existing ffmpeg code. It is done in code; **pilot 3** (series `pip-bruno-3d`, Pip and Bruno, about 60 s, hr and en) and the user's verdict are tracked in the creative hub's `HUB-30` plan. The Canvas player is frozen (it renders pilots 1 and 2) and is decided again after that verdict.
 
 ## Phase 1 tickets
@@ -59,6 +60,22 @@ Branch `CTS-18_blender-3d`, cut from the pilot 2 branch. The plan is `HUB-30` in
 | **CTS-29** | Docs: README (3D first, Canvas legacy, Blender 5.2 required, the GPL folder), `docs/blender.md`, `docs/provenance.md`, AGENTS.md, this roadmap. | Done |
 
 Pilot 3 (the run) and its acceptance criteria (C1..C17) are in the creative hub. Phase 2 (a 5 to 10 minute episode) starts only after the user has watched pilot 3 and said go; if the answer is yes, the Canvas player and Playwright are retired with it.
+
+## ElevenLabs voices and vehicle characters (HUB-31, series `pip-bruno-wheels`)
+
+Branch `CTS-30_vehicles-elevenlabs`, cut from `CTS-18_blender-3d`. The plan is `HUB-31` in the creative hub (`../creative-hub/.claude/tickets/HUB-31-vehicles-voices/plan.md`); the ElevenLabs client lives in flow-music-mcp (FMM-17, FMM-18).
+
+| Ticket | What | State |
+|---|---|---|
+| **CTS-30** | ElevenLabs as the first voice provider through flow-music-mcp (`studios/flow.ts`, `providers/elevenlabs.ts`): allocation ElevenLabs, then Gemini, then local, whole languages, Croatian first; `voice.<lang>.elevenlabs` in the bible; word times from the alignment (`wordsFrom`, shifted by `leadTrimS`); `cts_voice_quota` with the ElevenLabs line; `cts_voice_audition`; `eleven-credits` in `spend.json`; `W_VOICE_MIXED`, `W_VOICE_ID_CHANGED`. | Done |
+| **CTS-31** | Vehicle contracts (`kind: "vehicle"`, the `vehicle` block, the `drive` motion, `cylinder`, lamp eyes, set `paths`, the road-and-rail prop kinds), `library.json` `bodies`, lint `E_VEHICLE_LIMB`, `E_ACTION_BODY`, `E_MARK_OFF_PATH`, `E_OFF_TRACK`, `E_PATH_BLOCKED`, the `mini-vehicles` fixture. | Done |
+| **CTS-32** | The vehicle builder (wheels, lamp eyes with hoods and glow, bumper-mouth slots, puff pools, the antenna chain, the face ray test), the motion strip of the sheet, the designer prompt with the lamp-eyes rule, the Pip-car and Bruno-engine examples in `toon-3d.md`. | Done |
+| **CTS-33** | The road-and-rail set kit: paths as curves, `road`, `track`, `crossing`, `platform`, `signal`, `buffer_stop`, the set sheet with the paths, the background-artist prompt. | Done |
+| **CTS-34** | The vehicle acting library (`acting/vehicle.py`): `idle_engine`, hood blinks, `look_at`, the talking and listening automation, `drive`/`zoom`/`reverse`/`chug` along a path, the car `turn`, the gestures and reactions; B2v tests. | Done |
+| **CTS-35** | Timeline, assembly, pipeline and app for vehicle series: moves along paths and trains held to their tracks, vehicles on the road or rail top, a car over the crossing boards, puffs and lamp glow keyed, vehicle framing, writer facts and checks by body (sounds paired with sfx beats, the credit title card), premade ElevenLabs voices for the voice cast, `W_SFX_MISSING`, the Cast and Settings views; the pipeline test and the Blender e2e on `mini-vehicles`. | Done |
+| **CTS-36** | Docs: README, this roadmap, `docs/blender.md` (vehicles, paths, the actions, the build.json vehicle block), `docs/mcp-guide.md` (`cts_voice_audition`, `cts_voice_quota`, the voice plan), `docs/pipeline.md`. | Done |
+
+Pilot 4 (series `pip-bruno-wheels`, about 60 s, hr and en, ElevenLabs voices, $0 and 0 Flow credits) and its acceptance criteria are in the creative hub's `HUB-31` plan.
 
 ## Not in phase 1
 
