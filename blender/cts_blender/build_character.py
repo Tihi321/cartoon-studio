@@ -136,6 +136,13 @@ def _controls(spec, cid, coll):
     return ctl
 
 
+def _tuned_extent(part):
+    """The extent the default outline width and the box bevel were tuned on. For a box that is the full side, not the half extent `S.extent` returns
+    (CTS-46 made `extent` true; the looks of approved characters must not move, so a box is doubled back here)."""
+    ext = S.extent(part)
+    return tuple(2 * e for e in ext) if part["shape"] == "box" else ext
+
+
 def _part(cid, part, spec, style, ctl, coll, label="part"):
     pal = spec["palette"]
     if part["colour"] not in pal:
@@ -148,7 +155,7 @@ def _part(cid, part, spec, style, ctl, coll, label="part"):
     if vehicle_box:  # HUB-31: a vehicle's boxes are rounded (a loaf, a flat rounded-rectangle nose): 30 % of the smallest side, up to 30 cm
         bevel = min(0.3, 0.3 * min(S._radii3(part["size"])))
     else:
-        bevel = min(0.015, 0.35 * min(S.extent(part))) if part["shape"] == "box" else 0.0
+        bevel = min(0.015, 0.35 * min(_tuned_extent(part))) if part["shape"] == "box" else 0.0
     ob = S.make_object(f"{cid}_{label}_{part['id']}", bm, mat, ctl[part["control"]], tuple(part["at"]), tuple(part.get("rot", (0, 0, 0))), bevel=bevel, collection=coll)
     if vehicle_box:
         ob.modifiers["bevel"].segments = 5
@@ -156,7 +163,7 @@ def _part(cid, part, spec, style, ctl, coll, label="part"):
     if part["shape"] == "cylinder":
         _crisp_cylinder(ob, S.extent(part))
     tag(ob, cid, cts_part=part["id"])
-    ob["cts_outline"] = part["outline"] if "outline" in part else M.default_outline_width(S.extent(part))
+    ob["cts_outline"] = part["outline"] if "outline" in part else M.default_outline_width(_tuned_extent(part))
     return ob
 
 

@@ -175,8 +175,10 @@ def mesh_for(part):
 def extent(part):
     """Half-extents of a part (used for outline width and footprints)."""
     shape, size = part["shape"], part["size"]
-    if shape in ("ellipsoid", "box", "spines"):
+    if shape in ("ellipsoid", "spines"):
         return _radii3(size)
+    if shape == "box":  # `box()` scales a unit cube of side 1: the size is the full side
+        return tuple(r / 2 for r in _radii3(size))
     if shape == "cone":
         return (size[0], size[0], size[1] / 2)
     if shape == "capsule":
