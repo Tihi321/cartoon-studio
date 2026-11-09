@@ -8,6 +8,7 @@ import unittest
 import bpy
 
 from cts_blender import materials as M
+from cts_blender import shapes as S
 from cts_blender import build_set as bs
 from cts_blender.build_character import LAMP_PROP, LIMB_RE, SLOTS, build_character, read_spec, reset_scene
 from cts_blender.fingerprint import fingerprint
@@ -36,6 +37,14 @@ class Build(unittest.TestCase):
         parts = [o for o in rig["objects"] if "cts_part" in o]
         self.assertEqual(len(parts), len(spec["parts"]))
         self.assertTrue(all(any(m.type == "SOLIDIFY" for m in o.modifiers) for o in parts))
+
+    def test_box_extent_is_the_half_size_and_its_default_outline_did_not_move(self):
+        # CTS-46: extent() is half extents (a box is a unit cube scaled by size); the default outline of a box part stays what it was (3 % of the full side)
+        self.assertEqual(S.extent({"shape": "box", "size": [1.0, 0.4, 0.2]}), (0.5, 0.2, 0.1))
+        spec = copy.deepcopy(read_spec(TILLY))
+        spec["parts"].append({"id": "crate", "shape": "box", "size": [0.5, 0.4, 0.3], "at": [0, 3, 0.2], "colour": spec["parts"][0]["colour"], "control": "body"})
+        crate = next(o for o in build(spec)["rig"]["objects"] if o.get("cts_part") == "crate")
+        self.assertAlmostEqual(crate["cts_outline"], M.default_outline_width((0.5, 0.4, 0.3)))
 
     def test_buried_mouth_is_face_hidden(self):
         spec = read_spec(TILLY)
