@@ -144,9 +144,9 @@ export class Pipeline {
         const b = o.brief ?? {}
         const pitchTitle = (b.pitch as { title?: { en?: unknown } } | undefined)?.title?.en
         const title = typeof b.title === 'string' && b.title ? b.title : typeof pitchTitle === 'string' && pitchTitle ? pitchTitle : o.series
-        await store.createSeries(o.series, { title, ...(typeof b.idea === 'string' ? { logline: b.idea } : {}), ...(typeof b.ageMin === 'number' ? { ageMin: b.ageMin } : {}), ...(typeof b.ageMax === 'number' ? { ageMax: b.ageMax } : {}), renderer: o.options?.renderer === 'blender' ? 'blender' : 'canvas' })
+        await store.createSeries(o.series, { title, ...(typeof b.idea === 'string' ? { logline: b.idea } : {}), ...(typeof b.ageMin === 'number' ? { ageMin: b.ageMin } : {}), ...(typeof b.ageMax === 'number' ? { ageMax: b.ageMax } : {}), renderer: o.options?.renderer === 'canvas' ? 'canvas' : 'blender' })
       }
-      // HUB-30: the renderer decides the step list. A new run takes `options.renderer`, else the bible's (a hand-made series), else canvas.
+      // HUB-30: the renderer decides the step list. A new run takes `options.renderer`, else the bible's (an existing series keeps its own); a new series is `blender`.
       const wanted = o.options?.renderer
       if (wanted !== undefined && wanted !== 'canvas' && wanted !== 'blender') throw new Error(`options.renderer must be "canvas" or "blender", not ${JSON.stringify(wanted)}`)
       const existing = await this.read(o.series, o.episode)

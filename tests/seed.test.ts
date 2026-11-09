@@ -27,6 +27,10 @@ describe('the seed', () => {
       const head = f.startsWith('agents/') ? text.split(/In an old canvas series|Only an old canvas series|In a canvas series/)[0]! : text.split(/## An old canvas series/)[0]!
       expect(head, f).not.toMatch(/cut-?out|paper|puppet/i)
     }
+    const voice = await readFile(path.join(seedDir, 'agents/voice-director-elodie-brandt.md'), 'utf8')
+    expect(voice.indexOf('ElevenLabs')).toBeGreaterThan(-1)
+    expect(voice.indexOf('ElevenLabs')).toBeLessThan(voice.indexOf('Gemini TTS'))
+    expect(await readFile(path.join(seedDir, 'config/roles.md'), 'utf8')).toMatch(/`character-designer`: writes each character as a 3D toon spec/)
     dir = await mkdtemp(path.join(os.tmpdir(), 'cts-seed-'))
     const store = new SeriesStore(dir)
     expect((await store.createSeries('new3d', { title: 'New' })).style).toMatchObject({ outlinePx: 2, look: expect.stringContaining('toon 3D') })
