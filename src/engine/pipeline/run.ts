@@ -140,7 +140,8 @@ export class Pipeline {
     assertId(o.episode, 'episode id')
     return withLock(`${o.series}/${o.episode}`, async () => {
       const store = this.store
-      if (!(await store.seriesExists(o.series))) {
+      const created = !(await store.seriesExists(o.series))
+      if (created) {
         const b = o.brief ?? {}
         const pitchTitle = (b.pitch as { title?: { en?: unknown } } | undefined)?.title?.en
         const title = typeof b.title === 'string' && b.title ? b.title : typeof pitchTitle === 'string' && pitchTitle ? pitchTitle : o.series
@@ -151,7 +152,8 @@ export class Pipeline {
       if (wanted !== undefined && wanted !== 'canvas' && wanted !== 'blender') throw new Error(`options.renderer must be "canvas" or "blender", not ${JSON.stringify(wanted)}`)
       const existing = await this.read(o.series, o.episode)
       if (existing && wanted && wanted !== rendererOfState(existing)) throw new Error(`this episode already runs with the ${rendererOfState(existing)} renderer; the renderer of a run cannot change (use a new episode id)`)
-      const renderer = existing ? rendererOfState(existing) : ((wanted as 'canvas' | 'blender' | undefined) ?? (await store.readBible(o.series)).renderer)
+      // CTS-53: the stub bible has no renderer of its own (it reads as canvas), so a series this call created is `blender` unless asked
+      const renderer = existing ? rendererOfState(existing) : ((wanted as 'canvas' | 'blender' | undefined) ?? (created ? 'blender' : (await store.readBible(o.series)).renderer))
       if (renderer === 'blender') {
         const bible = await store.readBible(o.series)
         if (bible.renderer !== 'blender' && (bible.cast.length > 0 || bible.episodes.length > 0)) throw new Error(`series "${o.series}" is a canvas series with a cast or episodes; the 3D route is a new series (cts_run_pipeline with options.renderer "blender" and another slug)`)
