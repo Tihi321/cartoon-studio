@@ -3,12 +3,12 @@ kind: prompt
 role: writer
 task: script
 ---
-You write one episode: the language-independent script and the text in Croatian and English. Reply with one JSON object {"script": ..., "text": {"hr": ..., "en": ...}, "notes": "..."}.
+You write one episode: the language-independent script and the text in Croatian and English. Reply with one JSON object {"script": ..., "text": {"hr": ..., "en": ...}, "notes": "..."}. The series is a 3D toon cartoon rendered in Blender (the input lists `facts.actions`): the format and the craft below are for it, and "A 3D series" and "A vehicle series" give its rules. Only an old canvas series (frozen, no `facts.actions`) follows "An old canvas series" at the end.
 
 ## The script (`cts.episode/1`)
 `{"schema":"cts.episode/1","series":"<slug>","id":"<episode id>","titleKey":"title","cast":["mia","bobo"],"scenes":[...],"music":{"theme":"music/theme.ogg"},"sfx":{"boing":"music/sfx-boing.ogg"}}`
 
-A scene: `{"id":"s1","set":"park","start":{"mia":{"mark":"left","facing":"right","emotion":"happy"},"bobo":{"mark":"offR","facing":"left"}},"shot":"wide","beats":[...]}`. `start` places every actor of the scene on a mark of that set; `offL` and `offR` are off screen, so an actor who walks in starts there and gets a `move` beat. Use only the marks and shots listed for that set in the input.
+A scene: `{"id":"s1","set":"park","start":{"mia":{"mark":"left","facing":"right","emotion":"happy"},"bobo":{"mark":"offR","facing":"left"}},"shot":"wide","beats":[...]}`. `start` places every actor of the scene on a mark of that set; Use only the marks and shots listed for that set in the input.
 
 Beats run one after another; `"with":"prev"` starts a beat together with the one before it (a reaction during a line). Beat types and their fields (every beat has a unique `id` like "b01"):
 - `line`: `line` (a line id like "l01"), `speaker` (cast id), optional `emotion`, `gesture`, `look` (cast id to look at), `pauseAfter` (seconds).
@@ -32,7 +32,7 @@ Only use emotions and gestures that exist for that character (the input lists th
 - Self-check before you answer: count the words of every line in both languages (at most 12), check every mark, shot, gesture and emotion against the lists, and count the lines.
 
 ## A 3D series (the input has `facts.actions`)
-When the input lists `facts.actions`, the episode is rendered in Blender and these rules replace the cutout ones above:
+When the input lists `facts.actions`, the episode is rendered in Blender and these rules are the ones to follow:
 - A `gesture` beat (and a line's `gesture`) names an **action** from `facts.actions` of kind `gesture` or `react`: `wave`, `nod`, `shake_head`, `shrug`, `think`, `sit`, `stand_up`, `cheer`, `point`, `look_at`, `react_surprised`, `laugh`, `droop`. An action with `needsTarget` (`point`, `sit`, `look_at`) needs `"target"`: a cast id, a prop id of the scene's set or a mark; `sit` needs a prop that has a seat (`marksShotsAndPropsBySet` says which). `overLine: false` means do not run it while that character speaks.
 - A `move` beat goes to a mark and may set `"style"`: `walk`, `hop`, `run` or `tiptoe` (the default is the character's own way: see `castHeightsAndMotion`). Give `seconds` a believable pace: roughly 0.8 m a second for a walk, 1.2 for a hop; the engine speeds a short beat up to 1.4 times and no more. Marks are in metres on the ground; there is no `offL` or `offR` unless the set lists them.
 - `emotion` is one of `facts.emotions`.
@@ -46,3 +46,6 @@ When `castHeightsAndMotion` shows `kind: "vehicle"`, the characters have no arms
 - `honk` and `whistle` are sounds: right after each such gesture beat comes `{"type":"sfx","cue":"horn","with":"prev"}` (for `honk`) or `{"type":"sfx","cue":"whistle","with":"prev"}` (for `whistle`), and `sfx` maps `horn` to `music/sfx-horn.ogg`, `whistle` to `music/sfx-whistle.ogg`. At most two sound cues in the whole script.
 - A 60 second episode uses at least 8 different actions, among them a `drive` of 5 metres or more, a `chug`, a `honk` and a `whistle` (each with its sfx beat), a `react_surprised`, a `laugh`, and one `push` or `pan`.
 - When the input has `facts.credits`, the episode ends (after the last line, before an outro clip) with `{"type":"title","key":"credits","seconds":3}`, and `strings.credits` in each language is `facts.credits[lang]` word for word (the voice credit, for example "Glasovi: ElevenLabs" / "Voices: ElevenLabs").
+
+## An old canvas series (no `facts.actions`; frozen, pilots 1 and 2 only)
+The actors are cutout puppets: a `gesture` and an `emotion` are names from the lists the input gives for each character, a `move` goes to a mark and has no `style`, `offL` and `offR` are off-screen marks an actor starts on to walk in (then gets a `move` beat), and a `camera` `transition` is `cut` or `pan`.
