@@ -522,6 +522,29 @@ export async function recordElevenReading(args: { store: SeriesStore; series: st
   return reading
 }
 
+/**
+ * CTS-43: the after-reading of a phase, settled. The account counter can lag the last lines by a few seconds, so while it shows less than the
+ * estimate minus the tolerance in the same billing period it is read again, at most `tries` (2) more times `delayMs` apart (3 s; the
+ * `CTS_ELEVEN_SETTLE_MS` variable overrides it, 0 in the tests). Never waits when the before reading is missing or the period reset.
+ */
+export async function settleElevenAfter(
+  read: () => Promise<ElevenCounter | null>,
+  before: ElevenCounter | null,
+  estimate: number,
+  opts: { tries?: number; delayMs?: number; tolerance?: number } = {}
+): Promise<ElevenCounter | null> {
+  const env = Number(process.env.CTS_ELEVEN_SETTLE_MS)
+  const delayMs = opts.delayMs ?? (process.env.CTS_ELEVEN_SETTLE_MS !== undefined && Number.isFinite(env) && env >= 0 ? env : 3000)
+  const tolerance = opts.tolerance ?? 0.1
+  const lagging = (a: ElevenCounter | null) => !!a && !!before && a.resetAt === before.resetAt && a.used - before.used < estimate * (1 - tolerance) - EPS
+  let after = await read().catch(() => null)
+  for (let i = 0; i < (opts.tries ?? 2) && estimate > 0 && lagging(after); i++) {
+    await new Promise((r) => setTimeout(r, delayMs))
+    after = (await read().catch(() => null)) ?? after
+  }
+  return after
+}
+
 export interface ElevenPhaseCheck {
   phase: ElevenReading['phase']
   what: string
@@ -535,7 +558,10 @@ export interface ElevenPhaseCheck {
   oldPeriodUsedBefore?: number
   /** Reset only: the new period's count is not above the estimate (+ tolerance), so the phase's credits are accounted for across both periods. */
   newPeriodWithinEstimate?: boolean
-  /** Normal phase: |apiDelta - estimate| <= tolerance x estimate. Null when not judged (a reading is missing, or a reset). */
+  /**
+   * Normal phase: |apiDelta - estimate| <= tolerance x estimate. Reset: false when the new period alone used more than the estimate + tolerance
+   * (an overspend), else null (the old period's share is unknown). Null when a reading is missing.
+   */
   withinTolerance: boolean | null
   note?: string
 }
@@ -543,26 +569,32 @@ export interface ElevenPhaseCheck {
 export interface ElevenReconciliation {
   tolerance: number
   phases: ElevenPhaseCheck[]
-  /** Over the judged phases (both readings, same period). */
+  /** Summed over the same-period phases (both readings, same `resetAt`). */
   estimate: number
   apiDelta: number
-  /** Every judged phase within the tolerance; null when no phase could be judged. Reset and unread phases are not counted here. */
+  /**
+   * False when a reset phase overspent; else the summed same-period phases within the tolerance (a counter that lags one phase and catches up
+   * in the next is no mismatch); null when there is neither. Unread phases are not counted.
+   */
   withinTolerance: boolean | null
+  /** Reset phases whose new period alone used more than the estimate + tolerance. */
+  overspends: number
   resets: number
   unread: number
 }
 
 /**
  * CTS-43: our `eleven-credits` estimates against the account counter, phase by phase. Same `resetAt` before and after: the counter delta is
- * compared with the estimate (±tolerance). A changed `resetAt` is a new billing period: `reset: true`, `apiDelta` is the new period's count
- * and the old period's share is unknown, so it is reported apart, never as a mismatch. A missing reading (status down or 429) is `unread`.
+ * compared with the estimate (±tolerance) per phase, and the overall verdict compares the sums of those phases. A changed `resetAt` is a new
+ * billing period: `reset: true`, `apiDelta` is the new period's count and the old period's share is unknown, so it is reported apart; only a
+ * new-period count above the estimate + tolerance is a mismatch (an overspend). A missing reading (status down or 429) is `unread`.
  */
 export function reconcileEleven(readings: readonly ElevenReading[], tolerance = 0.1): ElevenReconciliation {
   const phases: ElevenPhaseCheck[] = []
   let estimate = 0
   let apiDelta = 0
   let judged = 0
-  let ok = true
+  let overspends = 0
   for (const r of readings) {
     const base = { phase: r.phase, what: r.what, at: r.at, estimate: r.estimate }
     if (!r.before || !r.after) {
@@ -570,14 +602,16 @@ export function reconcileEleven(readings: readonly ElevenReading[], tolerance = 
       continue
     }
     if (r.before.resetAt !== r.after.resetAt) {
+      const fits = r.after.used <= r.estimate * (1 + tolerance) + EPS
+      if (!fits) overspends++
       phases.push({
         ...base,
         apiDelta: r.after.used,
         reset: true,
         oldPeriodUsedBefore: r.before.used,
-        newPeriodWithinEstimate: r.after.used <= r.estimate * (1 + tolerance) + EPS,
-        withinTolerance: null,
-        note: `the billing period reset (resetAt ${r.before.resetAt ?? 'none'} -> ${r.after.resetAt ?? 'none'}): ${r.after.used} credit(s) in the new period; the old period's share after ${r.before.used} is unknown`
+        newPeriodWithinEstimate: fits,
+        withinTolerance: fits ? null : false,
+        note: `the billing period reset (resetAt ${r.before.resetAt ?? 'none'} -> ${r.after.resetAt ?? 'none'}): ${r.after.used} credit(s) in the new period; the old period's share after ${r.before.used} is unknown${fits ? '' : `; the new period alone is above the estimate of ${r.estimate} (overspend)`}`
       })
       continue
     }
@@ -586,8 +620,9 @@ export function reconcileEleven(readings: readonly ElevenReading[], tolerance = 
     judged++
     estimate += r.estimate
     apiDelta += d
-    ok &&= within
     phases.push({ ...base, apiDelta: d, reset: false, withinTolerance: within })
   }
-  return { tolerance, phases, estimate: round(estimate), apiDelta: round(apiDelta), withinTolerance: judged ? ok : null, resets: phases.filter((p) => p.reset).length, unread: phases.filter((p) => p.apiDelta === null).length }
+  const sumOk = Math.abs(apiDelta - estimate) <= tolerance * estimate + EPS
+  const withinTolerance = overspends > 0 ? false : judged ? sumOk : null
+  return { tolerance, phases, estimate: round(estimate), apiDelta: round(apiDelta), withinTolerance, overspends, resets: phases.filter((p) => p.reset).length, unread: phases.filter((p) => p.apiDelta === null).length }
 }

@@ -550,11 +550,15 @@ recorded too, as `currency: "eleven-credits"` (never money, no cap here: flow-mu
 CTS-43: `elevenReadings` (optional; older files without it still parse) holds one reading per ElevenLabs voice phase, a `cts_voice_audition`
 call or the pipeline's audition of a line (`phase: "auditions"`) and a voice run that used ElevenLabs (`phase: "voice"`): the account counter of
 `flow_elevenlabs_status` before and after the phase (`{used, remaining, resetAt}`, `null` when the status could not be read) and `estimate`,
-the sum of the phase's `eleven-credits` entries. `cts_budget_get` reconciles them (`eleven`): with the same `resetAt` before and after,
-`apiDelta = after.used - before.used` and `withinTolerance` is `|apiDelta - estimate| <= 10 % of estimate`; a changed `resetAt` is a new
-billing period, so `reset: true`, `apiDelta = after.used` (the new period only), `oldPeriodUsedBefore = before.used` (the old period's share
-after it is unknown) and `newPeriodWithinEstimate`, never a mismatch; a missing reading is unread and not judged. The overall
-`withinTolerance` covers only the judged phases (null when there is none).
+the sum of the phase's `eleven-credits` entries. The account counter can lag the last lines, so while the after reading shows less than
+the estimate minus 10 % in the same period it is read again, at most twice, 3 s apart (`CTS_ELEVEN_SETTLE_MS` sets the gap; 0 in the tests).
+`cts_budget_get` reconciles them (`eleven`): with the same `resetAt` before and after, `apiDelta = after.used - before.used` and the phase's
+`withinTolerance` is `|apiDelta - estimate| <= 10 % of estimate`; a changed `resetAt` is a new billing period, so `reset: true`,
+`apiDelta = after.used` (the new period only), `oldPeriodUsedBefore = before.used` (the old period's share after it is unknown) and
+`newPeriodWithinEstimate`; such a phase is not judged (`withinTolerance: null`) unless the new period alone used more than the estimate
++ 10 %, which is an overspend (`withinTolerance: false`, counted in `overspends`). A missing reading is unread and not judged. The overall
+`withinTolerance` is false when a phase overspent, else the sums of the same-period phases compared within 10 % (a counter that lags one
+phase and catches up in the next is no mismatch), null when there is neither.
 
 ```json
 { "schema": "cts.budget/1", "capUsd": 0, "flowCreditsCap": 50, "approvedBy": "user", "approvedAt": "2026-11-07T10:00:00Z", "note": "pilot: no paid images, 50 Flow credits" }

@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { elevenCounterOf, recordElevenCredits, recordElevenReading } from '../budget/spend'
+import { elevenCounterOf, recordElevenCredits, recordElevenReading, settleElevenAfter } from '../budget/spend'
 import type { ElevenReading } from '../../shared/contracts'
 import type { CtsService } from '../service'
 import { SeriesStore } from '../series/service'
@@ -96,7 +96,8 @@ export async function elevenAudition(svc: CtsService, a: ElevenAuditionArgs): Pr
   // CTS-43: the counter after the phase, next to the one read before it, so the API delta can be checked against the entries
   let reading: ElevenReading | undefined
   if (a.episode) {
-    const after = flow.elevenStatus ? elevenCounterOf(await flow.elevenStatus(a.signal).catch(() => null)) : null
+    const status = flow.elevenStatus?.bind(flow)
+    const after = status ? await settleElevenAfter(async () => elevenCounterOf(await status(a.signal)), before, ledgered) : null
     reading = await recordElevenReading({ store: st, series: a.series, episode: a.episode, reading: { phase: 'auditions', what: `audition ${a.cast} ${a.lang}`, before, after, estimate: ledgered } }).catch(() => undefined)
   }
   return {

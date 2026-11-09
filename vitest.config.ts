@@ -8,6 +8,6 @@ export default defineConfig({
     environment: 'node',
     testTimeout: 15000,
     // no test may start a real app: the services are started by Cartoon Studio only when this is not 0
-    env: { CTS_AUTOSTART: '0' }
+    env: { CTS_AUTOSTART: '0', CTS_ELEVEN_SETTLE_MS: '0' }
   }
 })

@@ -9,7 +9,7 @@ import type { ComfyClient } from '../comfy/client'
 import { SeriesFileError } from '../series/service'
 import type { SeriesStore } from '../series/service'
 import type { ElevenModelInfo, ElevenStatus, FlowClient } from '../studios/flow'
-import { elevenCounterOf, recordElevenCredits, recordElevenReading } from '../budget/spend'
+import { elevenCounterOf, recordElevenCredits, recordElevenReading, settleElevenAfter } from '../budget/spend'
 import type { VibeTtsClient, VibeVoices } from '../studios/vibetts'
 import { allocateVoice, DEFAULT_LOCAL_ORDER, localChain, voiceReads } from './allocate'
 import type { LocalOrder, VoiceAllocationEntry, VoiceAvailability, VoiceProviderUsed } from './allocate'
@@ -602,9 +602,11 @@ export async function runVoice(inp: VoiceRunInput): Promise<VoiceRunReport> {
 
     // CTS-43: the account counter after the ElevenLabs lines, next to the probe's reading before them
     if (p.eleven && (ledgered > 0 || Object.values(allocation).some((a) => a.provider === 'elevenlabs'))) {
-      const after = deps.flow.elevenStatus ? elevenCounterOf(await deps.flow.elevenStatus(inp.signal).catch(() => null)) : null
+      const before = elevenCounterOf(p.eleven.status)
+      const status = deps.flow.elevenStatus?.bind(deps.flow)
+      const after = status ? await settleElevenAfter(async () => elevenCounterOf(await status(inp.signal)), before, ledgered) : null
       const langsSpoken = Object.values(allocation).filter((a) => a.provider === 'elevenlabs').map((a) => a.lang)
-      report.elevenReading = await recordElevenReading({ store, series, episode, reading: { phase: 'voice', what: `voice ${langsSpoken.join(',') || 'elevenlabs'}`, before: elevenCounterOf(p.eleven.status), after, estimate: ledgered } }).catch((e: unknown) => {
+      report.elevenReading = await recordElevenReading({ store, series, episode, reading: { phase: 'voice', what: `voice ${langsSpoken.join(',') || 'elevenlabs'}`, before, after, estimate: ledgered } }).catch((e: unknown) => {
         report.warnings.push(`spend.json: the ElevenLabs counter reading was not recorded: ${(e as Error).message}`)
         return undefined
       })

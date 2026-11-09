@@ -13,6 +13,6 @@ export default defineConfig({
     retry: 1,
     testTimeout: 180000,
     hookTimeout: 120000,
-    env: { CTS_AUTOSTART: '0' }
+    env: { CTS_AUTOSTART: '0', CTS_ELEVEN_SETTLE_MS: '0' }
   }
 })

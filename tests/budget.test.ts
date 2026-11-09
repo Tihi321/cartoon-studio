@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { charge, ChargeError, reconcileEleven } from '../src/engine/budget/spend'
+import { charge, ChargeError, reconcileEleven, settleElevenAfter } from '../src/engine/budget/spend'
 import type { ChargeArgs } from '../src/engine/budget/spend'
 import { SeriesStore } from '../src/engine/series/service'
 
@@ -78,17 +78,38 @@ describe('charge', () => {
 })
 
 describe('the ElevenLabs reconciliation (CTS-43)', () => {
-  it('reports a billing-period reset apart, judges a normal phase within 10 % and skips an unread status', () => {
+  const OLD = '2026-04-01T08:14:55Z'
+  const NEW = '2026-12-10T02:42:32Z'
+  const at = '2026-11-09T10:00:00+01:00'
+
+  it('pilot 4: judges the auditions within 10 %, reports the reset of the voice run apart and skips an unread status', () => {
     const r = reconcileEleven([
-      // pilot 4: the period reset between the readings of the auditions
-      { phase: 'auditions', what: 'audition pip hr', at: '2026-11-09T10:00:00+01:00', before: { used: 0, remaining: 10000, resetAt: '2026-04-01' }, after: { used: 510, remaining: 9490, resetAt: '2026-12-10' }, estimate: 530 },
-      { phase: 'voice', what: 'voice hr,en', at: '2026-11-09T10:20:00+01:00', before: { used: 510, remaining: 9490, resetAt: '2026-12-10' }, after: { used: 1037, remaining: 8963, resetAt: '2026-12-10' }, estimate: 540 },
-      { phase: 'voice', what: 'voice en', at: '2026-11-09T10:30:00+01:00', before: { used: 1037, remaining: 8963, resetAt: '2026-12-10' }, after: null, estimate: 40 }
+      { phase: 'auditions', what: 'audition pip hr', at, before: { used: 0, remaining: 10000, resetAt: OLD }, after: { used: 510, remaining: 9490, resetAt: OLD }, estimate: 553 },
+      { phase: 'voice', what: 'voice hr,en', at, before: { used: 510, remaining: 9490, resetAt: OLD }, after: { used: 1037, remaining: 8963, resetAt: NEW }, estimate: 1037 },
+      { phase: 'voice', what: 'voice en', at, before: { used: 1037, remaining: 8963, resetAt: NEW }, after: null, estimate: 40 }
     ])
-    expect(r.phases[0]).toMatchObject({ reset: true, apiDelta: 510, oldPeriodUsedBefore: 0, newPeriodWithinEstimate: true, withinTolerance: null })
-    expect(r.phases[1]).toMatchObject({ reset: false, apiDelta: 527, withinTolerance: true })
+    expect(r.phases[0]).toMatchObject({ reset: false, apiDelta: 510, withinTolerance: true })
+    expect(r.phases[1]).toMatchObject({ reset: true, apiDelta: 1037, oldPeriodUsedBefore: 510, newPeriodWithinEstimate: true, withinTolerance: null })
     expect(r.phases[2]).toMatchObject({ apiDelta: null, withinTolerance: null })
-    expect(r).toMatchObject({ withinTolerance: true, estimate: 540, apiDelta: 527, resets: 1, unread: 1 })
+    expect(r).toMatchObject({ withinTolerance: true, estimate: 553, apiDelta: 510, overspends: 0, resets: 1, unread: 1 })
+  })
+
+  it('flags a new period that alone used more than the estimate after a reset', () => {
+    const r = reconcileEleven([{ phase: 'voice', what: 'voice hr,en', at, before: { used: 510, remaining: 9490, resetAt: OLD }, after: { used: 1200, remaining: 8800, resetAt: NEW }, estimate: 1037 }])
+    expect(r.phases[0]).toMatchObject({ reset: true, newPeriodWithinEstimate: false, withinTolerance: false })
+    expect(r).toMatchObject({ withinTolerance: false, overspends: 1 })
+  })
+
+  it('tolerates a lagging counter: the after-reading is read again, and the verdict sums the phases', async () => {
+    const reads = [{ used: 510, remaining: 9490, resetAt: OLD }, { used: 540, remaining: 9460, resetAt: OLD }]
+    const before = { used: 510, remaining: 9490, resetAt: OLD }
+    await expect(settleElevenAfter(async () => reads.shift() ?? null, before, 30, { delayMs: 0 })).resolves.toMatchObject({ used: 540 })
+    const r = reconcileEleven([
+      { phase: 'auditions', what: 'audition pip hr', at, before, after: before, estimate: 30 },
+      { phase: 'auditions', what: 'audition bruno hr', at, before, after: { used: 570, remaining: 9430, resetAt: OLD }, estimate: 30 }
+    ])
+    expect(r.phases.map((p) => p.withinTolerance)).toEqual([false, false])
+    expect(r).toMatchObject({ withinTolerance: true, estimate: 60, apiDelta: 60 })
   })
 })
 
