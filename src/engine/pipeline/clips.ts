@@ -298,10 +298,10 @@ export async function generateClip(a: GenerateClipArgs): Promise<GeneratedClip> 
   if (a.polish) {
     try {
       const img = await comfyProvider({ svc, store, series, episode, what: `clip ${clip} keyframe polish` }).generate({
-        prompt: `${shot.action.replace(/s+/g, ' ').trim()} ${renderer === 'blender' ? CLIP_STYLE_3D : CLIP_STYLE}`,
+        prompt: `${shot.action.replace(/\s+/g, ' ').trim()} ${renderer === 'blender' ? CLIP_STYLE_3D : CLIP_STYLE}`,
         size: STILL_SIZE,
         format: 'png',
-        out: keyframe.replace(/.png$/i, '') + '-polished',
+        out: keyframe.replace(/\.png$/i, '') + '-polished',
         init: { image: keyframe, denoise: POLISH_DENOISE },
         signal: a.signal
       })

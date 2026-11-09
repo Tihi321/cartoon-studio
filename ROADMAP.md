@@ -86,6 +86,7 @@ Branch `CTS-30_vehicles-elevenlabs`, cut from `CTS-18_blender-3d`. The plan is `
 | **CTS-46** | Blender: `shapes.extent()` returns true half extents for a `box` (size / 2); the default outline width and the box bevel keep their old values through `build_character._tuned_extent` (no approved look moves; every box of `mini-vehicles` and pilot 4 sets its own outline, so nothing changed there); the fixture's `house` moved to [-13, 6], out of the auto `two` shot. | Done |
 | **CTS-47** | 3D wording instead of "cutout": the four personas, the bible, pitches, clip-shots, clip-review and writer prompts lead with the 3D toon look and keep the cutout wording in an old-canvas section; a new series stub starts with the toon 3D style (`outlinePx` 2), canvas only when the run is canvas; `videoPrompt` defaults to the 3D wording. | Done |
 | **CTS-48** | The starter agents follow the seed: `agents/` is yours once it exists, so it was never refreshed and the cutout-era personas stayed; a starter agent file that is still exactly an earlier seed version (`SEED_HISTORY`) now gets the new seed text at the next start; an edited one is kept and a fired one does not come back. | Done |
+| **CTS-49** | The keyframe polish prompt collapsed runs of the letter "s" (`/s+/g`) instead of whitespace and the polished file name matched any character before `png`: `/\s+/g` and `/\.png$/i` in `clips.ts`. | Done |
 
 Pilot 4 (series `pip-bruno-wheels`, about 60 s, hr and en, ElevenLabs voices, $0 and 0 Flow credits) and its acceptance criteria are in the creative hub's `HUB-31` plan.
 
