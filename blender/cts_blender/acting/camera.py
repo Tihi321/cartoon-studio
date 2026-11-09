@@ -6,7 +6,7 @@ The camera is a state (location, target, lens) per frame; the writer turns it in
 """
 import numpy as np
 
-from . import action
+from . import BOTH, action
 from .core import FPS, TAU, Clip, smoothstep, window
 
 CAM = "camera"
@@ -89,14 +89,14 @@ def _cam(ctx):
     return ctx.camera
 
 
-@action("cut")
+@action("cut", bodies=BOTH)
 def cut(ctx, actor, t0, t1, params):
     f0 = ctx.f(t0)
     shot = vec7(resolve_shot(ctx, params["shot"], f0))
     return _clip(f0, f0, f0, shot[None, :])
 
 
-@action("pan")
+@action("pan", bodies=BOTH)
 def pan(ctx, actor, t0, t1, params):
     f0, f1 = ctx.f(t0), ctx.f(t1)
     a = _cam(ctx).at(f0).copy()
@@ -105,7 +105,7 @@ def pan(ctx, actor, t0, t1, params):
     return _clip(f0, f1, f0, a[None, :] + (b - a)[None, :] * e)
 
 
-@action("push")
+@action("push", bodies=BOTH)
 def push(ctx, actor, t0, t1, params):
     """A slow dolly-in: the camera moves toward its target (by `amount` of the distance, or to the shot `to`)."""
     f0, f1 = ctx.f(t0), ctx.f(t1)
@@ -120,7 +120,7 @@ def push(ctx, actor, t0, t1, params):
     return _clip(f0, f1, f0, a[None, :] + (b - a)[None, :] * (0.15 * np.arange(f1 - f0 + 1)[:, None] / max(f1 - f0, 1) + 0.85 * e))
 
 
-@action("follow")
+@action("follow", bodies=BOTH)
 def follow(ctx, actor, t0, t1, params):
     """Keeps a walking actor framed: the camera trucks along behind the actor (a lagging filter), then holds."""
     f0, f1 = ctx.f(t0), ctx.f(t1)
@@ -140,7 +140,7 @@ def follow(ctx, actor, t0, t1, params):
     return _clip(f0, f1, f0, out)
 
 
-@action("shake_small")
+@action("shake_small", bodies=BOTH)
 def shake_small(ctx, actor, t0, t1, params):
     f0, f1 = ctx.f(t0), ctx.f(t1) + ctx.settle // 2
     n = f1 - f0 + 1

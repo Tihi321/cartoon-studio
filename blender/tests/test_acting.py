@@ -1,7 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """B2: the acting library. The registry names equal library.json; each gesture's keys stay inside [t0, t1 + settle] and come back to the rest pose;
-in a 3 m walk each planted foot moves less than 2 cm in world space during its contact phase; a tail spring settles within 1 s after the root stops."""
+in a 3 m walk each planted foot moves less than 2 cm in world space during its contact phase; a tail spring settles within 1 s after the root stops.
+B2v (HUB-31, vehicles): the registry's bodies equal library.json and each vehicle action keys only its parts; in a 5 m drive the wheels roll the
+distance the root travels (within 2 %) and stay on the ground (within 1 cm); in a chug the wheels stay on the track; honk and bounce settle to rest."""
 import copy
+import json
+import re
 import math
 import os
 import unittest
@@ -11,13 +15,15 @@ import numpy as np
 from mathutils import Vector
 
 from cts_blender import materials as M
-from cts_blender.acting import ACTIONS, compose, manifest, registry_names
+from cts_blender.acting import ACTIONS, compose, manifest, registry_bodies, registry_names
 from cts_blender.acting.core import FPS, SETTLE_S, Ctx
+from cts_blender.acting.vehicle import path_distance
 from cts_blender.build_character import build_character, read_spec, reset_scene
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 TILLY = os.path.join(ROOT, "tests", "fixtures", "mini3d", "cast", "tilly", "character.json")
 POINTS = {"oak": (-3.0, 2.0, 1.5), "seat": (0.0, 2.0, 0.45)}
+VEHICLES = os.path.join(ROOT, "tests", "fixtures", "mini-vehicles", "cast")
 
 
 def fresh(spec=None, seconds=14.0, yaw=90.0):
@@ -30,11 +36,31 @@ def fresh(spec=None, seconds=14.0, yaw=90.0):
 class Registry(unittest.TestCase):
     def test_registry_names_equal_library_json(self):
         self.assertEqual(registry_names(), sorted(manifest()))
+        self.assertEqual(registry_bodies(), {n: sorted(a["bodies"]) for n, a in manifest().items()})
+
+    def test_vehicle_actions_key_only_their_parts(self):
+        for cid in ("pip", "bruno"):
+            spec = vehicle_spec(cid)
+            vtype = spec["vehicle"]["type"]
+            for name, a in manifest().items():
+                if "vehicle" not in a["bodies"] or a["kind"] == "camera" or vtype not in a.get("vehicleTypes", [vtype]):
+                    continue
+                ctx, actor = fresh_vehicle(cid)
+                before = {k: v.copy() for d in actor.mix.layers.values() for k, v in d.items()}
+                p = {"path": [[0.0, 0.0], [4.0, 0.0]]} if a["kind"] == "locomotion" else ({"target": "oak"} if a["needsTarget"] else {})
+                ACTIONS[name](ctx, actor, 1.0, 1.0 + a["seconds"]["default"], dict(p, facing="front") if name == "turn" else p).apply(actor.mix)
+                mix = actor.mix
+                keyed = {k[0] for d in mix.layers.values() for k, v in d.items() if k not in before or np.abs(v - before[k]).max() > 1e-9}
+                keyed |= {f"lid_{s}" for s in "LR" if mix.lid[s].any()} | ({"mouth"} if mix.mouth_set.any() or mix.frown.any() else set())
+                keyed |= ({"lamp_glow"} if mix.glow.any() else set()) | {e["source"] for e in mix.puffs}
+                wild = {c for c in actor.rig.controls if ("wheel_*" in a["parts"] and c.startswith("wheel_")) or ("antenna*" in a["parts"] and re.fullmatch(r"antenna\d+", c))}
+                self.assertTrue(keyed, f"{cid} {name} does nothing")
+                self.assertLessEqual(keyed, set(a["parts"]) | wild, f"{cid} {name} keys controls outside its parts")
 
 
 class Gestures(unittest.TestCase):
     def test_keys_stay_in_window_and_return_to_rest(self):
-        # creature gestures on the creature fixture; the vehicle ones are stubs until CTS-34 (B2v tests them on a vehicle)
+        # creature gestures on the creature fixture (the vehicle versions are tested on a vehicle in B2v)
         names = [n for n, a in manifest().items() if a["kind"] in ("gesture", "react") and "creature" in a["bodies"] and n not in ("idle", "look_at", "sit", "stand_up")]
         self.assertGreaterEqual(len(names), 10)
         for name in names:
@@ -125,6 +151,78 @@ class Spring(unittest.TestCase):
         self.assertGreater(math.degrees(during), 1.5, "the tail never moved while walking")
         after = float(mag[stop + FPS :].max())
         self.assertLess(after, max(math.radians(0.5), 0.08 * during), f"tail still swings {math.degrees(after):.2f} deg a second after the root stopped")
+
+
+# ---------------------------------------------------------------- B2v: vehicles
+
+
+def vehicle_spec(cid):
+    with open(os.path.join(VEHICLES, cid, "character.json"), encoding="utf-8") as f:
+        return json.load(f)
+
+
+def fresh_vehicle(cid, seconds=10.0, xy=(0.0, 0.0), yaw=90.0):
+    ctx = Ctx(int(seconds * FPS), seed=3, points={"oak": (3.0, -2.0, 1.0)})
+    actor = ctx.add_actor(cid, vehicle_spec(cid), {"xy": xy, "yaw": yaw})
+    return ctx, actor
+
+
+def wheel_centres(actor):
+    """{wheel: (n, 3)} world centres of the wheels, from the composed channels (what compose.write keys)."""
+    return {w: m[:, :3, 3] for w, m in actor.mix.world(actor.rig.spec["vehicle"]["wheels"]).items()}
+
+
+class Vehicles(unittest.TestCase):
+    def test_drive_rolls_the_distance_and_keeps_the_wheels_on_the_ground(self):
+        ctx, actor = fresh_vehicle("pip", 9.0, yaw=56.0)
+        path = [[0.0, 0.0], [3.0, -2.0], [4.0, -4.0]]  # 5.84 m with a bend
+        compose.build(ctx, {"pip": {"actions": [{"action": "drive", "t0": 0.5, "t1": 4.5, "params": {"path": path}}]}})
+        R = actor.rig.spec["vehicle"]["wheelRadius"]
+        xy = actor.mix.value("root", "location")[:, :2]
+        travelled = float(np.linalg.norm(np.diff(xy, axis=0), axis=1).sum())
+        self.assertGreater(travelled, 5.0)
+        self.assertLess(float(np.linalg.norm(xy[-1] - path[-1])), 0.01, "the drive does not end on the last path point")
+        rolled = np.mean([float(np.abs(np.diff(actor.mix.value(w, "rotation_euler")[:, 0])).sum()) * R for w in actor.rig.spec["vehicle"]["wheels"]])
+        self.assertLess(abs(rolled - travelled) / travelled, 0.02, f"the wheels roll {rolled:.3f} m for {travelled:.3f} m of travel")
+        for w, c in wheel_centres(actor).items():
+            self.assertLess(float(np.abs(c[:, 2] - R).max()), 0.01, f"{w} leaves the ground")
+        body = actor.mix.value("body", "rotation_euler", ("base",))
+        self.assertGreater(math.degrees(float(np.abs(body[:, 0]).max())), 1.0, "no squat, nose lift or nose dip")
+        self.assertGreater(math.degrees(float(np.abs(body[:, 1]).max())), 0.3, "no roll in the bend")
+
+    def test_chug_keeps_the_wheels_on_the_track(self):
+        ctx, actor = fresh_vehicle("bruno", 12.0, yaw=31.0)
+        track = [[-3.0, 5.0], [9.0, -15.0]]  # straight: a rigid six-wheeler cannot keep every axle on a curve within 1 cm
+        rail = 0.12
+        marks = [[0.0, 0.0], [3.0, -5.0], [6.0, -10.0]]
+        compose.build(ctx, {"bruno": {"actions": [{"action": "chug", "t0": 0.5, "t1": 8.0, "params": {"path": marks, "z": rail}}]}})
+        clip = actor.clips[0][1]
+        self.assertGreater(clip.meta["distance"], 10.0)
+        self.assertGreaterEqual(len(clip.meta["puffs"]), 5)
+        R = actor.rig.spec["vehicle"]["wheelRadius"]
+        for w, c in wheel_centres(actor).items():
+            side = np.abs(path_distance(track, c[:, :2]) - abs(actor.rig.rest_loc[w][0]))
+            self.assertLess(float(side.max()), 0.01, f"{w} leaves the track sideways by {float(side.max()):.3f} m")
+            self.assertLess(float(np.abs(c[ctx.f(8.0) :, 2] - R - rail).max()), 0.01, f"{w} is not on the rail top")
+
+    def test_honk_and_bounce_return_to_rest(self):
+        for name in ("honk", "bounce"):
+            ctx, actor = fresh_vehicle("pip")
+            before = {k: v.copy() for k, v in actor.mix.layers["base"].items()}
+            t0, t1 = 2.0, 2.0 + manifest()[name]["seconds"]["default"]
+            clip = ACTIONS[name](ctx, actor, t0, t1, {})
+            clip.apply(actor.mix)
+            lo, hi = clip.span()
+            self.assertGreaterEqual(lo, ctx.f(t0), name)
+            self.assertLessEqual(hi, ctx.f(t1) + ctx.settle, name)
+            for k, v in actor.mix.layers["base"].items():
+                np.testing.assert_allclose(v, before[k], err_msg=f"{name} changes the state {k}")
+            for layer, d in actor.mix.layers.items():
+                for key, arr in d.items() if layer != "base" else ():
+                    self.assertLess(float(np.abs(arr[hi:]).max()), 1e-6, f"{name} {key} does not return to rest")
+            self.assertEqual(float(actor.mix.lid["L"][hi:].max()), 0.0, name)
+            self.assertEqual(float(np.abs(actor.mix.glow[hi:]).max()), 0.0, name)
+        self.assertGreater(float(actor.mix.value("root", "location")[:, 2].max()), 0.05, "bounce: the wheels never leave the ground")
 
 
 if __name__ == "__main__":

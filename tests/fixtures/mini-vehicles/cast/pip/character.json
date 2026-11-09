@@ -47,7 +47,7 @@
     "control": "head",
     "eyes": { "x": 0.22, "z": 0.2, "r": 0.1, "faceY": -0.12, "pupil": { "size": 0.05, "lead": 0.01 }, "lamp": { "glow": "#fff2b0", "rim": "chrome" } },
     "lids": { "colour": "body" },
-    "brows": { "colour": "chrome", "at": [0, -0.1, 0.33], "length": 0.1 },
+    "brows": { "colour": "chrome", "at": [0.22, -0.1, 0.33], "length": 0.1 },
     "mouth": { "at": [0, -0.25, -0.12], "scale": 0.1, "inner": "#3a2020" }
   }
 }

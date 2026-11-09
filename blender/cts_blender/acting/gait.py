@@ -12,7 +12,7 @@ import math
 
 import numpy as np
 
-from . import action
+from . import BOTH, action
 from .core import FPS, TAU, Clip, euler_from_dir, knots, shift, smoothstep, wrap_pi, window
 from .limbs import arm_delta, clamp_arm, hang_dir, swing_dirs
 
@@ -263,8 +263,12 @@ def facing_yaw(ctx, actor, f, params):
     return math.atan2(v[0], -v[1]) if np.linalg.norm(v) > 1e-6 else yaw0
 
 
-@action("turn")
+@action("turn", bodies=BOTH)
 def turn(ctx, actor, t0, t1, params):
+    if actor.rig.spec.get("kind") == "vehicle":  # HUB-31: a car turns on a short arc, a train does not turn
+        from .vehicle import turn as vehicle_turn
+
+        return vehicle_turn(ctx, actor, t0, t1, params)
     rig = actor.rig
     f0, f1 = ctx.f(t0), ctx.f(t1)
     clip = Clip(f0, f1)

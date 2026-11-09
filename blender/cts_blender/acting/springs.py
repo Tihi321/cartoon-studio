@@ -5,6 +5,7 @@ A chain is the controls `<stem>1..n` (`ear_L1`, `tail1`, `acc_scarf1`) with `spr
 otherwise). Each joint is a rod hanging on a pivot: when the pivot accelerates, the rod's tip lags (angular acceleration -(u x a) / length), a spring
 (stiffness k, damping c) pulls the joint back to its rest angle, and every joint after the first feels the pivot motion of the one before it. The
 base acceleration comes from the world motion of the chain's parent, taken from the composed channels (forward kinematics), so a walk, a hop or a nod shakes them.
+A vehicle's antenna (`antenna1..n`, HUB-31) is the same chain on `body`, with a lower gain and a smaller swing; wheels are never a chain.
 """
 import math
 
@@ -60,6 +61,9 @@ def bake_secondary(ctx, actor):
         om = np.zeros((nj, 3))
         out = np.zeros((nj, n, 3))
         gain = 0.9 * rig.energy
+        max_angle = MAX_ANGLE
+        if stem == "antenna":  # HUB-31: a vehicle's whip antenna is a stiffer rod than an ear, and swings less
+            gain, max_angle = 0.45 * rig.energy, math.radians(40)
         for f in range(n):
             for _ in range(SUBSTEPS):
                 a_piv = a_loc[f].copy()
@@ -78,8 +82,8 @@ def bake_secondary(ctx, actor):
                     # keep the joint's own angle sane
                     rel = psi[i] - (psi[i - 1] if i else 0.0)
                     m = float(np.linalg.norm(rel))
-                    if m > MAX_ANGLE:
-                        psi[i] = (psi[i - 1] if i else 0.0) + rel * (MAX_ANGLE / m)
+                    if m > max_angle:
+                        psi[i] = (psi[i - 1] if i else 0.0) + rel * (max_angle / m)
                         om[i] *= 0.5
             for i in range(nj):
                 out[i, f] = psi[i] - (psi[i - 1] if i else 0.0)

@@ -9,12 +9,21 @@ import math
 
 import numpy as np
 
-from . import action
+from . import BOTH, action
 from .core import FPS, TAU, Clip, gesture_env, knots, shift, smoothstep, sphere_dir, window, wrap_pi
 from .limbs import arm_delta, clamp_arm
 
 DEG = math.radians
 SLOT = {"rest": 0, "A": 1, "E": 2, "O": 3, "U": 4, "MBP": 5}
+
+
+def _vehicle(actor):
+    """The vehicle family (HUB-31) when the actor is a vehicle, else None: a shared action branches to it before the creature code."""
+    if actor is not None and actor.rig.spec.get("kind") == "vehicle":
+        from . import vehicle
+
+        return vehicle
+    return None
 
 
 def _frames(ctx, t0, t1):
@@ -69,9 +78,12 @@ def _aim(ctx, actor, f, point):
 # ---------------------------------------------------------------- looking, blinking, idle
 
 
-@action("look_at")
+@action("look_at", bodies=BOTH)
 def look_at(ctx, actor, t0, t1, params):
     """Pupils lead, the head follows 2-3 frames later, the body only past `bodyPastDeg` (60). Holds on the target until the next look_at (`_hold_to`)."""
+    V = _vehicle(actor)
+    if V:
+        return V.look_at(ctx, actor, t0, t1, params)
     rig = actor.rig
     f0, f1 = ctx.f(t0), ctx.f(t1)
     clip = Clip(f0, f1)
@@ -124,8 +136,11 @@ def blink_amounts():
     return np.array([0.0, 0.55, 1.0, 1.0, 0.5, 0.0])
 
 
-@action("blink")
+@action("blink", bodies=BOTH)
 def blink(ctx, actor, t0, t1, params):
+    V = _vehicle(actor)
+    if V:
+        return V.blink(ctx, actor, t0, t1, params)
     f0, f1 = ctx.f(t0), ctx.f(t1)
     clip = Clip(f0, f1)
     clip.lid(f0, blink_amounts())
@@ -165,7 +180,10 @@ def idle(ctx, actor, t0, t1, params):
 
 def idle_clip(ctx, actor, f0=0, f1=None):
     """Breathing, a slow weight shift, head and arm micro-motion, seeded; fades out under walking so planted feet stay put. Computed over the whole
-    timeline (so it is the same whatever the window), written for frames f0..f1."""
+    timeline (so it is the same whatever the window), written for frames f0..f1. A vehicle gets `idle_engine` instead."""
+    V = _vehicle(actor)
+    if V:
+        return V.idle_engine_clip(ctx, actor, f0, f1)
     rig, n = actor.rig, ctx.n
     f1 = n - 1 if f1 is None else min(f1, n - 1)
     clip = Clip(f0, f1)
@@ -195,8 +213,11 @@ def idle_clip(ctx, actor, f0=0, f1=None):
 # ---------------------------------------------------------------- gestures
 
 
-@action("nod")
+@action("nod", bodies=BOTH)
 def nod(ctx, actor, t0, t1, params):
+    V = _vehicle(actor)
+    if V:
+        return V.nod(ctx, actor, t0, t1, params)
     rig = actor.rig
     f0, f1, n, m = _frames(ctx, t0, t1)
     clip = Clip(f0, f1)
@@ -215,8 +236,11 @@ def nod(ctx, actor, t0, t1, params):
     return clip
 
 
-@action("shake_head")
+@action("shake_head", bodies=BOTH)
 def shake_head(ctx, actor, t0, t1, params):
+    V = _vehicle(actor)
+    if V:
+        return V.shake_head(ctx, actor, t0, t1, params)
     rig = actor.rig
     f0, f1, n, m = _frames(ctx, t0, t1)
     clip = Clip(f0, f1)
@@ -354,8 +378,11 @@ def _chain_first(rig, stem_prefix):
     return [n for n in rig.controls if n in (f"{stem_prefix}_L1", f"{stem_prefix}_R1")]
 
 
-@action("react_surprised")
+@action("react_surprised", bodies=BOTH)
 def react_surprised(ctx, actor, t0, t1, params):
+    V = _vehicle(actor)
+    if V:
+        return V.react_surprised(ctx, actor, t0, t1, params)
     rig = actor.rig
     f0, f1, n, m = _frames(ctx, t0, t1)
     clip = Clip(f0, f1)
@@ -379,8 +406,11 @@ def react_surprised(ctx, actor, t0, t1, params):
     return clip
 
 
-@action("laugh")
+@action("laugh", bodies=BOTH)
 def laugh(ctx, actor, t0, t1, params):
+    V = _vehicle(actor)
+    if V:
+        return V.laugh(ctx, actor, t0, t1, params)
     rig = actor.rig
     f0, f1, n, m = _frames(ctx, t0, t1)
     clip = Clip(f0, f1)
@@ -404,8 +434,11 @@ def laugh(ctx, actor, t0, t1, params):
     return clip
 
 
-@action("droop")
+@action("droop", bodies=BOTH)
 def droop(ctx, actor, t0, t1, params):
+    V = _vehicle(actor)
+    if V:
+        return V.droop(ctx, actor, t0, t1, params)
     rig = actor.rig
     f0, f1, n, m = _frames(ctx, t0, t1)
     clip = Clip(f0, f1)
@@ -431,6 +464,9 @@ def droop(ctx, actor, t0, t1, params):
 
 def talking_clip(ctx, actor, accents, speaking=None):
     """While the actor speaks: a small head dip and an eyebrow lift on each word onset (the head layer), never the mouth (that is the lip-sync)."""
+    V = _vehicle(actor)
+    if V:
+        return V.talking_clip(ctx, actor, accents)
     rig = actor.rig
     clip = Clip(0, ctx.n - 1)
     rng = ctx.rng("talk", actor.id)
@@ -452,6 +488,9 @@ def talking_clip(ctx, actor, accents, speaking=None):
 
 def listening_actions(ctx, listener, speaker_id, speaking, accents, explicit_looks=()):
     """When nobody gives the listener a beat: look at the speaker as they start, nod now and then on their accents (not more often than every 1.6 s)."""
+    V = _vehicle(listener)
+    if V:
+        return V.listening_actions(ctx, listener, speaker_id, speaking, accents, explicit_looks)
     out = []
     taken = {round(a["t0"], 1) for a in explicit_looks}
     for t0, t1 in speaking:

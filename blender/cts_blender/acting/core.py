@@ -180,6 +180,8 @@ def _zrange(p):
         half = s[1]
     elif sh == "arc":
         half = s[0]
+    elif sh == "cylinder":  # HUB-31: [r] (length 2r), [r, length] or [rx, ry, length], along z
+        half = (s[1] if len(s) == 2 else s[2] if len(s) > 2 else 2 * s[0]) / 2
     else:
         half = s[2] if len(s) > 2 else s[0]
     return z - half, z + half
@@ -204,7 +206,8 @@ class Rig:
         self.controls = spec["controls"]
         m = spec["motion"]
         self.tempo, self.energy, self.bounce = float(m["tempo"]), float(m["energy"]), float(m["bounce"])
-        self.walk = m["walk"]
+        self.walk = m.get("walk")  # a vehicle has `drive` instead (HUB-31)
+        self.kind = spec.get("kind", "creature")
         self.parts = list(spec["parts"]) + list(spec.get("accessories") or [])
         self.order = self._order()
         self.rest_loc = {n: np.array(c["at"], dtype=float) for n, c in self.controls.items()}
@@ -277,7 +280,7 @@ class Rig:
         stems = {}
         for n in self.controls:
             stem, i = chain_stem(n)
-            if stem and not n.startswith("lid_") and not n.startswith("pupil_"):
+            if stem and not n.startswith("lid_") and not n.startswith("pupil_") and not n.startswith("wheel_"):
                 stems.setdefault(stem, []).append((i, n))
         return {s: [n for _, n in sorted(v)] for s, v in stems.items()}
 
@@ -314,6 +317,8 @@ class Mix:
         self.mouth = np.zeros(n, dtype=int)  # index into SLOTS, 0 = rest
         self.mouth_set = np.zeros(n, dtype=bool)
         self.frown = np.zeros(n, dtype=bool)
+        self.glow = np.zeros(n)  # vehicles: added to the lamp glow (`lamp_glow`, 0..1 after the rest value), HUB-31
+        self.puffs = []  # vehicles: puff events {f, source, size, drift} for the puff pool, HUB-31
 
     def rest(self, ctl, prop):
         r = self.rig
@@ -443,10 +448,20 @@ class Clip:
             self.items.append(("face", "mouth", "frown", int(f0), np.asarray(frown, dtype=bool), "frown"))
         return self
 
+    def glow(self, f0, vals):
+        """Adds to the lamp glow of a vehicle (a flash is +1, lamps off is -1)."""
+        self.items.append(("face", "lamp", "glow", int(f0), np.asarray(vals, dtype=float), "glow"))
+        return self
+
+    def puff(self, f, source, size=1.0, drift=0.0):
+        """A puff of smoke from `source` (chimney or exhaust) at frame f; drift is the vehicle's speed (m/s), so the puff stays behind."""
+        self.items.append(("face", "puff", source, int(f), np.array([size, drift], dtype=float), "puff"))
+        return self
+
     def span(self):
-        """(first frame, last frame) of every key in the clip."""
+        """(first frame, last frame) of every key in the clip (a puff counts as its start frame)."""
         lo = min((it[3] for it in self.items), default=self.f0)
-        hi = max((it[3] + len(it[4]) - 1 for it in self.items), default=self.f1)
+        hi = max((it[3] + (len(it[4]) - 1 if it[5] != "puff" else 0) for it in self.items), default=self.f1)
         return lo, hi
 
     def apply(self, mix):
@@ -475,6 +490,13 @@ class Clip:
                 a, b = max(f0, 0), min(f0 + len(vals), mix.n)
                 if b > a:
                     mix.frown[a:b] |= vals[a - f0 : b - f0]
+            elif kind == "glow":
+                a, b = max(f0, 0), min(f0 + len(vals), mix.n)
+                if b > a:
+                    mix.glow[a:b] += vals[a - f0 : b - f0]
+            elif kind == "puff":
+                if 0 <= f0 < mix.n:
+                    mix.puffs.append({"f": f0, "source": prop, "size": float(vals[0]), "drift": float(vals[1])})
 
 
 # ---------------------------------------------------------------- actors and the context
