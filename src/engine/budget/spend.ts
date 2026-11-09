@@ -5,7 +5,7 @@ import { budgetSchema } from '../../shared/schemas'
 import type { BudgetConfig } from '../../shared/schemas'
 import { atomicWrite } from '../store/atomic'
 import type { SeriesStore } from '../series/service'
-import type { SpendEntry as LedgerEntry } from '../../shared/contracts'
+import type { ElevenCounter, ElevenReading, SpendEntry as LedgerEntry } from '../../shared/contracts'
 import { estimateMessagesTokens } from '../models/types'
 import type { ChatMessage } from '../models/types'
 import type { ModelInfo } from '../models/registry'
@@ -438,11 +438,11 @@ function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
 const round = (n: number) => Math.round(n * 1e9) / 1e9
 
 /** The caps, the spent amount and the open reservations of an episode. */
-export async function budgetState(store: SeriesStore, series: string, episode: string): Promise<{ capUsd: number; flowCreditsCap: number; spentUsd: number; spentCredits: number; entries: LedgerEntry[]; approved: boolean }> {
+export async function budgetState(store: SeriesStore, series: string, episode: string): Promise<{ capUsd: number; flowCreditsCap: number; spentUsd: number; spentCredits: number; entries: LedgerEntry[]; elevenReadings: ElevenReading[]; approved: boolean }> {
   const budget = await store.readBudget(series, episode)
   const spend = await store.readSpend(series, episode)
   const sum = (c: ChargeCurrency) => round(spend.entries.filter((e) => e.currency === c).reduce((a, e) => a + e.amount, 0))
-  return { capUsd: budget?.capUsd ?? 0, flowCreditsCap: budget?.flowCreditsCap ?? 0, spentUsd: sum('usd'), spentCredits: sum('credits'), entries: spend.entries, approved: budget !== null }
+  return { capUsd: budget?.capUsd ?? 0, flowCreditsCap: budget?.flowCreditsCap ?? 0, spentUsd: sum('usd'), spentCredits: sum('credits'), entries: spend.entries, elevenReadings: spend.elevenReadings ?? [], approved: budget !== null }
 }
 
 /**
@@ -486,7 +486,7 @@ export async function charge<T>(args: ChargeArgs, run: () => Promise<T>, opts: C
   await withLock(key, async () => {
     release()
     const spend = await store.readSpend(series, episode)
-    await store.writeSpend(series, episode, { schema: 'cts.spend/1', entries: [...spend.entries, entry] })
+    await store.writeSpend(series, episode, { ...spend, entries: [...spend.entries, entry] })
   })
   return { value, amount, currency, entry }
 }
@@ -500,7 +500,94 @@ export async function recordElevenCredits(args: { store: SeriesStore; series: st
   const entry: LedgerEntry = { t: localIso(new Date()), provider: 'elevenlabs', model: args.model, what: args.what, currency: 'eleven-credits', amount: round(Math.max(0, args.amount)) }
   await withLock(`${store.dataDir}|${series}|${episode}`, async () => {
     const spend = await store.readSpend(series, episode)
-    await store.writeSpend(series, episode, { schema: 'cts.spend/1', entries: [...spend.entries, entry] })
+    await store.writeSpend(series, episode, { ...spend, entries: [...spend.entries, entry] })
   })
   return entry
+}
+
+/** CTS-43: the counter of a `flow_elevenlabs_status` answer, or null when it could not be read (not ready, down, 429, no `used`). */
+export function elevenCounterOf(st: { ready: boolean; used?: number; remaining?: number; resetAt?: string | null } | null | undefined): ElevenCounter | null {
+  if (!st?.ready || typeof st.used !== 'number' || !Number.isFinite(st.used)) return null
+  return { used: st.used, remaining: typeof st.remaining === 'number' ? st.remaining : null, resetAt: st.resetAt ?? null }
+}
+
+/** CTS-43: appends the account counter read before and after one ElevenLabs voice phase to spend.json (`elevenReadings`); the entries stay as they are. */
+export async function recordElevenReading(args: { store: SeriesStore; series: string; episode: string; reading: Omit<ElevenReading, 'at'> & { at?: string } }): Promise<ElevenReading> {
+  const { store, series, episode } = args
+  const reading: ElevenReading = { ...args.reading, at: args.reading.at ?? localIso(new Date()), estimate: round(Math.max(0, args.reading.estimate)) }
+  await withLock(`${store.dataDir}|${series}|${episode}`, async () => {
+    const spend = await store.readSpend(series, episode)
+    await store.writeSpend(series, episode, { ...spend, elevenReadings: [...(spend.elevenReadings ?? []), reading] })
+  })
+  return reading
+}
+
+export interface ElevenPhaseCheck {
+  phase: ElevenReading['phase']
+  what: string
+  at: string
+  estimate: number
+  /** The account's credits spent in the phase: `after.used - before.used`; after a reset `after.used` (the new period only); null when a reading is missing. */
+  apiDelta: number | null
+  /** The billing period changed between the readings (`resetAt` differs). */
+  reset: boolean
+  /** Reset only: the old period's counter at the `before` reading; what the phase spent in the old period after it is unknown. */
+  oldPeriodUsedBefore?: number
+  /** Reset only: the new period's count is not above the estimate (+ tolerance), so the phase's credits are accounted for across both periods. */
+  newPeriodWithinEstimate?: boolean
+  /** Normal phase: |apiDelta - estimate| <= tolerance x estimate. Null when not judged (a reading is missing, or a reset). */
+  withinTolerance: boolean | null
+  note?: string
+}
+
+export interface ElevenReconciliation {
+  tolerance: number
+  phases: ElevenPhaseCheck[]
+  /** Over the judged phases (both readings, same period). */
+  estimate: number
+  apiDelta: number
+  /** Every judged phase within the tolerance; null when no phase could be judged. Reset and unread phases are not counted here. */
+  withinTolerance: boolean | null
+  resets: number
+  unread: number
+}
+
+/**
+ * CTS-43: our `eleven-credits` estimates against the account counter, phase by phase. Same `resetAt` before and after: the counter delta is
+ * compared with the estimate (±tolerance). A changed `resetAt` is a new billing period: `reset: true`, `apiDelta` is the new period's count
+ * and the old period's share is unknown, so it is reported apart, never as a mismatch. A missing reading (status down or 429) is `unread`.
+ */
+export function reconcileEleven(readings: readonly ElevenReading[], tolerance = 0.1): ElevenReconciliation {
+  const phases: ElevenPhaseCheck[] = []
+  let estimate = 0
+  let apiDelta = 0
+  let judged = 0
+  let ok = true
+  for (const r of readings) {
+    const base = { phase: r.phase, what: r.what, at: r.at, estimate: r.estimate }
+    if (!r.before || !r.after) {
+      phases.push({ ...base, apiDelta: null, reset: false, withinTolerance: null, note: `the ElevenLabs status was not read ${r.before ? 'after' : 'before'} the phase` })
+      continue
+    }
+    if (r.before.resetAt !== r.after.resetAt) {
+      phases.push({
+        ...base,
+        apiDelta: r.after.used,
+        reset: true,
+        oldPeriodUsedBefore: r.before.used,
+        newPeriodWithinEstimate: r.after.used <= r.estimate * (1 + tolerance) + EPS,
+        withinTolerance: null,
+        note: `the billing period reset (resetAt ${r.before.resetAt ?? 'none'} -> ${r.after.resetAt ?? 'none'}): ${r.after.used} credit(s) in the new period; the old period's share after ${r.before.used} is unknown`
+      })
+      continue
+    }
+    const d = round(r.after.used - r.before.used)
+    const within = Math.abs(d - r.estimate) <= tolerance * r.estimate + EPS
+    judged++
+    estimate += r.estimate
+    apiDelta += d
+    ok &&= within
+    phases.push({ ...base, apiDelta: d, reset: false, withinTolerance: within })
+  }
+  return { tolerance, phases, estimate: round(estimate), apiDelta: round(apiDelta), withinTolerance: judged ? ok : null, resets: phases.filter((p) => p.reset).length, unread: phases.filter((p) => p.apiDelta === null).length }
 }

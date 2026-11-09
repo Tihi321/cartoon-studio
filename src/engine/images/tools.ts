@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { z } from 'zod'
-import { budgetState, localIso } from '../budget/spend'
+import { budgetState, localIso, reconcileEleven } from '../budget/spend'
 import type { Tool, ToolDef } from '../mcp/tools'
 import type { CtsService } from '../service'
 import { assertId } from '../series/paths'
@@ -51,7 +51,7 @@ export function imageTools(svc: CtsService, def: ToolDef): Tool[] {
     ),
     def(
       'cts_budget_get',
-      'Read an episode budget: the caps (0 when there is no budget.json), what is spent per currency (usd, Flow credits), what is left, and the ledger (spend.json).',
+      'Read an episode budget: the caps (0 when there is no budget.json), what is spent per currency (usd, Flow credits, ElevenLabs free-tier credits), what is left, the ledger (spend.json), and eleven: the ElevenLabs reconciliation (CTS-43) of each voice phase, our estimate against the account counter read before and after it (apiDelta, withinTolerance ±10 %; a billing-period reset between the readings is reset: true and not judged; a status that could not be read is unread).',
       z.object({ series, episode }),
       async (a) => {
         const s = await budgetState(store(), a.series, a.episode)
@@ -63,7 +63,9 @@ export function imageTools(svc: CtsService, def: ToolDef): Tool[] {
           spentCredits: s.spentCredits,
           leftUsd: Math.max(0, Math.round((s.capUsd - s.spentUsd) * 1e9) / 1e9),
           leftCredits: Math.max(0, Math.round((s.flowCreditsCap - s.spentCredits) * 1e9) / 1e9),
-          ledger: s.entries
+          spentElevenCredits: Math.round(s.entries.filter((e) => e.currency === 'eleven-credits').reduce((x, e) => x + e.amount, 0) * 1e9) / 1e9,
+          ledger: s.entries,
+          eleven: reconcileEleven(s.elevenReadings)
         }
       }
     ),

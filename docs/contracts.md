@@ -547,6 +547,15 @@ No `budget.json` means both caps are 0, so nothing paid runs. `capUsd` caps mone
 the ledger, one entry per paid call, appended after it (`currency` `usd` or `credits`). HUB-31: ElevenLabs free-tier lines and auditions are
 recorded too, as `currency: "eleven-credits"` (never money, no cap here: flow-music-mcp refuses past the free quota).
 
+CTS-43: `elevenReadings` (optional; older files without it still parse) holds one reading per ElevenLabs voice phase, a `cts_voice_audition`
+call or the pipeline's audition of a line (`phase: "auditions"`) and a voice run that used ElevenLabs (`phase: "voice"`): the account counter of
+`flow_elevenlabs_status` before and after the phase (`{used, remaining, resetAt}`, `null` when the status could not be read) and `estimate`,
+the sum of the phase's `eleven-credits` entries. `cts_budget_get` reconciles them (`eleven`): with the same `resetAt` before and after,
+`apiDelta = after.used - before.used` and `withinTolerance` is `|apiDelta - estimate| <= 10 % of estimate`; a changed `resetAt` is a new
+billing period, so `reset: true`, `apiDelta = after.used` (the new period only), `oldPeriodUsedBefore = before.used` (the old period's share
+after it is unknown) and `newPeriodWithinEstimate`, never a mismatch; a missing reading is unread and not judged. The overall
+`withinTolerance` covers only the judged phases (null when there is none).
+
 ```json
 { "schema": "cts.budget/1", "capUsd": 0, "flowCreditsCap": 50, "approvedBy": "user", "approvedAt": "2026-11-07T10:00:00Z", "note": "pilot: no paid images, 50 Flow credits" }
 ```
@@ -557,6 +566,9 @@ recorded too, as `currency: "eleven-credits"` (never money, no cap here: flow-mu
   "entries": [
     { "t": "2026-11-07T11:30:00Z", "provider": "flow", "model": "veo-3-fast", "what": "intro clip", "currency": "credits", "amount": 12 },
     { "t": "2026-11-09T10:05:00Z", "provider": "elevenlabs", "model": "eleven_multilingual_v2", "what": "voice hr l02", "currency": "eleven-credits", "amount": 15 }
+  ],
+  "elevenReadings": [
+    { "phase": "voice", "what": "voice hr", "at": "2026-11-09T10:06:00Z", "before": { "used": 510, "remaining": 9490, "resetAt": "2026-12-10T00:00:00Z" }, "after": { "used": 525, "remaining": 9475, "resetAt": "2026-12-10T00:00:00Z" }, "estimate": 15 }
   ]
 }
 ```

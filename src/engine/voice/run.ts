@@ -3,13 +3,13 @@ import path from 'node:path'
 import { z } from 'zod'
 import { readMd } from '../store/atomic'
 import { alignWords } from '../anim/visemes'
-import type { Lang, VoiceLine, VoiceManifest } from '../../shared/contracts'
+import type { ElevenReading, Lang, VoiceLine, VoiceManifest } from '../../shared/contracts'
 import type { VoiceProvider } from '../../shared/media'
 import type { ComfyClient } from '../comfy/client'
 import { SeriesFileError } from '../series/service'
 import type { SeriesStore } from '../series/service'
 import type { ElevenModelInfo, ElevenStatus, FlowClient } from '../studios/flow'
-import { recordElevenCredits } from '../budget/spend'
+import { elevenCounterOf, recordElevenCredits, recordElevenReading } from '../budget/spend'
 import type { VibeTtsClient, VibeVoices } from '../studios/vibetts'
 import { allocateVoice, DEFAULT_LOCAL_ORDER, localChain, voiceReads } from './allocate'
 import type { LocalOrder, VoiceAllocationEntry, VoiceAvailability, VoiceProviderUsed } from './allocate'
@@ -394,6 +394,8 @@ export interface VoiceRunReport {
   seconds: Record<string, number>
   /** HUB-31: the ElevenLabs free-tier credits this run spent (also in spend.json as `eleven-credits`). */
   elevenCredits: number
+  /** CTS-43: the account counter before and after this run's ElevenLabs lines (also in spend.json `elevenReadings`); absent when the run did not use ElevenLabs. */
+  elevenReading?: ElevenReading
 }
 
 const key = (lang: string, id: string): string => `${lang}/${id}`
@@ -456,6 +458,7 @@ export async function runVoice(inp: VoiceRunInput): Promise<VoiceRunReport> {
 
   const tmp = path.join(store.dataDir, 'state', 'tmp', `voice-${series}-${episode}-${process.pid}`)
   await fs.mkdir(tmp, { recursive: true })
+  let ledgered = 0
   try {
     const p = await probe(deps, config, provider, [...new Set(jobs.map((j) => j.lang))], inp.signal)
     const q = await deps.quota.read()
@@ -493,8 +496,10 @@ export async function runVoice(inp: VoiceRunInput): Promise<VoiceRunReport> {
           if (s.credits !== undefined && s.credits > 0) {
             // spent whatever happens to the audio next
             report.elevenCredits += s.credits
-            await recordElevenCredits({ store, series, episode, model: s.engine ?? 'elevenlabs', what: `voice ${job.lang} ${job.id}`, amount: s.credits }).catch((e: unknown) =>
-              report.warnings.push(`spend.json: the ${s.credits} ElevenLabs credit(s) of ${job.lang} ${job.id} were not recorded: ${(e as Error).message}`)
+            await recordElevenCredits({ store, series, episode, model: s.engine ?? 'elevenlabs', what: `voice ${job.lang} ${job.id}`, amount: s.credits }).then(
+              () => (ledgered += s.credits!),
+              (e: unknown) =>
+                report.warnings.push(`spend.json: the ${s.credits} ElevenLabs credit(s) of ${job.lang} ${job.id} were not recorded: ${(e as Error).message}`)
             )
           }
           const rel = clipFile(job.lang, job.id)
@@ -593,6 +598,16 @@ export async function runVoice(inp: VoiceRunInput): Promise<VoiceRunReport> {
         m.allocation = { provider: 'pinned', reason: 'the clips were asked for a provider by their characters' }
       }
       await save(lang)
+    }
+
+    // CTS-43: the account counter after the ElevenLabs lines, next to the probe's reading before them
+    if (p.eleven && (ledgered > 0 || Object.values(allocation).some((a) => a.provider === 'elevenlabs'))) {
+      const after = deps.flow.elevenStatus ? elevenCounterOf(await deps.flow.elevenStatus(inp.signal).catch(() => null)) : null
+      const langsSpoken = Object.values(allocation).filter((a) => a.provider === 'elevenlabs').map((a) => a.lang)
+      report.elevenReading = await recordElevenReading({ store, series, episode, reading: { phase: 'voice', what: `voice ${langsSpoken.join(',') || 'elevenlabs'}`, before: elevenCounterOf(p.eleven.status), after, estimate: ledgered } }).catch((e: unknown) => {
+        report.warnings.push(`spend.json: the ElevenLabs counter reading was not recorded: ${(e as Error).message}`)
+        return undefined
+      })
     }
   } finally {
     await fs.rm(tmp, { recursive: true, force: true }).catch(() => undefined)

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { charge, ChargeError } from '../src/engine/budget/spend'
+import { charge, ChargeError, reconcileEleven } from '../src/engine/budget/spend'
 import type { ChargeArgs } from '../src/engine/budget/spend'
 import { SeriesStore } from '../src/engine/series/service'
 
@@ -74,6 +74,21 @@ describe('charge', () => {
     await spendRows(0, 24)
     await expect(charge(args({ provider: 'flow', currency: 'credits', estimate: 12 }), async () => 1)).rejects.toMatchObject({ code: 'FLOW_CREDITS_EXCEEDED' })
     await expect(charge(args({ provider: 'flow', currency: 'credits', estimate: 6 }), async () => 1)).resolves.toMatchObject({ amount: 6, currency: 'credits' })
+  })
+})
+
+describe('the ElevenLabs reconciliation (CTS-43)', () => {
+  it('reports a billing-period reset apart, judges a normal phase within 10 % and skips an unread status', () => {
+    const r = reconcileEleven([
+      // pilot 4: the period reset between the readings of the auditions
+      { phase: 'auditions', what: 'audition pip hr', at: '2026-11-09T10:00:00+01:00', before: { used: 0, remaining: 10000, resetAt: '2026-04-01' }, after: { used: 510, remaining: 9490, resetAt: '2026-12-10' }, estimate: 530 },
+      { phase: 'voice', what: 'voice hr,en', at: '2026-11-09T10:20:00+01:00', before: { used: 510, remaining: 9490, resetAt: '2026-12-10' }, after: { used: 1037, remaining: 8963, resetAt: '2026-12-10' }, estimate: 540 },
+      { phase: 'voice', what: 'voice en', at: '2026-11-09T10:30:00+01:00', before: { used: 1037, remaining: 8963, resetAt: '2026-12-10' }, after: null, estimate: 40 }
+    ])
+    expect(r.phases[0]).toMatchObject({ reset: true, apiDelta: 510, oldPeriodUsedBefore: 0, newPeriodWithinEstimate: true, withinTolerance: null })
+    expect(r.phases[1]).toMatchObject({ reset: false, apiDelta: 527, withinTolerance: true })
+    expect(r.phases[2]).toMatchObject({ apiDelta: null, withinTolerance: null })
+    expect(r).toMatchObject({ withinTolerance: true, estimate: 540, apiDelta: 527, resets: 1, unread: 1 })
   })
 })
 

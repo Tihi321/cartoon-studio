@@ -825,8 +825,26 @@ export const spendEntrySchema = z.strictObject({
   currency: z.enum(['usd', 'credits', 'eleven-credits']),
   amount: z.number().nonnegative()
 })
-/** episodes/<ep>/spend.json: the ledger, appended after each paid call. */
-export const spendFileSchema = z.strictObject({ schema: schemaTag('spend'), entries: z.array(spendEntrySchema) })
+/** CTS-43: the ElevenLabs account counter as `flow_elevenlabs_status` read it (`used` in the billing period ending at `resetAt`). */
+export const elevenCounterSchema = z.strictObject({ used: z.number().nonnegative(), remaining: z.number().nullable(), resetAt: z.string().nullable() })
+/**
+ * CTS-43: the account counter read before and after one ElevenLabs voice phase (an audition call, a voice run), with the phase's own estimate
+ * (the sum of its `eleven-credits` entries). `before` / `after` are null when the status could not be read (down, 429): no mismatch then.
+ */
+export const elevenReadingSchema = z.strictObject({
+  phase: z.enum(['auditions', 'voice']),
+  /** What the phase did, e.g. `audition pip hr` or `voice hr,en`. */
+  what: z.string(),
+  /** ISO time of the `after` reading. */
+  at: z.string(),
+  before: elevenCounterSchema.nullable(),
+  after: elevenCounterSchema.nullable(),
+  estimate: z.number().nonnegative()
+})
+/** episodes/<ep>/spend.json: the ledger, appended after each paid call; `elevenReadings` (CTS-43, optional) the ElevenLabs counter around each voice phase. */
+export const spendFileSchema = z.strictObject({ schema: schemaTag('spend'), entries: z.array(spendEntrySchema), elevenReadings: z.array(elevenReadingSchema).optional() })
+export type ElevenCounter = z.infer<typeof elevenCounterSchema>
+export type ElevenReading = z.infer<typeof elevenReadingSchema>
 export type SpendEntry = z.infer<typeof spendEntrySchema>
 export type SpendFile = z.infer<typeof spendFileSchema>
 

@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { recordElevenCredits } from '../budget/spend'
+import { elevenCounterOf, recordElevenCredits, recordElevenReading } from '../budget/spend'
+import type { ElevenReading } from '../../shared/contracts'
 import type { CtsService } from '../service'
 import { SeriesStore } from '../series/service'
 import { elevenCodeOf } from '../studios/flow'
@@ -38,6 +39,8 @@ export interface ElevenAuditionResult {
   credits: number
   remainingAfter: number | null
   ledger: string | null
+  /** CTS-43: the account counter before and after these auditions, as recorded in spend.json (`elevenReadings`); absent without an episode. */
+  reading?: ElevenReading
   hint?: string
   error?: string
 }
@@ -66,6 +69,8 @@ export async function elevenAudition(svc: CtsService, a: ElevenAuditionArgs): Pr
   let credits = 0
   let remainingAfter: number | null = null
   let error: string | undefined
+  let ledgered = 0
+  const before = elevenCounterOf(e.status)
   try {
     for (const voiceId of a.voiceIds) {
       const name = `audition-${a.lang}-${voiceId.replace(/[^A-Za-z0-9_-]/g, '_')}${model !== DEFAULT_ELEVEN_MODEL ? `-${model.replace(/[^A-Za-z0-9_-]/g, '_')}` : ''}`
@@ -74,7 +79,7 @@ export async function elevenAudition(svc: CtsService, a: ElevenAuditionArgs): Pr
         const spent = r.creditsEstimate ?? Math.ceil(text.length * mult)
         credits += spent
         remainingAfter = r.remainingAfter ?? remainingAfter
-        if (a.episode) await recordElevenCredits({ store: st, series: a.series, episode: a.episode, model: r.model ?? model, what: `audition ${a.cast} ${a.lang} ${voiceId}`, amount: spent })
+        if (a.episode) await recordElevenCredits({ store: st, series: a.series, episode: a.episode, model: r.model ?? model, what: `audition ${a.cast} ${a.lang} ${voiceId}`, amount: spent }).then(() => (ledgered += spent))
         const out = path.join(dir, `${name}.wav`)
         const norm = await normaliseWav(r.file, out)
         await fs.rm(r.file, { force: true }).catch(() => undefined)
@@ -88,6 +93,12 @@ export async function elevenAudition(svc: CtsService, a: ElevenAuditionArgs): Pr
   } finally {
     await fs.rm(tmp, { recursive: true, force: true }).catch(() => undefined)
   }
+  // CTS-43: the counter after the phase, next to the one read before it, so the API delta can be checked against the entries
+  let reading: ElevenReading | undefined
+  if (a.episode) {
+    const after = flow.elevenStatus ? elevenCounterOf(await flow.elevenStatus(a.signal).catch(() => null)) : null
+    reading = await recordElevenReading({ store: st, series: a.series, episode: a.episode, reading: { phase: 'auditions', what: `audition ${a.cast} ${a.lang}`, before, after, estimate: ledgered } }).catch(() => undefined)
+  }
   return {
     cast: a.cast,
     lang: a.lang,
@@ -97,6 +108,7 @@ export async function elevenAudition(svc: CtsService, a: ElevenAuditionArgs): Pr
     credits,
     remainingAfter,
     ledger: a.episode ? `episodes/${a.episode}/spend.json` : null,
+    ...(reading ? { reading } : {}),
     ...(a.episode ? {} : { hint: 'no episode given: the credits are not in any spend.json; add them to the run log' }),
     ...(error ? { error } : {})
   }
