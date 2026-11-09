@@ -87,6 +87,7 @@ Branch `CTS-30_vehicles-elevenlabs`, cut from `CTS-18_blender-3d`. The plan is `
 | **CTS-47** | 3D wording instead of "cutout": the four personas, the bible, pitches, clip-shots, clip-review and writer prompts lead with the 3D toon look and keep the cutout wording in an old-canvas section; a new series stub starts with the toon 3D style (`outlinePx` 2), canvas only when the run is canvas; `videoPrompt` defaults to the 3D wording. | Done |
 | **CTS-48** | The starter agents follow the seed: `agents/` is yours once it exists, so it was never refreshed and the cutout-era personas stayed; a starter agent file that is still exactly an earlier seed version (`SEED_HISTORY`) now gets the new seed text at the next start; an edited one is kept and a fired one does not come back. | Done |
 | **CTS-49** | The keyframe polish prompt collapsed runs of the letter "s" (`/s+/g`) instead of whitespace and the polished file name matched any character before `png`: `/\s+/g` and `/\.png$/i` in `clips.ts`. | Done |
+| **CTS-50** | CTS-45 gap: a job that was running while a `from` / `retry` run reset its step could still mark that step done (or failed) when it ended. `markDone` and `noteFailure` now take the job id from `runStep` and drop the report with a log line unless `state.steps[step].job` is still that job. | Done |
 
 Pilot 4 (series `pip-bruno-wheels`, about 60 s, hr and en, ElevenLabs voices, $0 and 0 Flow credits) and its acceptance criteria are in the creative hub's `HUB-31` plan.
 

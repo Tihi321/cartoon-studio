@@ -363,10 +363,21 @@ export class Pipeline {
 
   // ---- what handlers report ----
 
-  async markDone(series: string, episode: string, step: string, detail: string): Promise<void> {
+  /**
+   * CTS-50: with `job` (a handler reporting its own result) the report counts only while the step still belongs to that job; a `from` / `retry`
+   * run that reset the step (and maybe made a new job) while the old job was running makes the old result stale, and it is dropped with a log line.
+   */
+  private async staleReport(state: PipelineState, step: string, job: string | undefined, what: string): Promise<boolean> {
+    if (job === undefined || state.steps[step]?.job === job) return false
+    this.svc.log(`pipeline ${state.series}/${state.episode}: dropped the ${what} of job ${job} for ${step}: the step was reset since (now ${state.steps[step]?.state ?? 'unknown'}${state.steps[step]?.job ? `, job ${state.steps[step]!.job}` : ''})`)
+    return true
+  }
+
+  async markDone(series: string, episode: string, step: string, detail: string, job?: string): Promise<void> {
     await withLock(`${series}/${episode}`, async () => {
       const state = await this.read(series, episode)
       if (!state) return
+      if (await this.staleReport(state, step, job, 'result')) return
       state.steps[step] = { ...state.steps[step], state: 'done', endedAt: this.now(), detail: detail.slice(0, 400), error: undefined }
       await this.save(state, step)
     })
@@ -382,10 +393,11 @@ export class Pipeline {
     })
   }
 
-  async noteFailure(series: string, episode: string, step: string, error: string): Promise<void> {
+  async noteFailure(series: string, episode: string, step: string, error: string, job?: string): Promise<void> {
     await withLock(`${series}/${episode}`, async () => {
       const state = await this.read(series, episode)
       if (!state) return
+      if (await this.staleReport(state, step, job, 'failure')) return
       state.steps[step] = { ...state.steps[step]!, error: error.slice(0, 600) }
       await this.save(state, step)
     })
