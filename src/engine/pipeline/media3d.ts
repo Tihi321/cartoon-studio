@@ -183,28 +183,43 @@ async function designAsset(e: Env, bible: Bible, a: Asset, o: { redo: boolean; u
 export async function characterStep(e: Env): Promise<string> {
   const bible = await requireChosen(e)
   const out: string[] = []
-  for (const [i, member] of bible.cast.entries()) {
-    e.progress(i / Math.max(1, bible.cast.length), `character ${member.id}`)
+  const designOne = async (member: Bible['cast'][number], redoAll: boolean): Promise<void> => {
     const castDir = e.store.paths(e.series).castDir(member.id)
     const redoFile = path.join(castDir, 'sheet-redo.json')
-    const redoNote = ((await readJson(redoFile))?.note as string | undefined) ?? undefined
+    const redoText = await fs.readFile(redoFile, 'utf8').catch(() => null)
+    const redoNote = redoText ? (((JSON.parse(redoText) as Record<string, unknown>).note as string | undefined) || 'build it again') : undefined
     const note = await designAsset(
       e,
       bible,
       { kind: 'character', id: member.id, dir: `cast/${member.id}`, specFile: e.store.paths(e.series).characterFile(member.id), role: 'character-designer', specKind: 'character-spec', reviewKind: 'character-review' },
       {
-        redo: !!redoNote || e.detail === 'redo',
+        redo: !!redoNote || redoAll,
         ...(redoNote ? { userNote: redoNote } : {}),
         context: async () => ({ series: { slug: e.series, title: bible.title, tone: bible.tone, style: bible.style, audience: bible.audience }, member: castView(member), others: await otherSpecs(e, bible, member.id) })
       }
     )
-    await fs.rm(redoFile, { force: true })
+    // CTS-39: the note is taken only if it is still the one this round read (a newer note waits for the next round)
+    if ((await fs.readFile(redoFile, 'utf8').catch(() => null)) === redoText) await fs.rm(redoFile, { force: true })
     // the character path in the bible (a hand-written spec is linked as well)
     const fresh = await e.store.readBible(e.series)
     if (fresh.cast.some((c) => c.id === member.id && c.character !== `cast/${member.id}/character.json`)) {
       await e.store.writeBible(e.series, { ...fresh, cast: fresh.cast.map((c) => (c.id === member.id ? { ...c, character: `cast/${member.id}/character.json` } : c)) })
     }
     out.push(note)
+  }
+  for (const [i, member] of bible.cast.entries()) {
+    e.progress(i / Math.max(1, bible.cast.length), `character ${member.id}`)
+    await designOne(member, e.detail === 'redo')
+  }
+  // CTS-39: a redo note that came in while this job ran (a second cts_sheet_approve ok: false) joins this job instead of starting another one
+  for (let round = 0; round < 4; round++) {
+    const waiting: Bible['cast'] = []
+    for (const member of bible.cast) if (await exists(path.join(e.store.paths(e.series).castDir(member.id), 'sheet-redo.json'))) waiting.push(member)
+    if (waiting.length === 0) break
+    for (const member of waiting) {
+      e.progress(null, `character ${member.id} (a note that came in later)`)
+      await designOne(member, false)
+    }
   }
   return `characters: ${out.join(' | ')}; waiting for the user to approve the sheets`
 }

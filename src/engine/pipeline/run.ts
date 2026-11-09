@@ -250,8 +250,8 @@ export class Pipeline {
           state.steps.pitch = { state: 'pending', detail: 'redo' }
           continue outer
         }
-        // CTS-37: a note waits for the step before the gate (the user asked for a redo): that step runs again, once, with every note
-        if (reason === 'redo-voice_cast') {
+        // CTS-37/39: a note waits for the step before the gate (the user asked for a redo): that step runs again, once, with every note
+        if (reason === 'redo-character' || reason === 'redo-voice_cast') {
           const target = reason.slice('redo-'.length)
           state.steps[target] = { state: 'pending', detail: `revise (the user's note)`, ...(state.steps[target]?.attempts ? { attempts: state.steps[target]!.attempts } : {}) }
           continue outer
@@ -292,6 +292,8 @@ export class Pipeline {
     if (step.id === 'sheet_review') {
       const bible = await store.readBible(state.series)
       if (rendererOfState(state) === 'blender') {
+        // CTS-39: a redo note that no character job took yet (it came in while the last one ended) makes the character step run again
+        for (const c of bible.cast) if (await store.exists(path.join(store.paths(state.series).castDir(c.id), 'sheet-redo.json'))) return 'redo-character'
         // a 3D sheet is approved for one spec: a spec that changed since (specHash) needs the user's look again
         const open: string[] = []
         for (const c of bible.cast) {
@@ -398,7 +400,7 @@ export class Pipeline {
    * every pipeline that waits at `sheet_review` goes on once the last character is approved. Not `ok`: the sheet is made again with the note added to the
    * prompt (`cast_sheet` and `sheet_review` are reopened; a new seed range is used), and the approval of that character is withdrawn.
    */
-  async approveSheet(series: string, castId: string, ok: boolean, note?: string): Promise<{ cast: string; ok: boolean; approvedAt?: string; sheet?: NonNullable<Bible['cast'][number]['sheet']>; stillOpen: string[]; resumed: PipelineReport[]; warning?: string }> {
+  async approveSheet(series: string, castId: string, ok: boolean, note?: string): Promise<{ cast: string; ok: boolean; approvedAt?: string; sheet?: NonNullable<Bible['cast'][number]['sheet']>; stillOpen: string[]; resumed: PipelineReport[]; joined?: string[]; warning?: string }> {
     assertSlug(series)
     const store = this.store
     const bible = await store.readBible(series)
@@ -457,15 +459,18 @@ export class Pipeline {
       await store.writeFile(series, 'sheet-redo.json', `${JSON.stringify({ note: note!.trim(), at, specHash }, null, 2)}\n`, castDir)
       await store.writeBible(series, { ...bible, cast: bible.cast.map((c) => (c.id === castId ? { ...c, sheet: undefined } : c)) })
       let past = false
+      const joined: string[] = []
       for (const ep of await this.episodesWithPipeline(series)) {
         const st = await this.read(series, ep)
         if (!st) continue
         const steps = stepsOf(st).map((s) => s.id)
         if (steps.slice(steps.indexOf('sheet_review') + 1).some((id) => st.steps[id]?.state !== 'pending')) past = true
-        await this.reopen(series, ep, ['character', 'sheet_review'], `revise sheet ${castId}`)
+        // CTS-39: one character job per pipeline. While one is queued or running it takes this note too (it looks for redo notes until none is left)
+        if (await this.liveJob(st, 'character')) joined.push(ep)
+        else await this.reopen(series, ep, ['character', 'sheet_review'], `revise sheet ${castId}`)
         resumed.push(await this.advance(series, ep))
       }
-      return { cast: castId, ok, stillOpen: bible.cast.map((c) => c.id), resumed, ...(past ? { warning: 'steps after the sheets had already started: run cts_run_pipeline {from: "set3d"} (or "assemble" when only the look changed) after the new sheet is approved' } : {}) }
+      return { cast: castId, ok, stillOpen: bible.cast.map((c) => c.id), resumed, ...(joined.length ? { joined } : {}), ...(past ? { warning: 'steps after the sheets had already started: run cts_run_pipeline {from: "set3d"} (or "assemble" when only the look changed) after the new sheet is approved' } : {}) }
     }
     const sheet = { approvedAt: at, specHash }
     await store.writeBible(series, { ...bible, cast: bible.cast.map((c) => (c.id === castId ? { ...c, sheet } : c)) })
@@ -510,6 +515,14 @@ export class Pipeline {
     }
     const voices = Object.fromEntries(bible.cast.map((c) => [c.id, Object.fromEntries(Object.entries(c.voice).map(([lang, v]) => [lang, (v as { elevenlabs?: unknown; vibetts?: string } | undefined)?.elevenlabs ?? (v as { vibetts?: string } | undefined)?.vibetts ?? null]))]))
     return { ok, at, voicesHash, voices, resumed, ...(!ok && passed.length ? { warning: `${passed.join(', ')} passed the voice review earlier and keep their voices: cts_run_pipeline {series, episode, from: "voice_cast"} casts one again` } : {}) }
+  }
+
+  /** The step runs a job that is still queued or running. */
+  private async liveJob(state: PipelineState, stepId: string): Promise<boolean> {
+    const st = state.steps[stepId]
+    if (st?.state !== 'running' || !st.job) return false
+    const j = await this.svc.deps.jobs.find(st.job)
+    return j?.state === 'queued' || j?.state === 'running'
   }
 
   async episodesWithPipeline(series: string): Promise<string[]> {

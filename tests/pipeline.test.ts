@@ -304,4 +304,20 @@ describe('the 3D pipeline', () => {
     expect(lint.errors).toEqual([])
     expect(lint.warnings.map((i) => i.code)).toContain('W_SFX_MISSING')
   }, 180_000)
+
+  it('CTS-39: two sheet redos in a row make one character job that redoes each character once', async () => {
+    const { fake, seen, pipe } = await startMiniVehicles()
+    await pauseOf(pipe, 'the pause at sheet_review')
+    const specsBefore = seen.filter((k) => k.startsWith('character-designer/character-spec')).length
+    await pipe.approveSheet('mini-vehicles', 'pip', false, 'lamps closer together')
+    const second = await pipe.approveSheet('mini-vehicles', 'bruno', false, 'a taller funnel')
+    expect(second.joined).toEqual(['ep00-wheels'])
+    const again = await pauseOf(pipe, 'the pause after the redo')
+    expect(again.step).toBe('sheet_review')
+    expect(again.steps.find((s) => s.id === 'character')?.job).toBe('mini-vehicles--character--ep00-wheels--r2')
+    expect(await env!.engine.cts.deps.jobs.find('mini-vehicles--character--ep00-wheels--r3')).toBeNull()
+    expect(seen.filter((k) => k.startsWith('character-designer/character-spec')).slice(specsBefore).sort()).toEqual(['character-designer/character-spec:bruno', 'character-designer/character-spec:pip'])
+    expect(fake.calls.filter((c) => c.id === 'pip')).toHaveLength(3)
+    expect(fake.calls.filter((c) => c.id === 'bruno')).toHaveLength(2)
+  }, 120_000)
 })
