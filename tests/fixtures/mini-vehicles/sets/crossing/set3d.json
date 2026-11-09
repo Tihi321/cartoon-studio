@@ -1,0 +1,30 @@
+{
+  "schema": "cts.set3d/1",
+  "id": "crossing",
+  "ground": { "size": [30, 18], "colour": "#7cc576", "patches": [] },
+  "sky": { "top": "#86cdf0", "horizon": "#e4f6fb" },
+  "paths": {
+    "road": { "kind": "road", "points": [[-12, -1], [0, -1], [12, -1]] },
+    "rail": { "kind": "track", "points": [[2, -8], [2, 8]] }
+  },
+  "props": [
+    { "id": "road", "kind": "road", "at": [0, 0], "path": "road" },
+    { "id": "rail", "kind": "track", "at": [0, 0], "path": "rail" },
+    { "id": "xing", "kind": "crossing", "at": [2, -1] },
+    { "id": "platform", "kind": "platform", "at": [4, 5], "rot": 90 },
+    { "id": "signal", "kind": "signal", "at": [3.2, -4] },
+    { "id": "oak", "kind": "tree_round", "at": [-6, 4], "scale": 1.4 },
+    { "id": "house", "kind": "house", "at": [-8, -6] }
+  ],
+  "marks": {
+    "road_left": [-8, -1],
+    "crossing_road": [-1, -1],
+    "road_right": [8, -1],
+    "track_bottom": [2, -6],
+    "platform": [2, 4.5],
+    "track_top": [2, 7]
+  },
+  "cameras": {
+    "crossing": { "loc": [-2, -9, 2.2], "target": [1, -1, 0.8], "lens": 35 }
+  }
+}

@@ -159,7 +159,7 @@ The script is language-independent: scenes of beats with line ids; the words liv
 | Beat | Fields |
 |---|---|
 | `line` | `line` (id in the text catalog), `speaker`, `emotion?`, `gesture?`, `look?` (cast id), `pauseAfter?` |
-| `move` | `who`, `to` (a mark; `offL`/`offR` for enter and exit), `seconds`, `style?` (Blender series: `walk`, `hop`, `run` or `tiptoe`; default from the character's motion profile) |
+| `move` | `who`, `to` (a mark; `offL`/`offR` for enter and exit), `seconds`, `style?` (Blender series: `walk`, `hop`, `run` or `tiptoe` for a creature, `drive`, `zoom` or `reverse` for a car, `chug` for a train; default from the character: its walk style, a car drives, a train chugs) |
 | `turn` | `who`, `facing` |
 | `emote` | `who`, `emotion` |
 | `gesture` | `who`, `gesture` (one of the rig's gestures; in a Blender series an action of the acting library), `target?` (Blender series: a cast id, a prop id of the set or a mark: point at, sit on, look at) |
@@ -301,7 +301,7 @@ A cast member's `sheet` (the approval of the 3D sheet) holds `approvedAt` and `s
 
 ### Character `cast/<id>/character.json`
 
-A character is parts (primitives) hung on **controls**, named empties. Standard controls: `root`, `squash`, `body`, `head`, `arm_L`, `arm_R`, `lid_L`, `lid_R`, `pupil_L`, `pupil_R` and `mouth` are required; `hand_L/R`, `leg_L/R` (a character without legs hops or slides), `brow_L/R`, `ear_L1..`, `ear_R1..`, `tail1..` and `acc_<name>1..` (chains such as a scarf) are optional. `root` has no parent; every other control names one. Every part names a control and a palette colour. `motion` is the profile the acting library scales with (`tempo` is the gesture speed factor, `energy` the amplitude, `bounce` the hop and idle bob, `walk.style` is `walk`, `hop` or `waddle`). `springs` sets the damped spring of a secondary chain. `face` puts eyes, lids, optional brows and the mouth (six slots `rest A E O U MBP`) on the head; the builder refuses a face that is buried in the head (`E_FACE_HIDDEN`).
+A character is parts (primitives) hung on **controls**, named empties. Standard controls of a creature (a vehicle's are below): `root`, `squash`, `body`, `head`, `arm_L`, `arm_R`, `lid_L`, `lid_R`, `pupil_L`, `pupil_R` and `mouth` are required; `hand_L/R`, `leg_L/R` (a character without legs hops or slides), `brow_L/R`, `ear_L1..`, `ear_R1..`, `tail1..` and `acc_<name>1..` (chains such as a scarf) are optional. `root` has no parent; every other control names one. Every part names a control and a palette colour. `motion` is the profile the acting library scales with (`tempo` is the gesture speed factor, `energy` the amplitude, `bounce` the hop and idle bob, `walk.style` is `walk`, `hop` or `waddle`). `springs` sets the damped spring of a secondary chain. `face` puts eyes, lids, optional brows and the mouth (six slots `rest A E O U MBP`) on the head; the builder refuses a face that is buried in the head (`E_FACE_HIDDEN`).
 
 ```json
 {
@@ -348,7 +348,53 @@ A character is parts (primitives) hung on **controls**, named empties. Standard 
 }
 ```
 
-A part's `shape` is `ellipsoid`, `cone`, `box`, `capsule`, `torus`, `arc` or `spines` (a part with a `spines` block: `count`, `length`, `radius`, `keep` `back|top|all`, `lean`). `accessories` (optional) is a list of parts with the same shape.
+A part's `shape` is `ellipsoid`, `cone`, `box`, `capsule`, `torus`, `arc`, `spines` (a part with a `spines` block: `count`, `length`, `radius`, `keep` `back|top|all`, `lean`) or `cylinder` (a radius and a length: wheels, chimneys, buffers). `accessories` (optional) is a list of parts with the same shape.
+
+#### Vehicles (`kind: "vehicle"`, HUB-31)
+
+`kind` is `creature` (the default, so a spec without it, such as every pilot 3 spec, is a creature) or `vehicle`. A vehicle has no arms and no legs: its required controls are `root`, `squash`, `body`, `head` (the front face block, which tilts and turns within limits), `lid_L`, `lid_R`, `pupil_L`, `pupil_R` and `mouth`, plus at least one `wheel_<n>`; optional are `brow_L/R` (the lamp hoods' visors), `chimney` and `exhaust` (puff sources), `horn`, `antenna1..` (a spring chain) and `acc_<name>1..`. An `arm_*`, `hand_*` or `leg_*` control on a vehicle is the lint error `E_VEHICLE_LIMB`. A vehicle needs the `vehicle` block: `type` (`car` or `train`), `wheelRadius` in metres, `wheels` (every `wheel_<n>` control, each spinning on its own axis) and `track` (`true` for a train, which moves only along a `track` path; `false` for a car). Its `motion` has `drive` instead of `walk`: `style` (`zip` quick and bouncy, `chug` slow with a heavy late settle), `topSpeed` (m/s), `accel` (m/s²) and `suspension` (0 stiff to 1 soft). The eyes of a vehicle are its front lamps: `face.eyes.lamp` gives the `glow` colour they flash with and the palette colour of the lamp `rim`; the lids are the lamp hoods and the mouth is the bumper or buffer-beam slot (the six visemes as for creatures).
+
+```json
+{
+  "schema": "cts.character3d/1",
+  "id": "pip",
+  "units": "m",
+  "kind": "vehicle",
+  "height": 1.1,
+  "palette": { "body": "#d9792b", "cream": "#f3dfb5", "tyre": "#2b2118", "chrome": "#c9c9c9", "pennant": "#6fae4f" },
+  "motion": { "tempo": 1.4, "energy": 1, "bounce": 0.5, "drive": { "style": "zip", "topSpeed": 3, "accel": 3, "suspension": 0.7 } },
+  "vehicle": { "type": "car", "wheelRadius": 0.18, "wheels": ["wheel_1", "wheel_2"], "track": false },
+  "controls": {
+    "root": { "parent": null, "at": [0, 0, 0] },
+    "squash": { "parent": "root", "at": [0, 0, 0] },
+    "body": { "parent": "squash", "at": [0, 0, 0.5] },
+    "head": { "parent": "body", "at": [0, -0.55, 0] },
+    "lid_L": { "parent": "head", "at": [-0.22, -0.12, 0.2] },
+    "lid_R": { "parent": "head", "at": [0.22, -0.12, 0.2] },
+    "pupil_L": { "parent": "head", "at": [-0.22, -0.2, 0.2] },
+    "pupil_R": { "parent": "head", "at": [0.22, -0.2, 0.2] },
+    "mouth": { "parent": "head", "at": [0, -0.25, -0.12] },
+    "wheel_1": { "parent": "root", "at": [-0.42, -0.5, 0.18] },
+    "wheel_2": { "parent": "root", "at": [0.42, -0.5, 0.18] },
+    "antenna1": { "parent": "body", "at": [0.3, 0.3, 0.35] },
+    "antenna2": { "parent": "antenna1", "at": [0, 0, 0.25] }
+  },
+  "springs": { "antenna": { "stiffness": 40, "damping": 4 } },
+  "parts": [
+    { "id": "body", "shape": "ellipsoid", "size": [0.5, 0.8, 0.35], "at": [0, 0, 0], "colour": "body", "control": "body" },
+    { "id": "front", "shape": "ellipsoid", "size": [0.45, 0.25, 0.2], "at": [0, 0, -0.08], "colour": "cream", "control": "head" },
+    { "id": "wheel_1", "shape": "cylinder", "size": [0.18, 0.14], "at": [0, 0, 0], "rot": [0, 90, 0], "colour": "tyre", "control": "wheel_1" },
+    { "id": "wheel_2", "shape": "cylinder", "size": [0.18, 0.14], "at": [0, 0, 0], "rot": [0, 90, 0], "colour": "tyre", "control": "wheel_2" },
+    { "id": "pennant", "shape": "box", "size": [0.08, 0.005, 0.05], "at": [0.05, 0, 0.2], "colour": "pennant", "control": "antenna2" }
+  ],
+  "face": {
+    "control": "head",
+    "eyes": { "x": 0.22, "z": 0.2, "r": 0.1, "faceY": -0.12, "pupil": { "size": 0.05, "lead": 0.01 }, "lamp": { "glow": "#fff2b0", "rim": "chrome" } },
+    "lids": { "colour": "body" },
+    "mouth": { "at": [0, -0.25, -0.12], "scale": 0.1, "inner": "#3a2020" }
+  }
+}
+```
 
 ### Set `sets/<id>/set3d.json`
 
@@ -366,6 +412,29 @@ Ground, sky, props from the kit (`tree_round`, `tree_cone`, `bush`, `bench`, `ro
   ],
   "marks": { "left": [-2.5, 0], "center": [0, 0], "right": [2.5, 0], "bench": [3, 1.4] },
   "cameras": { "bench": { "loc": [3, -2.5, 1.1], "target": [3, 2, 0.5], "lens": 40 } }
+}
+```
+
+**Paths and the road and rail kit (HUB-31).** `paths` (optional, so older sets parse) holds the centre lines vehicles follow, by id: `kind` (`road` or `track`), `points` (at least two `[x, y]`) and `width` in metres (default 3 for a road, 1.6 for a track). The kit adds `road` and `track` (built along a path: such a prop names it in `path`, a path of the same kind, and its `at` is not used), `crossing` (where a road path meets a track path), `platform`, `signal` and `buffer_stop`. Lint: a mark used by a car's move must lie within 0.3 m of a road path and a train's within 0.3 m of a track path (`E_MARK_OFF_PATH`); a train's two marks lie on one track path (`E_OFF_TRACK`); a path's strip (half its width) clears every prop footprint (`E_PATH_BLOCKED`; road, track and crossing take no ground).
+
+```json
+{
+  "schema": "cts.set3d/1",
+  "id": "crossing",
+  "ground": { "size": [30, 18], "colour": "#7cc576" },
+  "sky": { "top": "#86cdf0", "horizon": "#e4f6fb" },
+  "paths": {
+    "road": { "kind": "road", "points": [[-12, -1], [12, -1]] },
+    "rail": { "kind": "track", "points": [[2, -8], [2, 8]] }
+  },
+  "props": [
+    { "id": "road", "kind": "road", "at": [0, 0], "path": "road" },
+    { "id": "rail", "kind": "track", "at": [0, 0], "path": "rail" },
+    { "id": "xing", "kind": "crossing", "at": [2, -1] },
+    { "id": "platform", "kind": "platform", "at": [4, 5], "rot": 90 }
+  ],
+  "marks": { "road_left": [-8, -1], "crossing_road": [-1, -1], "track_bottom": [2, -6], "platform": [2, 4.5] },
+  "cameras": { "crossing": { "loc": [-2, -9, 2.2], "target": [1, -1, 0.8], "lens": 35 } }
 }
 ```
 
@@ -443,11 +512,13 @@ Written by `cts_scene_assemble` next to `scene.blend`; not a contract the engine
 
 ### Acting library `blender/cts_blender/acting/library.json`
 
-Not a series file: the single source for the action names (`src/engine/blender/library.ts` reads it; the Python registry must list the same names). Per action: `name`, `kind` (`gesture`, `locomotion`, `react`, `camera`), `parts` (the controls it moves), `seconds` (`min`, `default`, `max`: the timeline never stretches a gesture past `max`), `overLine` (may run while the actor speaks; `W_GESTURE_OVER_LINE` when not), `needsTarget`, `params`, and `auto: true` for what the assembler makes by itself (`idle`, `blink`). A `gesture` beat or a line's `gesture` must name a non-automatic gesture or reaction.
+Not a series file: the single source for the action names (`src/engine/blender/library.ts` reads it; the Python registry must list the same names). Per action: `name`, `kind` (`gesture`, `locomotion`, `react`, `camera`), `bodies` (the body kinds that can do it: `creature`, `vehicle` or both; camera actions list both), `vehicleTypes?` (a vehicle action only a `car` or only a `train` does), `parts` (the controls it moves), `seconds` (`min`, `default`, `max`: the timeline never stretches a gesture past `max`), `overLine` (may run while the actor speaks; `W_GESTURE_OVER_LINE` when not), `needsTarget`, `params`, and `auto: true` for what the assembler makes by itself (`idle` for a creature, `idle_engine` for a vehicle, `blink`). A `gesture` beat or a line's `gesture` must name a non-automatic gesture or reaction (`E_ACTION_UNKNOWN`) that the actor's body can do (`E_ACTION_BODY`); a `move` runs the locomotion of its style and a `turn` the `turn` action, with the same body check.
+
+A name shared by both bodies is one action (`blink`, `look_at`, `turn`, `nod`, `shake_head`, `react_surprised`, `laugh`, `droop` and the camera); its `parts` are the union of what each body moves, and an actor keys only the controls it has. In `parts`, `wheel_*` is every wheel control, `antenna*` every antenna link, `lamp_glow` the glow of the lamp eyes and `camera` the camera. Creature only: `idle`, `walk`, `hop`, `run`, `point`, `wave`, `shrug`, `think`, `sit`, `stand_up`, `cheer` (frozen for pilot 3). Vehicle only: `idle_engine`, `drive`, `zoom`, `reverse` (car), `chug` (train), `bounce`, `lean`, `tilt`, `wiggle`, `rev`, `honk` (car), `whistle` (train), `puff`, `flash`, `wink`, `point_nose`, `spin_wheels`, `park`, `start_up`; `turn` on a vehicle is a car's. `honk` and `whistle` are paired with an `sfx` beat in the script.
 
 ```text
-{ "name": "point", "kind": "gesture", "parts": ["arm_R", "hand_R", "body", "head"],
-  "seconds": { "min": 0.8, "default": 1.4, "max": 3 }, "overLine": true, "needsTarget": true, "params": { "arm": "L|R" } }
+{ "name": "honk", "kind": "gesture", "bodies": ["vehicle"], "vehicleTypes": ["car"], "parts": ["squash", "body", "head", "horn", "lid_L", "lid_R", "lamp_glow"],
+  "seconds": { "min": 0.5, "default": 0.8, "max": 1.5 }, "overLine": false, "needsTarget": false, "params": { "sfx": "horn" } }
 ```
 
 ## Clips `clips/clips.json` (series) and `episodes/<ep>/clips/clips.json`
@@ -518,6 +589,11 @@ Errors fail a step; warnings are listed. Every issue has `code`, `message`, `fil
 | `E_MARK_BLOCKED` | a mark of a 3D set lies inside the footprint of a prop (the radius per kind is in `props.json`): an actor would stand in the tree or the bench |
 | `E_GESTURE_UNKNOWN` | a gesture is not in the actor's rig (canvas series) |
 | `E_ACTION_UNKNOWN` | a gesture is not an action of the acting library (Blender series) |
+| `E_ACTION_BODY` | a gesture, move style or turn names an action the actor's body cannot do (the action's `bodies` and `vehicleTypes`): `wave` on a vehicle, `drive` on a creature, `honk` on a train |
+| `E_VEHICLE_LIMB` | a vehicle's spec has an `arm_*`, `hand_*` or `leg_*` control |
+| `E_MARK_OFF_PATH` | a mark used by a vehicle's move lies more than 0.3 m from a path of its kind (a car: `road`, a train: `track`), or the set has no such path |
+| `E_OFF_TRACK` | a train moves between two marks that are not on one track path |
+| `E_PATH_BLOCKED` | a set path's strip (half its width) runs through a prop's footprint |
 | `E_LINE_NO_TEXT` | a line (or title string) has no text in a language |
 | `E_LINE_NO_AUDIO` | a line has no audio in a language (checked when a voice manifest exists, or with `requireAudio`) |
 | `E_RIG_PART` | a rig file is missing, breaks the part rules, or lacks a mouth, eye or brow state |

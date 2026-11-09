@@ -1,0 +1,30 @@
+{
+  "schema": "cts.episode/1",
+  "series": "mini-vehicles",
+  "id": "ep00-wheels",
+  "titleKey": "title",
+  "cast": ["pip", "bruno"],
+  "scenes": [
+    {
+      "id": "s1",
+      "set": "crossing",
+      "start": {
+        "pip": { "mark": "road_left", "facing": "right", "emotion": "happy" },
+        "bruno": { "mark": "track_bottom", "facing": "left" }
+      },
+      "shot": "wide",
+      "beats": [
+        { "id": "b01", "type": "move", "who": "pip", "to": "crossing_road", "seconds": 3, "style": "drive" },
+        { "id": "b02", "type": "gesture", "who": "pip", "gesture": "honk" },
+        { "id": "b03", "type": "sfx", "cue": "horn", "with": "prev" },
+        { "id": "b04", "type": "move", "who": "bruno", "to": "platform", "seconds": 5, "style": "chug" },
+        { "id": "b05", "type": "camera", "shot": "crossing", "transition": "push", "seconds": 2, "with": "prev" },
+        { "id": "b06", "type": "line", "line": "l01", "speaker": "pip", "emotion": "happy", "look": "bruno" },
+        { "id": "b07", "type": "line", "line": "l02", "speaker": "bruno", "emotion": "surprised", "look": "pip" },
+        { "id": "b08", "type": "gesture", "who": "pip", "gesture": "react_surprised" }
+      ]
+    }
+  ],
+  "music": {},
+  "sfx": { "horn": "music/sfx-horn.ogg" }
+}

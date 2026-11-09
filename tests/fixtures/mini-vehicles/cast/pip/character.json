@@ -1,0 +1,53 @@
+{
+  "schema": "cts.character3d/1",
+  "id": "pip",
+  "units": "m",
+  "kind": "vehicle",
+  "height": 1.1,
+  "palette": { "body": "#d9792b", "cream": "#f3dfb5", "tyre": "#2b2118", "glass": "#3a4a5a", "chrome": "#c9c9c9", "pennant": "#6fae4f" },
+  "motion": { "tempo": 1.4, "energy": 1.0, "bounce": 0.5, "drive": { "style": "zip", "topSpeed": 3, "accel": 3, "suspension": 0.7 } },
+  "vehicle": { "type": "car", "wheelRadius": 0.18, "wheels": ["wheel_1", "wheel_2", "wheel_3", "wheel_4"], "track": false },
+  "controls": {
+    "root": { "parent": null, "at": [0, 0, 0] },
+    "squash": { "parent": "root", "at": [0, 0, 0] },
+    "body": { "parent": "squash", "at": [0, 0, 0.5] },
+    "head": { "parent": "body", "at": [0, -0.55, 0] },
+    "lid_L": { "parent": "head", "at": [-0.22, -0.12, 0.2] },
+    "lid_R": { "parent": "head", "at": [0.22, -0.12, 0.2] },
+    "pupil_L": { "parent": "head", "at": [-0.22, -0.2, 0.2] },
+    "pupil_R": { "parent": "head", "at": [0.22, -0.2, 0.2] },
+    "brow_L": { "parent": "head", "at": [-0.22, -0.1, 0.32] },
+    "brow_R": { "parent": "head", "at": [0.22, -0.1, 0.32] },
+    "mouth": { "parent": "head", "at": [0, -0.25, -0.12] },
+    "horn": { "parent": "head", "at": [0.3, -0.2, -0.05] },
+    "exhaust": { "parent": "body", "at": [0.25, 0.8, -0.3] },
+    "wheel_1": { "parent": "root", "at": [-0.42, -0.5, 0.18] },
+    "wheel_2": { "parent": "root", "at": [0.42, -0.5, 0.18] },
+    "wheel_3": { "parent": "root", "at": [-0.42, 0.5, 0.18] },
+    "wheel_4": { "parent": "root", "at": [0.42, 0.5, 0.18] },
+    "antenna1": { "parent": "body", "at": [0.3, 0.3, 0.35] },
+    "antenna2": { "parent": "antenna1", "at": [0, 0, 0.25] },
+    "antenna3": { "parent": "antenna2", "at": [0, 0, 0.25] }
+  },
+  "springs": { "antenna": { "stiffness": 40, "damping": 4 } },
+  "parts": [
+    { "id": "body", "shape": "ellipsoid", "size": [0.5, 0.8, 0.35], "at": [0, 0, 0], "colour": "body", "control": "body", "outline": 0.01 },
+    { "id": "cabin", "shape": "ellipsoid", "size": [0.42, 0.45, 0.3], "at": [0, 0.1, 0.3], "colour": "body", "control": "body", "outline": 0.01 },
+    { "id": "windscreen", "shape": "ellipsoid", "size": [0.36, 0.06, 0.18], "at": [0, -0.3, 0.35], "rot": [-30, 0, 0], "colour": "glass", "control": "body" },
+    { "id": "front", "shape": "ellipsoid", "size": [0.45, 0.25, 0.2], "at": [0, 0, -0.08], "colour": "cream", "control": "head", "outline": 0.01 },
+    { "id": "wheel_1", "shape": "cylinder", "size": [0.18, 0.14], "at": [0, 0, 0], "rot": [0, 90, 0], "colour": "tyre", "control": "wheel_1" },
+    { "id": "wheel_2", "shape": "cylinder", "size": [0.18, 0.14], "at": [0, 0, 0], "rot": [0, 90, 0], "colour": "tyre", "control": "wheel_2" },
+    { "id": "wheel_3", "shape": "cylinder", "size": [0.18, 0.14], "at": [0, 0, 0], "rot": [0, 90, 0], "colour": "tyre", "control": "wheel_3" },
+    { "id": "wheel_4", "shape": "cylinder", "size": [0.18, 0.14], "at": [0, 0, 0], "rot": [0, 90, 0], "colour": "tyre", "control": "wheel_4" },
+    { "id": "antenna1", "shape": "cylinder", "size": [0.008, 0.25], "at": [0, 0, 0.125], "colour": "chrome", "control": "antenna1" },
+    { "id": "antenna2", "shape": "cylinder", "size": [0.008, 0.25], "at": [0, 0, 0.125], "colour": "chrome", "control": "antenna2" },
+    { "id": "pennant", "shape": "box", "size": [0.08, 0.005, 0.05], "at": [0.05, 0, 0.2], "colour": "pennant", "control": "antenna3" }
+  ],
+  "face": {
+    "control": "head",
+    "eyes": { "x": 0.22, "z": 0.2, "r": 0.1, "faceY": -0.12, "pupil": { "size": 0.05, "lead": 0.01 }, "lamp": { "glow": "#fff2b0", "rim": "chrome" } },
+    "lids": { "colour": "body" },
+    "brows": { "colour": "chrome", "at": [0, -0.1, 0.33], "length": 0.1 },
+    "mouth": { "at": [0, -0.25, -0.12], "scale": 0.1, "inner": "#3a2020" }
+  }
+}

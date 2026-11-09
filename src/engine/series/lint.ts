@@ -1,12 +1,12 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import sharp from 'sharp'
-import { BROW_STATES, EYE_STATES, MOUTH_SHAPES } from '../../shared/contracts'
+import { BROW_STATES, EYE_STATES, MOUTH_SHAPES, PATH_MARK_TOLERANCE, isVehicle } from '../../shared/contracts'
 import { character3dSchema, style3dSchema } from '../../shared/contracts'
-import type { Bible, Character3d, Episode, Lang, Rig, RigVariant, Set3d, SetFile, TextCatalog, Timeline, Timeline3d, VoiceManifest } from '../../shared/contracts'
+import type { Bible, Character3d, Episode, Lang, PathKind, Rig, RigVariant, Set3d, SetFile, TextCatalog, Timeline, Timeline3d, VehicleCharacter3d, VoiceManifest } from '../../shared/contracts'
 import { SIX_VISEMES, textHasLabial } from '../anim/visemes'
-import { loadActingLibrary } from '../blender/library'
-import { propFootprint } from '../blender/props'
+import { bodyCannot, bodyOf, loadActingLibrary, moveAction } from '../blender/library'
+import { blockedPaths, distanceToPath, pathsAt, propFootprint } from '../blender/props'
 import type { ActingLibrary } from '../blender/library'
 import { loadRenderConfig } from '../render/ffmpeg'
 import { readMixCheck } from '../render/mixcheck'
@@ -35,6 +35,11 @@ export const LINT_CODES = [
   'E_MOUTH_SILENT',
   'E_LANG_ORDER',
   'E_CLIP_MISSING',
+  'E_VEHICLE_LIMB',
+  'E_ACTION_BODY',
+  'E_MARK_OFF_PATH',
+  'E_OFF_TRACK',
+  'E_PATH_BLOCKED',
   'W_LINE_LONG',
   'W_OFF_FRAME',
   'W_GESTURE_OVER_LINE',
@@ -271,6 +276,7 @@ export async function lintSeries(store: SeriesStore, series: string, opts: LintO
     }
     const castIds = script ? script.cast : bible.cast.map((c) => c.id)
     const rigOf = new Map<string, Rig>()
+    const charOf = new Map<string, Character3d>()
     const blender = bible.renderer === 'blender'
     if (blender) await lintStyle3d(issues, store, series, bible)
     for (const id of castIds) {
@@ -279,7 +285,8 @@ export async function lintSeries(store: SeriesStore, series: string, opts: LintO
         continue
       }
       if (blender) {
-        await lintCharacter3d(issues, store, series, bible, id)
+        const spec = await lintCharacter3d(issues, store, series, bible, id)
+        if (spec) charOf.set(id, spec)
         continue
       }
       const check = await checkRig(store, series, id)
@@ -300,7 +307,7 @@ export async function lintSeries(store: SeriesStore, series: string, opts: LintO
       const set = await lintSet(issues, store, series, bible, id)
       if (set) setOf.set(id, set)
     }
-    if (script && opts.episode) await lintEpisode(issues, stats, store, series, opts, bible, script, rigOf, setOf, blender ? set3dOf : undefined)
+    if (script && opts.episode) await lintEpisode(issues, stats, store, series, opts, bible, script, rigOf, setOf, blender ? set3dOf : undefined, charOf)
   }
   const errors = issues.list.filter((i) => i.severity === 'error')
   const shares = stats.map((s) => s.share)
@@ -341,7 +348,18 @@ async function lintCharacter3d(issues: Issues, store: SeriesStore, series: strin
     return null
   }
   const rel = relTo(p, file)
-  const character = await load(issues, rel, () => store.readJson(file, character3dSchema))
+  // E_VEHICLE_LIMB comes from the schema (its message starts with the code): report it by name, the other schema issues as E_SCHEMA
+  const character = await load(issues, rel, async () => {
+    try {
+      return await store.readJson(file, character3dSchema)
+    } catch (e) {
+      if (!(e instanceof SeriesFileError) || e.kind !== 'schema' || !e.issues.some((i) => i.includes('E_VEHICLE_LIMB:'))) throw e
+      for (const i of e.issues.filter((x) => x.includes('E_VEHICLE_LIMB:'))) issues.add('E_VEHICLE_LIMB', i.split('E_VEHICLE_LIMB: ')[1]!, { file: rel, where: i.split(':')[0] })
+      const rest = e.issues.filter((x) => !x.includes('E_VEHICLE_LIMB:'))
+      if (rest.length) throw new SeriesFileError(e.file, 'schema', rest)
+      return null
+    }
+  })
   if (character && character.id !== id) issues.add('E_SCHEMA', `character id "${character.id}" is not the cast id "${id}"`, { file: rel, where: 'id' })
   return character
 }
@@ -375,6 +393,9 @@ async function lintSet3d(issues: Issues, store: SeriesStore, series: string, bib
       if (r > 0 && d < r) issues.add('E_MARK_BLOCKED', `mark "${name}" is inside the footprint of prop "${prop.id}" (${prop.kind}, radius ${r.toFixed(2)} m, ${d.toFixed(2)} m away): an actor would stand in it`, { file: rel, where: name })
     }
   }
+  // a road or a track that runs through a tree or a house
+  for (const b of blockedPaths(set))
+    issues.add('E_PATH_BLOCKED', `path "${b.path}" runs through the footprint of prop "${b.prop}" (${b.kind}): its centre line passes ${b.distance.toFixed(2)} m from the prop and needs ${b.clear.toFixed(2)} m (the footprint plus half the path width)`, { file: rel, where: `paths.${b.path}` })
   return set
 }
 
@@ -424,7 +445,9 @@ async function lintEpisode(
   rigOf: Map<string, Rig>,
   setOf: Map<string, SetFile>,
   /** Blender series (`renderer: "blender"`): the 3D sets by id. Absent for a canvas series. */
-  set3dOf?: Map<string, Set3d>
+  set3dOf?: Map<string, Set3d>,
+  /** Blender series: the character specs that parsed, by cast id (the body kind decides E_ACTION_BODY and the path checks). */
+  charOf: Map<string, Character3d> = new Map()
 ): Promise<void> {
   const ep = opts.episode!
   const b3d = !!set3dOf
@@ -471,6 +494,7 @@ async function lintEpisode(
           issues.add('E_ACTION_UNKNOWN', `action "${name}" is not a gesture of the acting library (${[...library.scriptable].join(', ')})`, { file: scriptRel, where })
           return undefined
         }
+        body(actor, action?.name, where)
         return action
       }
       const rig = rigOf.get(actor)
@@ -489,6 +513,40 @@ async function lintEpisode(
       if (!script.cast.includes(target) && !prop && !set3d.marks[target]) issues.add('E_MARK_UNKNOWN', `target "${target}" is not a cast id, a prop or a mark of set "${scene.set}"`, { file: scriptRel, where })
       else if (name === 'sit' && !prop?.seat) issues.add('E_MARK_UNKNOWN', `"sit" needs a prop with a seat; "${target}" has none`, { file: scriptRel, where })
     }
+    /** E_ACTION_BODY: an action this cast member's body (a creature, a car, a train) cannot do. */
+    const body = (actor: string, name: string | undefined, where: string) => {
+      const action = name ? library?.byName.get(name) : undefined
+      const spec = charOf.get(actor)
+      if (!action || !spec) return
+      const why = bodyCannot(action, bodyOf(spec))
+      if (why) issues.add('E_ACTION_BODY', `"${actor}" cannot do it: ${why}`, { file: scriptRel, where })
+    }
+    /** A vehicle move: both marks lie on a path of its kind (E_MARK_OFF_PATH, once per mark), and a train's two marks on one track path (E_OFF_TRACK). */
+    const offPath = new Set<string>()
+    const pathMove = (who: string, spec: VehicleCharacter3d, from: string | undefined, to: string, where: string) => {
+      if (!set3d) return
+      const kind: PathKind = spec.vehicle.track ? 'track' : 'road'
+      const near = (m: string | undefined) => {
+        const p = m ? set3d.marks[m] : undefined
+        return p ? pathsAt(set3d, p, kind) : null
+      }
+      for (const m of [from, to]) {
+        const p = m ? set3d.marks[m] : undefined
+        if (!m || !p || offPath.has(`${m}:${kind}`) || near(m)!.length) continue
+        offPath.add(`${m}:${kind}`)
+        const all = Object.values(set3d.paths ?? {}).filter((x) => x.kind === kind)
+        const d = all.length ? Math.min(...all.map((x) => distanceToPath(p, x))) : null
+        const why = d === null ? `set "${scene.set}" has no ${kind} path` : `it is ${d.toFixed(2)} m from the nearest ${kind} path (at most ${PATH_MARK_TOLERANCE} m)`
+        issues.add('E_MARK_OFF_PATH', `mark "${m}", used by a move of the ${spec.vehicle.type} "${who}", is not on a ${kind}: ${why}`, { file: scriptRel, where })
+      }
+      if (kind !== 'track') return
+      const a = near(from)
+      const b = near(to)
+      if (a && b && !a.some((id) => b.includes(id)))
+        issues.add('E_OFF_TRACK', `the train "${who}" moves from "${from}" to "${to}", which are not on one track path (${a.join(', ') || 'no track'} / ${b.join(', ') || 'no track'})`, { file: scriptRel, where })
+    }
+    /** Where each actor stands in this scene (its start mark, then the target of its last move). */
+    const at = new Map<string, string>(Object.entries(scene.start).map(([id, s]) => [id, s.mark]))
     // beats that run together (a beat without `with: "prev"` starts a group): who speaks, and which gestures may not overlap a line
     let groupSpeakers: string[] = []
     let groupGestures: { who: string; name: string; where: string }[] = []
@@ -520,11 +578,19 @@ async function lintEpisode(
           for (const g of groupGestures) if (g.who === b.speaker) overLine(g.who, g.name, g.where)
           groupSpeakers.push(b.speaker)
           break
-        case 'move':
+        case 'move': {
           checkActor(b.who, where)
           mark(b.to, where)
+          const spec = charOf.get(b.who)
+          if (b3d) body(b.who, moveAction(b.style, spec ?? null), where)
+          if (spec && isVehicle(spec)) pathMove(b.who, spec, at.get(b.who), b.to, where)
+          at.set(b.who, b.to)
           break
+        }
         case 'turn':
+          checkActor(b.who, where)
+          if (b3d) body(b.who, 'turn', where)
+          break
         case 'emote':
           checkActor(b.who, where)
           break

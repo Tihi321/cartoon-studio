@@ -41,4 +41,4 @@ def registry_names():
     return sorted(ACTIONS)
 
 
-from . import camera, gait, gestures  # noqa: E402,F401  (they register their actions)
+from . import camera, gait, gestures, vehicle  # noqa: E402,F401  (they register their actions; vehicle.py holds the HUB-31 names)

@@ -8,6 +8,7 @@ import { rigVariantSchema } from '../src/shared/contracts'
 import { SeriesStore } from '../src/engine/series/service'
 import { installMini } from './fixtures/mini'
 import { installMini3d } from './fixtures/mini3d'
+import { installMiniVehicles } from './fixtures/mini-vehicles'
 
 let dir: string | undefined
 afterEach(async () => {
@@ -46,6 +47,7 @@ describe('contracts and lint', () => {
     const store = new SeriesStore(dir)
 
     expect((await store.readBible('mini3d')).renderer).toBe('blender')
+    expect((await store.readCharacter3d('mini3d', 'tilly')).kind).toBe('creature') // a spec without kind (pilot 3) is a creature
     const clean = await lintSeries(store, 'mini3d', { episode: 'ep00-mini3d', requireAudio: true })
     expect(clean.errors).toEqual([])
     expect(clean.warnings).toEqual([])
@@ -56,6 +58,33 @@ describe('contracts and lint', () => {
     await writeFile(scriptFile, JSON.stringify(script))
     const broken = await lintSeries(store, 'mini3d', { episode: 'ep00-mini3d' })
     expect(broken.errors.map((e) => e.code)).toEqual(['E_ACTION_UNKNOWN'])
+  })
+
+  it('the fixture mini-vehicles (a car and a train on paths) lints clean; a limb, a creature gesture and a train off its track are errors', async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'cts-contracts-'))
+    const root = await installMiniVehicles(dir)
+    const store = new SeriesStore(dir)
+
+    const clean = await lintSeries(store, 'mini-vehicles', { episode: 'ep00-wheels', requireAudio: true })
+    expect(clean.errors).toEqual([])
+    expect(clean.warnings).toEqual([])
+
+    const pipFile = path.join(root, 'cast', 'pip', 'character.json')
+    const pip = JSON.parse(await readFile(pipFile, 'utf8'))
+    pip.controls.arm_L = { parent: 'body', at: [-0.3, 0, 0] }
+    await writeFile(pipFile, JSON.stringify(pip))
+    const scriptFile = path.join(root, 'episodes', 'ep00-wheels', 'script.json')
+    const script = JSON.parse(await readFile(scriptFile, 'utf8'))
+    const beats = script.scenes[0].beats
+    beats[3].to = 'road_right' // the train leaves its track
+    beats[7] = { id: 'b08', type: 'gesture', who: 'bruno', gesture: 'wave' }
+    await writeFile(scriptFile, JSON.stringify(script))
+
+    const broken = await lintSeries(store, 'mini-vehicles', { episode: 'ep00-wheels' })
+    const codes = broken.errors.map((e) => e.code)
+    expect(codes).toEqual(expect.arrayContaining(['E_VEHICLE_LIMB', 'E_ACTION_BODY', 'E_OFF_TRACK']))
+    expect(codes).not.toContain('E_SCHEMA')
+    expect(broken.errors.find((e) => e.code === 'E_ACTION_BODY')?.message).toMatch(/"wave".*creature/)
   })
 
   it('rig variant b and the recraft-svg path are gone; only a (claude-svg) and c (raster) remain', () => {

@@ -1,0 +1,9 @@
+{
+  "schema": "cts.text/1",
+  "lang": "hr",
+  "strings": { "title": "Mala proba s kotačima" },
+  "lines": {
+    "l01": { "text": "Bip! Bok, Bruno!", "delivery": "cheerful" },
+    "l02": { "text": "Oh! Dobro jutro, Pip." }
+  }
+}

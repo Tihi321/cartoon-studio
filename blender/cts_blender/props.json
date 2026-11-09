@@ -1,6 +1,6 @@
 {
   "schema": "cts.prop-kit/1",
-  "note": "The prop kit of the set builder. footprint: the radius in metres (at scale 1) of the ground the prop takes, so a mark or a walk should stay outside it (the lint of CTS-21 follow-ups and the builder's own warning read it). colours: the keys a set may override in a prop's `colours`. Heights are not listed: a cloud floats, a flower patch is flat.",
+  "note": "The prop kit of the set builder. footprint: the radius in metres (at scale 1) of the ground the prop takes, so a mark or a walk should stay outside it (the lint of CTS-21 follow-ups and the builder's own warning read it). colours: the keys a set may override in a prop's `colours`. Heights are not listed: a cloud floats, a flower patch is flat. HUB-31 road and rail kit (data first; the builders are CTS-33): road and track are built along a path of the set (`path`), so they take no ground; a crossing sits where a road path meets a track path and vehicles pass through it (footprint 0); a path's strip (half its width) must clear every other footprint (lint E_PATH_BLOCKED).",
   "kinds": {
     "tree_round": { "footprint": 0.45, "colours": ["trunk", "leaves", "leaves2"] },
     "tree_cone": { "footprint": 0.4, "colours": ["trunk", "leaves"] },
@@ -10,6 +10,12 @@
     "flowers": { "footprint": 0.0, "colours": ["a", "b", "c"] },
     "fence": { "footprint": 1.6, "colours": ["wood"] },
     "house": { "footprint": 2.2, "colours": ["walls", "roof", "door"] },
-    "cloud": { "footprint": 0.0, "colours": ["cloud"] }
+    "cloud": { "footprint": 0.0, "colours": ["cloud"] },
+    "road": { "footprint": 0.0, "colours": ["asphalt", "dash", "kerb"] },
+    "track": { "footprint": 0.0, "colours": ["rail", "sleeper", "ballast"] },
+    "crossing": { "footprint": 0.0, "colours": ["boards", "post", "stripe", "sign"] },
+    "platform": { "footprint": 1.0, "colours": ["deck", "edge", "post", "roof"] },
+    "signal": { "footprint": 0.3, "colours": ["post", "head", "lamp"] },
+    "buffer_stop": { "footprint": 0.6, "colours": ["frame", "beam", "stripe"] }
   }
 }

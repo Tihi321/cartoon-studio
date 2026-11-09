@@ -1,0 +1,63 @@
+{
+  "schema": "cts.bible/1",
+  "slug": "mini-vehicles",
+  "title": { "hr": "Mala proba s kotačima", "en": "Mini Wheels Test" },
+  "audience": { "ageMin": 4, "ageMax": 8 },
+  "logline": { "hr": "Pip i Bruno sreću se na prijelazu.", "en": "Pip and Bruno meet at the crossing." },
+  "tone": ["gentle humour", "every episode ends warm"],
+  "style": {
+    "look": "toon-shaded primitives, dark outline",
+    "palette": ["#d9792b", "#f3dfb5", "#8a5a35", "#4e3423", "#6fae4f", "#2b2118"],
+    "outlinePx": 2,
+    "refPrompt": "a small orange car and a big brown train engine with lamp eyes"
+  },
+  "languages": ["hr", "en"],
+  "cast": [
+    {
+      "id": "pip",
+      "name": { "hr": "Pip", "en": "Pip" },
+      "role": "lead",
+      "personality": "quick, curious",
+      "look": "a small round orange car with lamp eyes on its front wings and a whip antenna with a green pennant",
+      "voice": {
+        "hr": { "provider": "auto", "gemini": "Leda", "vibetts": "supertonic:F3", "speed": 1 },
+        "en": { "provider": "auto", "gemini": "Leda", "vibetts": "af_bella", "speed": 1 }
+      },
+      "character": "cast/pip/character.json"
+    },
+    {
+      "id": "bruno",
+      "name": { "hr": "Bruno", "en": "Bruno" },
+      "role": "lead",
+      "personality": "slow, kind",
+      "look": "a long brown train engine with big cream lamp eyes low on its nose and a short chimney",
+      "voice": {
+        "hr": { "provider": "auto", "gemini": "Charon", "vibetts": "supertonic:M1", "speed": 1 },
+        "en": { "provider": "auto", "gemini": "Charon", "vibetts": "am_adam", "speed": 1 }
+      },
+      "character": "cast/bruno/character.json"
+    }
+  ],
+  "sets": [
+    { "id": "crossing", "name": { "hr": "Prijelaz", "en": "The crossing" }, "description": "a road and a track cross in a meadow, with a small platform", "file": "sets/crossing/set3d.json" }
+  ],
+  "music": { "stings": [] },
+  "rules": ["lines of at most 12 words", "no name-calling"],
+  "episodes": [{ "id": "ep00-wheels", "title": { "hr": "Mala proba s kotačima", "en": "Mini Wheels Test" }, "status": "draft" }],
+  "pitches": [
+    {
+      "id": "p1",
+      "title": { "hr": "Mala proba s kotačima", "en": "Mini Wheels Test" },
+      "logline": { "hr": "Auto i vlak na prijelazu.", "en": "A car and a train at the crossing." },
+      "leads": [
+        { "name": "Pip", "what": "quick little car" },
+        { "name": "Bruno", "what": "slow kind engine" }
+      ],
+      "sets": ["crossing"],
+      "why": "the smallest vehicle series that exercises paths, a drive, a chug and a honk"
+    }
+  ],
+  "chosenPitch": "p1",
+  "renderer": "blender",
+  "style3d": "style3d.json"
+}

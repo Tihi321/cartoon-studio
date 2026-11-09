@@ -242,7 +242,8 @@ export type SetFile = z.infer<typeof setSchema>
 
 const beatBase = { id: idSchema, with: z.literal('prev').optional() }
 
-export const MOVE_STYLES = ['walk', 'hop', 'run', 'tiptoe'] as const
+/** `walk hop run tiptoe` move a creature; `drive zoom reverse` a car and `chug` a train (HUB-31). */
+export const MOVE_STYLES = ['walk', 'hop', 'run', 'tiptoe', 'drive', 'zoom', 'reverse', 'chug'] as const
 export type MoveStyle = (typeof MOVE_STYLES)[number]
 
 export const BEAT_TYPES = ['line', 'move', 'turn', 'emote', 'gesture', 'look', 'camera', 'pause', 'sfx', 'music', 'title', 'clip'] as const
@@ -470,11 +471,28 @@ export type Timeline = z.infer<typeof timelineSchema>
 // ---- 3D (renderer "blender", HUB-30): characters, sets, the look, the timeline ----
 // Units are metres, z is up, a rotation is degrees (x, y, z). A character faces -y at yaw 0 (the camera looks along +y).
 
-/** The controls every character has (parented empties, HUB-30 decision 6). Legs, ears, tails, brows, hands and accessory chains are optional. */
+/** The body kinds of a 3D character (HUB-31): a `creature` (arms, optional legs) or a `vehicle` (wheels, no arms or legs). */
+export const BODY_KINDS = ['creature', 'vehicle'] as const
+export const bodyKindSchema = z.enum(BODY_KINDS)
+export type BodyKind = z.infer<typeof bodyKindSchema>
+export const VEHICLE_TYPES = ['car', 'train'] as const
+export const vehicleTypeSchema = z.enum(VEHICLE_TYPES)
+export type VehicleType = z.infer<typeof vehicleTypeSchema>
+
+/** The controls every creature has (parented empties, HUB-30 decision 6). Legs, ears, tails, brows, hands and accessory chains are optional. */
 export const REQUIRED_CONTROLS = ['root', 'squash', 'body', 'head', 'arm_L', 'arm_R', 'lid_L', 'lid_R', 'pupil_L', 'pupil_R', 'mouth'] as const
 export const OPTIONAL_CONTROL_RE = /^(hand_[LR]|leg_[LR]|brow_[LR]|ear_[LR]\d+|tail\d+|acc_[A-Za-z0-9-]+\d+)$/
-export const PART_SHAPES = ['ellipsoid', 'cone', 'box', 'capsule', 'torus', 'arc', 'spines'] as const
+/** The controls every vehicle has (HUB-31 decision 8), plus at least one `wheel_<n>`. `head` is the front face block. */
+export const REQUIRED_VEHICLE_CONTROLS = ['root', 'squash', 'body', 'head', 'lid_L', 'lid_R', 'pupil_L', 'pupil_R', 'mouth'] as const
+export const WHEEL_CONTROL_RE = /^wheel_\d+$/
+/** Optional vehicle controls: wheels, lamp hoods (`brow_L/R`), the puff sources, the horn, the antenna spring chain and accessory chains. */
+export const OPTIONAL_VEHICLE_CONTROL_RE = /^(wheel_\d+|brow_[LR]|chimney|exhaust|horn|antenna\d+|acc_[A-Za-z0-9-]+\d+)$/
+/** Arm, hand and leg controls: an error on a vehicle. The schema message starts with `E_VEHICLE_LIMB:` so lint reports it under that code. */
+export const LIMB_CONTROL_RE = /^(arm|hand|leg)_/
+export const PART_SHAPES = ['ellipsoid', 'cone', 'box', 'capsule', 'torus', 'arc', 'spines', 'cylinder'] as const
 export const WALK_STYLES = ['walk', 'hop', 'waddle'] as const
+/** How a vehicle drives: `zip` (quick starts, bouncy) or `chug` (slow start, heavy late settle). */
+export const DRIVE_STYLES = ['zip', 'chug'] as const
 
 const size3 = z.array(z.number().positive()).min(1).max(3)
 const controlName = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/)
@@ -482,7 +500,7 @@ const controlName = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/)
 export const character3dPartSchema = z.strictObject({
   id: nameSchema,
   shape: z.enum(PART_SHAPES),
-  /** Radii or extents, one to three numbers (an ellipsoid has three radii, a cone a radius and a height ...). */
+  /** Radii or extents, one to three numbers (an ellipsoid has three radii, a cone a radius and a height, a cylinder a radius and a length ...). */
   size: size3,
   at: vec3,
   rot: vec3.optional(),
@@ -496,31 +514,66 @@ export const character3dPartSchema = z.strictObject({
 })
 export type Character3dPart = z.infer<typeof character3dPartSchema>
 
+const motionBase = {
+  /** Gesture speed factor (Pip 1.4, Bruno 0.75). */
+  tempo: z.number().positive(),
+  /** Amplitude of gestures and idle motion. */
+  energy: z.number().positive(),
+  /** Hop and idle bob (a vehicle: the suspension bob). */
+  bounce: z.number().nonnegative()
+}
+/** The motion profile of a creature. */
+export const creatureMotionSchema = z.strictObject({
+  ...motionBase,
+  walk: z.strictObject({ style: z.enum(WALK_STYLES), stride: z.number().positive(), cadence: z.number().positive() })
+})
+export type CreatureMotion = z.infer<typeof creatureMotionSchema>
+/** The motion profile of a vehicle: `topSpeed` in m/s, `accel` in m/s², `suspension` 0 (stiff) to 1 (soft: bouncy, settles late). */
+export const vehicleMotionSchema = z.strictObject({
+  ...motionBase,
+  drive: z.strictObject({ style: z.enum(DRIVE_STYLES), topSpeed: z.number().positive(), accel: z.number().positive(), suspension: z.number().min(0).max(1) })
+})
+export type VehicleMotion = z.infer<typeof vehicleMotionSchema>
+
+/** The `vehicle` block: the type, the wheel radius in metres, the wheel controls (each spins on its own axis), and `track` (a train: true, it moves only along a track path; a car: false). */
+export const vehicleBlockSchema = z.strictObject({
+  type: vehicleTypeSchema,
+  wheelRadius: z.number().positive(),
+  wheels: z.array(controlName).min(1),
+  track: z.boolean()
+})
+export type VehicleBlock = z.infer<typeof vehicleBlockSchema>
+
 /** `cast/<id>/character.json`: a character as primitives (no AI image is an input). The builder (`blender/`) makes `character.blend` from it. */
 export const character3dSchema = z
   .strictObject({
     schema: schemaTag('character3d'),
     id: idSchema,
     units: z.literal('m'),
-    /** Standing height in metres. */
+    /** HUB-31: the body kind; default `creature` (so every pilot 3 spec parses unchanged). */
+    kind: bodyKindSchema.default('creature'),
+    /** Standing height in metres (a vehicle: to the roof). */
     height: z.number().positive(),
     palette: z.record(controlName, hexColour),
-    motion: z.strictObject({
-      /** Gesture speed factor (Pip 1.4, Bruno 0.75). */
-      tempo: z.number().positive(),
-      /** Amplitude of gestures and idle motion. */
-      energy: z.number().positive(),
-      /** Hop and idle bob. */
-      bounce: z.number().nonnegative(),
-      walk: z.strictObject({ style: z.enum(WALK_STYLES), stride: z.number().positive(), cadence: z.number().positive() })
-    }),
+    /** A creature has `walk`, a vehicle `drive` (the refinement checks it against `kind`). */
+    motion: z.union([creatureMotionSchema, vehicleMotionSchema]),
+    /** Vehicles only, and required for them. */
+    vehicle: vehicleBlockSchema.optional(),
     controls: z.record(controlName, z.strictObject({ parent: controlName.nullable(), at: vec3, rot: vec3.optional() })),
-    /** Spring of a secondary chain (`ear_L`, `tail`, `acc_scarf`): stiffness and damping. A chain without an entry uses the library default. */
+    /** Spring of a secondary chain (`ear_L`, `tail`, `acc_scarf`, `antenna`): stiffness and damping. A chain without an entry uses the library default. */
     springs: z.record(controlName, z.strictObject({ stiffness: z.number().positive(), damping: z.number().nonnegative() })).optional(),
     parts: z.array(character3dPartSchema).min(1),
     face: z.strictObject({
       control: z.literal('head'),
-      eyes: z.strictObject({ x: z.number(), z: z.number(), r: z.number().positive(), faceY: z.number(), pupil: z.strictObject({ size: z.number().positive(), lead: z.number().nonnegative() }) }),
+      eyes: z.strictObject({
+        x: z.number(),
+        z: z.number(),
+        r: z.number().positive(),
+        faceY: z.number(),
+        pupil: z.strictObject({ size: z.number().positive(), lead: z.number().nonnegative() }),
+        /** HUB-31: lamp eyes (a vehicle's front lamps): the colour they glow with when they flash, and the palette colour of the lamp rim. */
+        lamp: z.strictObject({ glow: hexColour, rim: controlName }).optional()
+      }),
       lids: z.strictObject({ colour: controlName }),
       brows: z.strictObject({ colour: controlName, at: vec3, length: z.number().positive() }).optional(),
       mouth: z.strictObject({ at: vec3, scale: z.number().positive(), inner: hexColour, tongue: hexColour.optional() })
@@ -529,13 +582,37 @@ export const character3dSchema = z
   })
   .superRefine((c, ctx) => {
     const bad = (path: (string | number)[], message: string) => ctx.addIssue({ code: 'custom', path, message })
-    for (const name of REQUIRED_CONTROLS) if (!c.controls[name]) bad(['controls', name], `a character has the control "${name}"`)
+    const vehicle = c.kind === 'vehicle'
+    const required: readonly string[] = vehicle ? REQUIRED_VEHICLE_CONTROLS : REQUIRED_CONTROLS
+    for (const name of required) if (!c.controls[name]) bad(['controls', name], `a ${c.kind} has the control "${name}"`)
     for (const [name, ctl] of Object.entries(c.controls)) {
-      if (!(REQUIRED_CONTROLS as readonly string[]).includes(name) && !OPTIONAL_CONTROL_RE.test(name)) bad(['controls', name], `"${name}" is not a standard control (hand_L/R, leg_L/R, brow_L/R, ear_L1.., ear_R1.., tail1.., acc_<name>1..)`)
+      if (vehicle && LIMB_CONTROL_RE.test(name)) bad(['controls', name], `E_VEHICLE_LIMB: a vehicle has no arms, hands or legs ("${name}")`)
+      else if (vehicle && !required.includes(name) && !OPTIONAL_VEHICLE_CONTROL_RE.test(name))
+        bad(['controls', name], `"${name}" is not a standard vehicle control (wheel_1.., brow_L/R, chimney, exhaust, horn, antenna1.., acc_<name>1..)`)
+      else if (!vehicle && !required.includes(name) && !OPTIONAL_CONTROL_RE.test(name))
+        bad(['controls', name], `"${name}" is not a standard control (hand_L/R, leg_L/R, brow_L/R, ear_L1.., ear_R1.., tail1.., acc_<name>1..)`)
       if (ctl.parent !== null && !c.controls[ctl.parent]) bad(['controls', name, 'parent'], `parent "${ctl.parent}" is not a control`)
       if (ctl.parent === null && name !== 'root') bad(['controls', name, 'parent'], 'only root has no parent')
     }
     if (c.controls.root && c.controls.root.parent !== null) bad(['controls', 'root', 'parent'], 'root has no parent (null)')
+    if (vehicle) {
+      const wheels = Object.keys(c.controls).filter((n) => WHEEL_CONTROL_RE.test(n))
+      if (!wheels.length) bad(['controls'], 'a vehicle has at least one wheel control (wheel_1, wheel_2 ..)')
+      if (!('drive' in c.motion)) bad(['motion'], 'a vehicle has motion.drive (not walk)')
+      if (!c.vehicle) bad(['vehicle'], 'a vehicle has a vehicle block { type, wheelRadius, wheels, track }')
+      else {
+        c.vehicle.wheels.forEach((w, i) => {
+          if (!WHEEL_CONTROL_RE.test(w) || !c.controls[w]) bad(['vehicle', 'wheels', i], `"${w}" is not a wheel control of this vehicle`)
+        })
+        for (const w of wheels) if (!c.vehicle.wheels.includes(w)) bad(['vehicle', 'wheels'], `wheel control "${w}" is not listed in vehicle.wheels`)
+        if (c.vehicle.type === 'train' && !c.vehicle.track) bad(['vehicle', 'track'], 'a train runs on a track (track: true)')
+        if (c.vehicle.type === 'car' && c.vehicle.track) bad(['vehicle', 'track'], 'a car does not run on a track (track: false)')
+      }
+    } else {
+      if (!('walk' in c.motion)) bad(['motion'], 'a creature has motion.walk (not drive)')
+      if (c.vehicle) bad(['vehicle'], 'only a vehicle (kind: "vehicle") has a vehicle block')
+    }
+    if (c.face.eyes.lamp && !c.palette[c.face.eyes.lamp.rim]) bad(['face', 'eyes', 'lamp', 'rim'], `colour "${c.face.eyes.lamp.rim}" is not in the palette`)
     const lists = [['parts', c.parts], ['accessories', c.accessories ?? []]] as const
     for (const [label, list] of lists) {
       list.forEach((part, i) => {
@@ -547,37 +624,75 @@ export const character3dSchema = z
     if (c.face.brows && !c.palette[c.face.brows.colour]) bad(['face', 'brows', 'colour'], `colour "${c.face.brows.colour}" is not in the palette`)
   })
 export type Character3d = z.infer<typeof character3dSchema>
+export type VehicleCharacter3d = Character3d & { kind: 'vehicle'; motion: VehicleMotion; vehicle: VehicleBlock }
 
-export const PROP_KINDS = ['tree_round', 'tree_cone', 'bush', 'bench', 'rock', 'flowers', 'fence', 'house', 'cloud'] as const
+/** A parsed spec is a vehicle (the schema guarantees `motion.drive` and `vehicle` for it). */
+export const isVehicle = (c: Character3d): c is VehicleCharacter3d => c.kind === 'vehicle'
 
-/** `sets/<id>/set3d.json`: ground, sky, props from the kit, marks (ground points actors walk to) and named cameras. The builder makes `set.blend`. */
-export const set3dSchema = z.strictObject({
-  schema: schemaTag('set3d'),
-  id: idSchema,
-  ground: z.strictObject({
-    /** Width and depth in metres. */
-    size: point,
-    colour: hexColour,
-    patches: z.array(z.strictObject({ shape: z.enum(['disc', 'rect']), at: point, size: point, colour: hexColour })).default([])
-  }),
-  sky: z.strictObject({ top: hexColour, horizon: hexColour }),
-  props: z.array(
-    z.strictObject({
-      id: idSchema,
-      kind: z.enum(PROP_KINDS),
-      /** Ground position (x, y) in metres. */
-      at: point,
-      rot: z.number().optional(),
-      scale: z.number().positive().optional(),
-      colours: z.record(controlName, hexColour).optional(),
-      /** Where an actor sits (`sit`): the seat height and the seat point relative to the prop. */
-      seat: z.strictObject({ height: z.number().positive(), at: point }).optional()
+/** The prop kit (`blender/cts_blender/props.json`); HUB-31 adds the road and rail kit `road track crossing platform signal buffer_stop`. */
+export const PROP_KINDS = ['tree_round', 'tree_cone', 'bush', 'bench', 'rock', 'flowers', 'fence', 'house', 'cloud', 'road', 'track', 'crossing', 'platform', 'signal', 'buffer_stop'] as const
+export type PropKind = (typeof PROP_KINDS)[number]
+/** Path kinds of a set (HUB-31): a car drives on a `road`, a train runs on a `track`. */
+export const PATH_KINDS = ['road', 'track'] as const
+export const pathKindSchema = z.enum(PATH_KINDS)
+export type PathKind = z.infer<typeof pathKindSchema>
+/** The width in metres of a path that gives none. */
+export const PATH_WIDTH_DEFAULT: Readonly<Record<PathKind, number>> = { road: 3, track: 1.6 }
+/** A mark is on a path when it lies within this many metres of the path's centre line (E_MARK_OFF_PATH, E_OFF_TRACK). */
+export const PATH_MARK_TOLERANCE = 0.3
+/** The prop kinds built along a path: their `path` names a path of this kind and their `at` is not used. */
+export const PATH_PROP_KINDS: Readonly<Partial<Record<PropKind, PathKind>>> = { road: 'road', track: 'track' }
+
+/** A path of a set: a centre line on the ground (x, y in metres, at least two points) that vehicles follow; `width` in metres. */
+export const set3dPathSchema = z.strictObject({ kind: pathKindSchema, points: z.array(point).min(2), width: z.number().positive().optional() })
+export type Set3dPath = z.infer<typeof set3dPathSchema>
+
+/** `sets/<id>/set3d.json`: ground, sky, props from the kit, marks (ground points actors walk to), named cameras and (HUB-31) paths. The builder makes `set.blend`. */
+export const set3dSchema = z
+  .strictObject({
+    schema: schemaTag('set3d'),
+    id: idSchema,
+    ground: z.strictObject({
+      /** Width and depth in metres. */
+      size: point,
+      colour: hexColour,
+      patches: z.array(z.strictObject({ shape: z.enum(['disc', 'rect']), at: point, size: point, colour: hexColour })).default([])
+    }),
+    sky: z.strictObject({ top: hexColour, horizon: hexColour }),
+    props: z.array(
+      z.strictObject({
+        id: idSchema,
+        kind: z.enum(PROP_KINDS),
+        /** Ground position (x, y) in metres. */
+        at: point,
+        rot: z.number().optional(),
+        scale: z.number().positive().optional(),
+        colours: z.record(controlName, hexColour).optional(),
+        /** Where an actor sits (`sit`): the seat height and the seat point relative to the prop. */
+        seat: z.strictObject({ height: z.number().positive(), at: point }).optional(),
+        /** HUB-31: a `road` or `track` prop is built along this path of the set (a path of the same kind). */
+        path: idSchema.optional()
+      })
+    ),
+    /** Ground points (x, y): `walk` goes to them, actors start on them. */
+    marks: z.record(nameSchema, point),
+    cameras: z.record(nameSchema, z.strictObject({ loc: vec3, target: vec3, lens: z.number().positive() })).default({}),
+    /** HUB-31: the roads and tracks vehicles follow, by id. Optional, so sets without vehicles parse unchanged. */
+    paths: z.record(idSchema, set3dPathSchema).optional()
+  })
+  .superRefine((s, ctx) => {
+    s.props.forEach((p, i) => {
+      const bad = (message: string) => ctx.addIssue({ code: 'custom', path: ['props', i, 'path'], message })
+      const need = PATH_PROP_KINDS[p.kind]
+      if (!need) {
+        if (p.path !== undefined) bad(`a ${p.kind} is not built along a path (only road and track are)`)
+        return
+      }
+      const path = p.path === undefined ? undefined : s.paths?.[p.path]
+      if (!path) bad(`a ${p.kind} prop names the ${need} path it is built along (${p.path === undefined ? 'none given' : `"${p.path}" is not a path of the set`})`)
+      else if (path.kind !== need) bad(`a ${p.kind} prop is built along a ${need} path; "${p.path}" is a ${path.kind}`)
     })
-  ),
-  /** Ground points (x, y): `walk` goes to them, actors start on them. */
-  marks: z.record(nameSchema, point),
-  cameras: z.record(nameSchema, z.strictObject({ loc: vec3, target: vec3, lens: z.number().positive() })).default({})
-})
+  })
 export type Set3d = z.infer<typeof set3dSchema>
 
 const skyColours = z.strictObject({ top: hexColour, horizon: hexColour })

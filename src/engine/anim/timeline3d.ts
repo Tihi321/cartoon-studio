@@ -1,5 +1,6 @@
 import type { Beat, Character3d, Lang, Lipsync, Set3d, TextCatalog, Timeline3d, TimelineClip, Viseme, VoiceLine, VoiceManifest } from '../../shared/contracts'
-import { loadActingLibrary } from '../blender/library'
+import { isVehicle } from '../../shared/contracts'
+import { loadActingLibrary, moveAction } from '../blender/library'
 import type { ActingAction, ActingLibrary } from '../blender/library'
 import type { SeriesStore } from '../series/service'
 import { hashString, mulberry32 } from './blink'
@@ -53,6 +54,8 @@ interface Actor3 {
 /** Metres a second at the character's usual pace for a style: the same as `nominal_walk_speed` of the acting library. */
 export function nominalWalkSpeed(spec: Character3d | null, style?: string): number {
   if (!spec) return 0.8
+  // a vehicle: its top speed until CTS-35 plans path moves
+  if (!('walk' in spec.motion)) return spec.motion.drive.topSpeed
   const w = spec.motion.walk
   return w.stride * w.cadence * spec.motion.tempo * (WALK_KIND[style ?? w.style] ?? 1)
 }
@@ -177,8 +180,9 @@ export async function buildTimeline3d(store: SeriesStore, series: string, episod
         if (a) {
           const to = markPoint(beat.to)
           const dist = Math.hypot(to[0] - a.pos[0], to[1] - a.pos[1])
-          const style = beat.style ?? a.spec?.motion.walk.style ?? 'walk'
-          const action = style === 'hop' || style === 'run' ? style : 'walk'
+          const style = beat.style ?? (a.spec && 'walk' in a.spec.motion ? a.spec.motion.walk.style : undefined) ?? 'walk'
+          // a vehicle drives or chugs (CTS-31: the action name only; CTS-35 makes the move follow its path)
+          const action = a.spec && isVehicle(a.spec) ? moveAction(beat.style, a.spec) : style === 'hop' || style === 'run' ? style : 'walk'
           const need = dist / (MAX_PACE * Math.max(nominalWalkSpeed(a.spec, style), 0.05))
           const seconds = Math.max(beat.seconds, need)
           if (seconds > beat.seconds + 1e-9) warn(`move ${beat.id}: ${beat.who} needs ${seconds.toFixed(1)} s for ${dist.toFixed(1)} m, the beat said ${beat.seconds} s; lengthened`)

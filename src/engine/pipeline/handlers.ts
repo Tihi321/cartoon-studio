@@ -210,7 +210,7 @@ async function castMotion(e: Env, bible: Bible): Promise<Record<string, unknown>
   const out: Record<string, unknown> = {}
   for (const c of bible.cast) {
     const spec = await e.store.readCharacter3d(e.series, c.id).catch(() => null)
-    out[c.id] = spec ? { height: spec.height, tempo: spec.motion.tempo, walk: spec.motion.walk } : null
+    out[c.id] = spec ? { height: spec.height, tempo: spec.motion.tempo, ...('walk' in spec.motion ? { walk: spec.motion.walk } : { kind: spec.kind, drive: spec.motion.drive }) } : null
   }
   return out
 }

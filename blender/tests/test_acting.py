@@ -34,7 +34,8 @@ class Registry(unittest.TestCase):
 
 class Gestures(unittest.TestCase):
     def test_keys_stay_in_window_and_return_to_rest(self):
-        names = [n for n, a in manifest().items() if a["kind"] in ("gesture", "react") and n not in ("idle", "look_at", "sit", "stand_up")]
+        # creature gestures on the creature fixture; the vehicle ones are stubs until CTS-34 (B2v tests them on a vehicle)
+        names = [n for n, a in manifest().items() if a["kind"] in ("gesture", "react") and "creature" in a["bodies"] and n not in ("idle", "look_at", "sit", "stand_up")]
         self.assertGreaterEqual(len(names), 10)
         for name in names:
             ctx, actor = fresh()

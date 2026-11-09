@@ -1,0 +1,31 @@
+{
+  "schema": "cts.voice/1",
+  "episode": "ep00-wheels",
+  "lang": "hr",
+  "allocation": { "provider": "vibetts", "reason": "fixture: placeholder tones" },
+  "lines": {
+    "l01": {
+      "file": "voice/hr/l01.wav",
+      "seconds": 1.2,
+      "provider": "vibetts",
+      "engine": "fixture",
+      "voice": "tone",
+      "speed": 1,
+      "hash": "fixture-hr-l01",
+      "words": null,
+      "status": "ok"
+    },
+    "l02": {
+      "file": "voice/hr/l02.wav",
+      "seconds": 1.0,
+      "provider": "vibetts",
+      "engine": "fixture",
+      "voice": "tone",
+      "speed": 1,
+      "hash": "fixture-hr-l02",
+      "words": null,
+      "status": "ok"
+    }
+  },
+  "costUsd": 0
+}

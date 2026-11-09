@@ -1,0 +1,36 @@
+{
+  "schema": "cts.voice/1",
+  "episode": "ep00-wheels",
+  "lang": "en",
+  "allocation": { "provider": "elevenlabs", "reason": "fixture: a fake ElevenLabs line with alignment word times" },
+  "lines": {
+    "l01": {
+      "file": "voice/en/l01.wav",
+      "seconds": 1.0,
+      "provider": "elevenlabs",
+      "engine": "eleven_multilingual_v2",
+      "voice": "fixture-voice-pip",
+      "speed": 1,
+      "hash": "fixture-en-l01",
+      "words": [
+        { "w": "Beep", "t0": 0.05, "t1": 0.3 },
+        { "w": "Hello", "t0": 0.36, "t1": 0.66 },
+        { "w": "Bruno", "t0": 0.68, "t1": 0.95 }
+      ],
+      "wordsCoverage": 1,
+      "status": "ok"
+    },
+    "l02": {
+      "file": "voice/en/l02.wav",
+      "seconds": 0.8,
+      "provider": "vibetts",
+      "engine": "fixture",
+      "voice": "tone",
+      "speed": 1,
+      "hash": "fixture-en-l02",
+      "words": null,
+      "status": "ok"
+    }
+  },
+  "costUsd": 0
+}

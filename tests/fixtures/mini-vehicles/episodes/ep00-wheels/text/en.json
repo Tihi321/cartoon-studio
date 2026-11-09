@@ -1,0 +1,9 @@
+{
+  "schema": "cts.text/1",
+  "lang": "en",
+  "strings": { "title": "A Small Wheels Test" },
+  "lines": {
+    "l01": { "text": "Beep! Hello, Bruno!", "delivery": "cheerful" },
+    "l02": { "text": "Oh! Good morning, Pip." }
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "schema": "cts.character3d/1",
+  "id": "bruno",
+  "units": "m",
+  "kind": "vehicle",
+  "height": 2.2,
+  "palette": { "body": "#8a5a35", "dark": "#4e3423", "cream": "#f3dfb5", "tyre": "#2b2118", "brass": "#c9a64a" },
+  "motion": { "tempo": 0.75, "energy": 0.8, "bounce": 0.2, "drive": { "style": "chug", "topSpeed": 2, "accel": 0.6, "suspension": 0.4 } },
+  "vehicle": { "type": "train", "wheelRadius": 0.3, "wheels": ["wheel_1", "wheel_2", "wheel_3", "wheel_4", "wheel_5", "wheel_6"], "track": true },
+  "controls": {
+    "root": { "parent": null, "at": [0, 0, 0] },
+    "squash": { "parent": "root", "at": [0, 0, 0] },
+    "body": { "parent": "squash", "at": [0, 0, 1.1] },
+    "head": { "parent": "body", "at": [0, -1.85, -0.35] },
+    "lid_L": { "parent": "head", "at": [-0.35, -0.12, 0.05] },
+    "lid_R": { "parent": "head", "at": [0.35, -0.12, 0.05] },
+    "pupil_L": { "parent": "head", "at": [-0.35, -0.22, 0.05] },
+    "pupil_R": { "parent": "head", "at": [0.35, -0.22, 0.05] },
+    "brow_L": { "parent": "head", "at": [-0.35, -0.1, 0.25] },
+    "brow_R": { "parent": "head", "at": [0.35, -0.1, 0.25] },
+    "mouth": { "parent": "head", "at": [0, -0.15, -0.25] },
+    "chimney": { "parent": "body", "at": [0, -1.2, 0.7] },
+    "wheel_1": { "parent": "root", "at": [-0.6, -1.2, 0.3] },
+    "wheel_2": { "parent": "root", "at": [0.6, -1.2, 0.3] },
+    "wheel_3": { "parent": "root", "at": [-0.6, 0, 0.3] },
+    "wheel_4": { "parent": "root", "at": [0.6, 0, 0.3] },
+    "wheel_5": { "parent": "root", "at": [-0.6, 1.2, 0.3] },
+    "wheel_6": { "parent": "root", "at": [0.6, 1.2, 0.3] }
+  },
+  "parts": [
+    { "id": "body", "shape": "ellipsoid", "size": [0.75, 1.9, 0.7], "at": [0, 0, 0], "colour": "body", "control": "body", "outline": 0.015 },
+    { "id": "cab", "shape": "box", "size": [1.5, 1.2, 1.0], "at": [0, 1.2, 0.5], "colour": "dark", "control": "body", "outline": 0.015 },
+    { "id": "nose", "shape": "box", "size": [1.4, 0.3, 0.9], "at": [0, 0, 0], "colour": "body", "control": "head", "outline": 0.015 },
+    { "id": "chimney", "shape": "cylinder", "size": [0.15, 0.4], "at": [0, 0, 0.2], "colour": "dark", "control": "chimney" },
+    { "id": "wheel_1", "shape": "cylinder", "size": [0.3, 0.15], "at": [0, 0, 0], "rot": [0, 90, 0], "colour": "tyre", "control": "wheel_1" },
+    { "id": "wheel_2", "shape": "cylinder", "size": [0.3, 0.15], "at": [0, 0, 0], "rot": [0, 90, 0], "colour": "tyre", "control": "wheel_2" },
+    { "id": "wheel_3", "shape": "cylinder", "size": [0.3, 0.15], "at": [0, 0, 0], "rot": [0, 90, 0], "colour": "tyre", "control": "wheel_3" },
+    { "id": "wheel_4", "shape": "cylinder", "size": [0.3, 0.15], "at": [0, 0, 0], "rot": [0, 90, 0], "colour": "tyre", "control": "wheel_4" },
+    { "id": "wheel_5", "shape": "cylinder", "size": [0.3, 0.15], "at": [0, 0, 0], "rot": [0, 90, 0], "colour": "tyre", "control": "wheel_5" },
+    { "id": "wheel_6", "shape": "cylinder", "size": [0.3, 0.15], "at": [0, 0, 0], "rot": [0, 90, 0], "colour": "tyre", "control": "wheel_6" }
+  ],
+  "face": {
+    "control": "head",
+    "eyes": { "x": 0.35, "z": 0.05, "r": 0.18, "faceY": -0.15, "pupil": { "size": 0.08, "lead": 0.015 }, "lamp": { "glow": "#fff2b0", "rim": "brass" } },
+    "lids": { "colour": "body" },
+    "brows": { "colour": "brass", "at": [0, -0.12, 0.26], "length": 0.2 },
+    "mouth": { "at": [0, -0.15, -0.25], "scale": 0.18, "inner": "#3a2020" }
+  }
+}
