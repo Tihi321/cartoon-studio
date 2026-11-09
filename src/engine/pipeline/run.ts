@@ -164,6 +164,8 @@ export class Pipeline {
       if (!state.brief || Object.keys(briefOf(state)).length === 0) {
         if (!state.steps.pitch || state.steps.pitch.state !== 'done') throw new Error('the first call needs a brief: {idea, ageMin?, ageMax?, notes?} (what the series is about)')
       }
+      // CTS-45: the earliest step this call puts back; the queued or stopped jobs of it and of every later step are dropped below
+      let redoAt: string | null = o.from ?? null
       if (o.from) {
         resetFrom(state, o.from)
         if (o.from === 'pitch') {
@@ -172,6 +174,7 @@ export class Pipeline {
         }
       }
       if (o.retry) {
+        redoAt ??= stepsOf(state).find((s) => state.steps[s.id]?.state === 'failed')?.id ?? null
         for (const [id, st] of Object.entries(state.steps)) if (st.state === 'failed') Object.assign(st, { state: 'pending', error: undefined, detail: 'retry', ...(id === 'safety' ? { attempts: 0 } : {}) })
         if (state.state === 'failed') state.state = 'idle'
       }
@@ -187,10 +190,30 @@ export class Pipeline {
           if (state.steps[id]?.state !== 'done') state.steps[id] = { state: 'done', endedAt: this.now(), detail: `given pitch ${pitch.id}` }
         }
       }
+      if (redoAt) await this.dropQueuedFrom(state, redoAt)
       state.run = (state.run ?? 0) + 1
       await this.save(state, null)
       return this.advanceLocked(o.series, o.episode)
     })
+  }
+
+  /**
+   * CTS-45: a step put back (`from`, `retry`) makes a fresh job. A job of that step or of a later one that still sits in the queue (queued, or stopped
+   * by `cts_stop_now`, which puts it back there) would run on resume with the old inputs, and its handler would mark the step done with a stale result.
+   * It is removed. A job that is running right now is not touched (stop it first).
+   */
+  private async dropQueuedFrom(state: PipelineState, stepId: string): Promise<string[]> {
+    const steps = stepsOf(state)
+    const tasks = new Set(steps.slice(steps.findIndex((s) => s.id === stepId)).map(taskOf))
+    const jobs = this.svc.deps.jobs
+    const dropped: string[] = []
+    for (const j of await jobs.list('queued')) {
+      if (j.data.book !== state.series || j.data.unit !== state.episode || !tasks.has(j.data.task)) continue
+      await fs.rm(jobs.file('queued', j.id), { force: true })
+      dropped.push(j.id)
+    }
+    if (dropped.length) this.svc.log(`pipeline ${state.series}/${state.episode}: dropped the queued job(s) of the steps from ${stepId} on: ${dropped.join(', ')}`)
+    return dropped
   }
 
   /** Looks at the state and the job store and moves one step on. Safe to call at any time. */

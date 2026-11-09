@@ -316,6 +316,24 @@ describe('the 3D pipeline', () => {
     expect((await store.readBudget('fresh', 'ep01'))?.flowCreditsCap).toBe(150)
   })
 
+  it('CTS-45: a run from an earlier step drops the queued or stopped job of a later step, so a resume never reuses a stale final_render', async () => {
+    env = await makeEnv({ paused: true })
+    const pipe = new Pipeline(env.engine.cts)
+    const jobs = env.engine.cts.deps.jobs
+    await pipe.run({ series: 'fresh', episode: 'ep01', brief: { idea: 'a car and a train' }, options: { renderer: 'blender' } })
+    // the final render was stopped (cts_stop_now puts a running job back in the queue) with the assembly it had
+    const stale = 'fresh--final_render--ep01--r1'
+    await jobs.enqueue({ id: stale, task: 'final_render', role: 'showrunner', book: 'fresh', unit: 'ep01', round: 1 })
+    const state = (await pipe.read('fresh', 'ep01'))!
+    state.steps.final_render = { state: 'running', job: stale }
+    await new SeriesStore(env.dir).writePipeline('fresh', 'ep01', state)
+
+    await pipe.run({ series: 'fresh', episode: 'ep01', from: 'assemble' })
+    expect(await jobs.find(stale)).toBeNull()
+    expect((await pipe.read('fresh', 'ep01'))!.steps.final_render).toMatchObject({ state: 'pending', detail: 'redo' })
+    expect(env.logs.join(' ')).toContain(stale)
+  })
+
   it('CTS-39: two sheet redos in a row make one character job that redoes each character once', async () => {
     const { fake, seen, pipe } = await startMiniVehicles()
     await pauseOf(pipe, 'the pause at sheet_review')

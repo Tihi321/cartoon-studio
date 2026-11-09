@@ -18,7 +18,7 @@ The steps below are the list of a **canvas** series (pilots 1 and 2, the `mini` 
 
 `advance` looks at the first step that is not done: a gate that is not open stops the run (`waiting-on-user`); a pending step becomes a job `<series>--<task>--<episode>--r<n>` of the step's role; a running step whose job is queued/running keeps the state `running` (or `waiting-on-client` while the job's model call sits in the client queue); a failed job fails the step. A handler marks its step done and calls `advance`, which enqueues the next step's job. `cts_wait {series}` therefore follows the whole run: it returns when a model call waits for you (`clientTasks`) or nothing is left. `cts_status {series}` lists the pipelines (state, step, hint).
 
-`retry: true` puts failed steps back to pending. `from: "<step>"` puts that step and every later step back (marked `redo`: their handlers make the files again instead of keeping them). `options` are merged into the stored ones.
+`retry: true` puts failed steps back to pending. `from: "<step>"` puts that step and every later step back (marked `redo`: their handlers make the files again instead of keeping them), and removes the queued (or `cts_stop_now`-stopped) jobs of those steps from the queue, so a resume never finishes an old job with stale inputs (a job running right now is not touched: stop it first). `options` are merged into the stored ones.
 
 ## The mandatory pause
 
