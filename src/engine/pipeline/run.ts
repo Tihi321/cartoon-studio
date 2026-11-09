@@ -73,6 +73,13 @@ export async function specHashOf(store: SeriesStore, series: string, castId: str
   }
 }
 
+/** CTS-37: the user's verdict on the voice cast of a series (`cts_voice_approve`), and the notes for the next casting round. */
+export const VOICE_REVIEW_FILE = 'voice-review.json'
+export const VOICE_REDO_FILE = 'voice-redo.json'
+
+/** sha1 of every cast member's voice record: an approval is of these voices; a changed voice (a recast, `cts_series_update`) needs the user's ear again. */
+export const voicesHashOf = (bible: Pick<Bible, 'cast'>): string => sha1(JSON.stringify(bible.cast.map((c) => [c.id, c.voice])))
+
 async function readJsonFile(file: string): Promise<Record<string, unknown> | null> {
   try {
     return JSON.parse(await fs.readFile(file, 'utf8')) as Record<string, unknown>
@@ -243,6 +250,12 @@ export class Pipeline {
           state.steps.pitch = { state: 'pending', detail: 'redo' }
           continue outer
         }
+        // CTS-37: a note waits for the step before the gate (the user asked for a redo): that step runs again, once, with every note
+        if (reason === 'redo-voice_cast') {
+          const target = reason.slice('redo-'.length)
+          state.steps[target] = { state: 'pending', detail: `revise (the user's note)`, ...(state.steps[target]?.attempts ? { attempts: state.steps[target]!.attempts } : {}) }
+          continue outer
+        }
         if (reason) {
           state.state = 'waiting-on-user'
           state.waitingOn = reason
@@ -251,7 +264,7 @@ export class Pipeline {
         if (step.kind === 'gate') {
           st.state = 'done'
           st.endedAt = this.now()
-          st.detail = step.id === 'sheet_review' ? 'approved' : 'chosen'
+          st.detail = step.id === 'pitch_choice' ? 'chosen' : 'approved'
           continue outer
         }
         const id = await this.enqueue(state, step)
@@ -291,6 +304,14 @@ export class Pipeline {
       const open = bible.cast.filter((c) => !c.sheet?.approvedAt).map((c) => c.id)
       if (open.length === 0) return null
       return `waiting for the user to look at the character sheet of ${open.join(', ')} (cast/<id>/sheet.png) and approve it: cts_sheet_approve {series, cast, ok: true}, or ok: false with a note to make it again. Nothing is rigged before every character is approved.`
+    }
+    if (step.id === 'voice_review') {
+      const root = store.paths(state.series).root
+      if (await store.exists(path.join(root, VOICE_REDO_FILE))) return 'redo-voice_cast'
+      const bible = await store.readBible(state.series)
+      const review = await readJsonFile(path.join(root, VOICE_REVIEW_FILE))
+      if (review?.ok === true && review.voicesHash === voicesHashOf(bible)) return null
+      return `waiting for the user to listen to the voice cast of ${bible.cast.map((c) => c.id).join(', ')} (the auditions in cast/<id>/voice/: audition-<lang>-<voiceId>.wav from ElevenLabs, else <lang>.wav; the voices are in the bible) and approve it: cts_voice_approve {series, ok: true}, or ok: false with a note to cast again. To try other ElevenLabs voices first: cts_voice_audition, cts_series_update with the chosen voice ids, then cts_voice_approve. No line is spoken before the approval.`
     }
     if (step.id === 'clips') return clipsGate(store, state.series, state.episode, optionsOf(state))
     return null
@@ -458,6 +479,39 @@ export class Pipeline {
     return { cast: castId, ok, approvedAt: at, sheet, stillOpen, resumed }
   }
 
+  /**
+   * CTS-37: the user's verdict on the voice cast of a Blender series (every character's voice in every language, heard through the auditions). `ok`:
+   * `voice-review.json` records the hash of the voices and every pipeline that waits at `voice_review` goes on (a voice changed later needs a new
+   * approval). Not `ok`: the note is added to `voice-redo.json` and the waiting pipelines cast again (`voice_cast` runs with the notes, then waits here).
+   */
+  async approveVoices(series: string, ok: boolean, note?: string): Promise<{ ok: boolean; at: string; voicesHash: string; voices: Record<string, unknown>; resumed: PipelineReport[]; warning?: string }> {
+    assertSlug(series)
+    const store = this.store
+    const bible = await store.readBible(series)
+    if (bible.renderer !== 'blender') throw new Error(`"${series}" is a canvas series: the voice review is a step of the 3D route`)
+    if (bible.cast.length === 0) throw new Error(`"${series}" has no cast yet`)
+    if (!ok && !note?.trim()) throw new Error('a redo needs a note: say what to change in which voice (the voice director gets the note)')
+    const at = this.now()
+    const voicesHash = voicesHashOf(bible)
+    await store.writeFile(series, VOICE_REVIEW_FILE, `${JSON.stringify({ ok, note: note?.trim() || null, at, voicesHash }, null, 2)}\n`)
+    if (!ok) {
+      // notes add up until a casting round takes them
+      const prev = await readJsonFile(path.join(store.paths(series).root, VOICE_REDO_FILE))
+      const notes = [...(Array.isArray(prev?.notes) ? (prev.notes as unknown[]).filter((x): x is string => typeof x === 'string') : []), note!.trim()]
+      await store.writeFile(series, VOICE_REDO_FILE, `${JSON.stringify({ notes, at }, null, 2)}\n`)
+    }
+    const resumed: PipelineReport[] = []
+    const passed: string[] = []
+    for (const ep of await this.episodesWithPipeline(series)) {
+      const st = await this.read(series, ep)
+      if (!st || rendererOfState(st) !== 'blender') continue
+      if (st.steps.voice_review?.state === 'done') passed.push(ep)
+      else if (st.state === 'waiting-on-user' || !ok) resumed.push(await this.advance(series, ep))
+    }
+    const voices = Object.fromEntries(bible.cast.map((c) => [c.id, Object.fromEntries(Object.entries(c.voice).map(([lang, v]) => [lang, (v as { elevenlabs?: unknown; vibetts?: string } | undefined)?.elevenlabs ?? (v as { vibetts?: string } | undefined)?.vibetts ?? null]))]))
+    return { ok, at, voicesHash, voices, resumed, ...(!ok && passed.length ? { warning: `${passed.join(', ')} passed the voice review earlier and keep their voices: cts_run_pipeline {series, episode, from: "voice_cast"} casts one again` } : {}) }
+  }
+
   async episodesWithPipeline(series: string): Promise<string[]> {
     const dir = this.store.paths(series).episodesDir
     const names = await fs.readdir(dir).catch(() => [] as string[])
@@ -514,7 +568,9 @@ function hintFor(state: PipelineState, step: string | null): string {
           ? rendererOfState(state) === 'blender'
             ? `STOP: the user must look at the character sheets (cast/<id>/sheet.png: turnaround, expressions, mouths; cts_character_get {series: "${s}", cast: "<id>"} shows one, the Cast view of the studio too). Show every sheet, wait for the answer per character, then cts_sheet_approve {series: "${s}", cast: "<id>", ok: true} or ok: false with a note to build that character again. The sets and everything after are not made before every character is approved.`
             : `STOP: the user must look at the character sheets (cast/<id>/sheet.png: the master and three poses; cts_cast_get shows them). Show every sheet, wait for the answer per character, then cts_sheet_approve {series: "${s}", cast: "<id>", ok: true} or ok: false with a note to make that sheet again. Nothing is rigged before every character is approved.`
-          : `Waiting for you or the user: ${state.waitingOn ?? ''}`
+          : step === 'voice_review'
+            ? `STOP: the user must hear the voice cast: play the auditions (cast/<id>/voice/audition-<lang>-<voiceId>.wav, else <lang>.wav) and say which voice is which character. Other ElevenLabs voices can be tried with cts_voice_audition {series: "${s}", cast, lang, provider: "elevenlabs", voiceIds, episode} and set with cts_series_update. Then cts_voice_approve {series: "${s}", ok: true}, or ok: false with a note to cast again. No line is spoken before.`
+            : `Waiting for you or the user: ${state.waitingOn ?? ''}`
     case 'waiting-on-client':
       return `Model calls wait for you: cts_get_task -> answer -> cts_submit_task until none, then cts_wait {series: "${s}"}.`
     case 'running':

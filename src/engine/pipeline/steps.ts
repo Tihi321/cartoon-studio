@@ -62,6 +62,8 @@ export const BLENDER_STEPS: readonly StepDef[] = [
   byId('script'),
   byId('safety'),
   byId('voice_cast'),
+  // CTS-37: the user hears the cast (the auditions, ElevenLabs when it is ready) before a single line is spoken
+  { id: 'voice_review', no: '7b', label: 'The user listens to the voice cast and approves it', role: 'voice-director', kind: 'gate' },
   byId('voice'),
   byId('music'),
   byId('clip_shots'),
@@ -114,6 +116,8 @@ export function resetFrom(state: PipelineState, id: string): void {
 export function normalise(state: PipelineState): PipelineState {
   // a Blender run only gets the steps of its own list; the canvas migrations below never touch it
   if (rendererOfState(state) === 'blender') {
+    // CTS-37: a run from before the voice review whose voices were already started (pilots 3 and 4) does not stop at the new gate
+    if (!state.steps.voice_review && state.steps.voice && state.steps.voice.state !== 'pending') state.steps.voice_review = { state: 'done', detail: 'made before the voice review step' }
     for (const step of BLENDER_STEPS) state.steps[step.id] ??= { state: 'pending' }
     return state
   }

@@ -158,81 +158,94 @@ function fakeBlender(dir: string): { runner: BlenderRunner; calls: { command: st
   return { runner, calls }
 }
 
+/**
+ * The vehicle fixture with the mock roles, a fake Blender and a fake ElevenLabs, started with the given pitch; the auditions of the voice casting go
+ * through the fake ElevenLabs (CTS-37).
+ */
+async function startMiniVehicles() {
+  const eleven = fakeEleven()
+  const vibetts = { url: 'fake', listVoices: async () => Promise.reject(new Error('VibeTTS is off')) }
+  env = await makeEnv(
+    {
+      providers: [{ id: 'loc', local: true, concurrency: 4, models: ['m1'], vision: true }],
+      roles: Object.fromEntries(ROLES.map((r) => [r, ['loc/m1']])),
+      agents: ROLES.map((role) => ({ role, name: role }))
+    },
+    { flow: eleven.flow, vibetts: vibetts as never, voiceRuntime: { sleep: async () => undefined } }
+  )
+  const dir = env.dir
+  const series = await installMiniVehicles(dir)
+  const store = new SeriesStore(dir)
+  // the theme is kept; the horn the script cues is never made, so it is a warning and silence (decision 14)
+  await mkdir(path.join(series, 'music'), { recursive: true })
+  await writeFile(path.join(series, 'music', 'theme.ogg'), 'kept')
+  await sharp({ create: { width: 64, height: 36, channels: 3, background: '#8a8a8a' } }).png().toFile(path.join(dir, 'grey.png'))
+
+  const fake = fakeBlender(dir)
+  setBlenderRunnerOverride(fake.runner)
+
+  // the mock roles: answers by the kind of the task (the guide named in the system message)
+  const fixture = JSON.parse(await readFile(path.join(MINI_VEHICLES_DIR, 'bible.json'), 'utf8')) as { cast: { id: string; name: unknown; role: string; personality: string; look: string; voice: Record<string, unknown> }[]; style: unknown; title: unknown; logline: unknown; tone: string[]; rules: string[]; sets: { id: string; name: unknown; description: string }[] }
+  const seen: string[] = []
+  const inputs = new Map<string, string>()
+  const reviews = new Map<string, number>()
+  const text = (m: ChatRequest['messages'][number]): string => (typeof m.content === 'string' ? m.content : m.content.map((p) => ('text' in p ? p.text : '')).join('\n'))
+  env.mock.onAny(async (req) => {
+    const kind = /Your guide for this task \(([^)]+)\)/.exec(text(req.messages[0]!))?.[1] ?? '?'
+    const user = text(req.messages[req.messages.length - 1]!)
+    const id = /"id": "([a-z0-9-]+)"/.exec(user)?.[1] ?? ''
+    seen.push(`${kind}:${id}`)
+    inputs.set(kind, user)
+    const pass = { verdict: 'pass', scores: { quality: 5 }, notes: 'fine', problems: [] }
+    switch (kind) {
+      case 'showrunner/bible':
+        return JSON.stringify({ title: fixture.title, logline: fixture.logline, tone: fixture.tone, rules: fixture.rules, style: fixture.style, cast: fixture.cast.map((c) => ({ id: c.id, name: c.name, role: c.role, personality: c.personality, look: c.look })), sets: fixture.sets.map((x) => ({ id: x.id, name: x.name, description: x.description })) })
+      case 'character-designer/character-spec':
+        return JSON.stringify({ spec: JSON.parse(await readFile(path.join(MINI_VEHICLES_DIR, 'cast', id, 'character.json'), 'utf8')), notes: 'again' })
+      case 'character-designer/character-review': {
+        const n = (reviews.get(id) ?? 0) + 1
+        reviews.set(id, n)
+        // the first look at pip asks for a change, every other one passes
+        return JSON.stringify(id === 'pip' && n === 1 ? { verdict: 'revise', scores: { quality: 3 }, notes: 'lamps', problems: [{ where: 'front', what: 'lamps too far apart', fix: 'lid_L and lid_R closer' }] } : pass)
+      }
+      case 'background-artist/set-review':
+      case 'child-safety-reviewer/safety':
+      case 'frame-critic/frames-3d':
+        return JSON.stringify(pass)
+      case 'voice-director/voice-cast': {
+        // OmniVoice tags for the local fallback, a Kokoro voice each, and the premade ElevenLabs voice for both languages
+        const voice = (c: { id: string; voice: Record<string, unknown> }, i: number) => {
+          const eleven = { voiceId: i === 0 ? 'premade-bright' : 'premade-deep', name: i === 0 ? 'Bright' : 'Deep' }
+          const comfy = { engine: 'omnivoice', instruct: i === 0 ? 'male, child, high pitch' : 'male, elderly, low pitch', ref: null, refText: null, seed: 7 + i }
+          return [c.id, { hr: { ...(c.voice.hr as object), comfy, elevenlabs: eleven }, en: { ...(c.voice.en as object), elevenlabs: eleven } }]
+        }
+        return JSON.stringify({ voices: Object.fromEntries(fixture.cast.map(voice)), audition: Object.fromEntries(fixture.cast.map((c) => [c.id, { hr: 'Bok!', en: 'Hi!' }])), notes: '' })
+      }
+      default:
+        throw new Error(`the mock has no answer for ${kind}`)
+    }
+  })
+
+  const pipe = new Pipeline(env.engine.cts)
+  const brief = { pitch: { title: { hr: 'Mala proba s kotačima', en: 'Mini Wheels Test' }, logline: { hr: 'Auto i vlak na prijelazu.', en: 'A car and a train at the crossing.' }, leads: [{ name: 'Pip', what: 'quick little car' }, { name: 'Bruno', what: 'slow kind engine' }], sets: ['crossing'], why: 'the smallest vehicle series' }, seconds: 20, lineRange: [2, 2] }
+  await pipe.run({ series: 'mini-vehicles', episode: 'ep00-wheels', brief, options: { renderer: 'blender', skipClips: true } })
+  return { eleven, fake, store, series, seen, inputs, pipe }
+}
+
+/** Waits until the run waits for the user (fails on a failed step). */
+const pauseOf = (pipe: Pipeline, label: string) =>
+  waitFor(async () => {
+    const r = await pipe.status('mini-vehicles', 'ep00-wheels')
+    if (r?.state === 'failed') throw new Error(`failed: ${JSON.stringify(r.steps.filter((s) => s.state === 'failed'))}`)
+    return r?.state === 'waiting-on-user' ? r : null
+  }, 60_000, label)
+
 describe('the 3D pipeline', () => {
   it('runs mini-vehicles from the given pitch to done: designer revision, the pause for the sheets, ElevenLabs voices, the drive on its road, both languages rendered', async () => {
-    const eleven = fakeEleven()
-    const vibetts = { url: 'fake', listVoices: async () => Promise.reject(new Error('VibeTTS is off')) }
-    env = await makeEnv(
-      {
-        providers: [{ id: 'loc', local: true, concurrency: 4, models: ['m1'], vision: true }],
-        roles: Object.fromEntries(ROLES.map((r) => [r, ['loc/m1']])),
-        agents: ROLES.map((role) => ({ role, name: role }))
-      },
-      { flow: eleven.flow, vibetts: vibetts as never, voiceRuntime: { sleep: async () => undefined } }
-    )
-    const dir = env.dir
-    const series = await installMiniVehicles(dir)
-    const store = new SeriesStore(dir)
-    // the theme is kept; the horn the script cues is never made, so it is a warning and silence (decision 14)
-    await mkdir(path.join(series, 'music'), { recursive: true })
-    await writeFile(path.join(series, 'music', 'theme.ogg'), 'kept')
-    await sharp({ create: { width: 64, height: 36, channels: 3, background: '#8a8a8a' } }).png().toFile(path.join(dir, 'grey.png'))
-
-    const fake = fakeBlender(dir)
-    setBlenderRunnerOverride(fake.runner)
-
-    // the mock roles: answers by the kind of the task (the guide named in the system message)
-    const fixture = JSON.parse(await readFile(path.join(MINI_VEHICLES_DIR, 'bible.json'), 'utf8')) as { cast: { id: string; name: unknown; role: string; personality: string; look: string; voice: Record<string, unknown> }[]; style: unknown; title: unknown; logline: unknown; tone: string[]; rules: string[]; sets: { id: string; name: unknown; description: string }[] }
-    const seen: string[] = []
-    const inputs = new Map<string, string>()
-    const reviews = new Map<string, number>()
-    const text = (m: ChatRequest['messages'][number]): string => (typeof m.content === 'string' ? m.content : m.content.map((p) => ('text' in p ? p.text : '')).join('\n'))
-    env.mock.onAny(async (req) => {
-      const kind = /Your guide for this task \(([^)]+)\)/.exec(text(req.messages[0]!))?.[1] ?? '?'
-      const user = text(req.messages[req.messages.length - 1]!)
-      const id = /"id": "([a-z0-9-]+)"/.exec(user)?.[1] ?? ''
-      seen.push(`${kind}:${id}`)
-      inputs.set(kind, user)
-      const pass = { verdict: 'pass', scores: { quality: 5 }, notes: 'fine', problems: [] }
-      switch (kind) {
-        case 'showrunner/bible':
-          return JSON.stringify({ title: fixture.title, logline: fixture.logline, tone: fixture.tone, rules: fixture.rules, style: fixture.style, cast: fixture.cast.map((c) => ({ id: c.id, name: c.name, role: c.role, personality: c.personality, look: c.look })), sets: fixture.sets.map((x) => ({ id: x.id, name: x.name, description: x.description })) })
-        case 'character-designer/character-spec':
-          return JSON.stringify({ spec: JSON.parse(await readFile(path.join(MINI_VEHICLES_DIR, 'cast', id, 'character.json'), 'utf8')), notes: 'again' })
-        case 'character-designer/character-review': {
-          const n = (reviews.get(id) ?? 0) + 1
-          reviews.set(id, n)
-          // the first look at pip asks for a change, every other one passes
-          return JSON.stringify(id === 'pip' && n === 1 ? { verdict: 'revise', scores: { quality: 3 }, notes: 'lamps', problems: [{ where: 'front', what: 'lamps too far apart', fix: 'lid_L and lid_R closer' }] } : pass)
-        }
-        case 'background-artist/set-review':
-        case 'child-safety-reviewer/safety':
-        case 'frame-critic/frames-3d':
-          return JSON.stringify(pass)
-        case 'voice-director/voice-cast': {
-          // OmniVoice tags for the local fallback, a Kokoro voice each, and the premade ElevenLabs voice for both languages
-          const voice = (c: { id: string; voice: Record<string, unknown> }, i: number) => {
-            const eleven = { voiceId: i === 0 ? 'premade-bright' : 'premade-deep', name: i === 0 ? 'Bright' : 'Deep' }
-            const comfy = { engine: 'omnivoice', instruct: i === 0 ? 'male, child, high pitch' : 'male, elderly, low pitch', ref: null, refText: null, seed: 7 + i }
-            return [c.id, { hr: { ...(c.voice.hr as object), comfy, elevenlabs: eleven }, en: { ...(c.voice.en as object), elevenlabs: eleven } }]
-          }
-          return JSON.stringify({ voices: Object.fromEntries(fixture.cast.map(voice)), audition: Object.fromEntries(fixture.cast.map((c) => [c.id, { hr: 'Bok!', en: 'Hi!' }])), notes: '' })
-        }
-        default:
-          throw new Error(`the mock has no answer for ${kind}`)
-      }
-    })
-
-    const pipe = new Pipeline(env.engine.cts)
-    const brief = { pitch: { title: { hr: 'Mala proba s kotačima', en: 'Mini Wheels Test' }, logline: { hr: 'Auto i vlak na prijelazu.', en: 'A car and a train at the crossing.' }, leads: [{ name: 'Pip', what: 'quick little car' }, { name: 'Bruno', what: 'slow kind engine' }], sets: ['crossing'], why: 'the smallest vehicle series' }, seconds: 20, lineRange: [2, 2] }
-    await pipe.run({ series: 'mini-vehicles', episode: 'ep00-wheels', brief, options: { renderer: 'blender', skipAuditions: true, skipClips: true } })
+    const { eleven, fake, store, series, seen, inputs, pipe } = await startMiniVehicles()
 
     // the pause: both characters are built and self-reviewed, nothing else
-    const paused = await waitFor(async () => {
-      const r = await pipe.status('mini-vehicles', 'ep00-wheels')
-      if (r?.state === 'failed') throw new Error(`failed: ${JSON.stringify(r.steps.filter((s) => s.state === 'failed'))}`)
-      return r?.state === 'waiting-on-user' ? r : null
-    }, 60_000, 'the pause at sheet_review')
+    const paused = await pauseOf(pipe, 'the pause at sheet_review')
     expect(paused.step).toBe('sheet_review')
     expect(paused.steps.map((s) => s.id)).toEqual(BLENDER_STEPS.map((s) => s.id))
     expect(paused.steps.filter((s) => s.state === 'done').map((s) => s.id)).toEqual(['pitch', 'pitch_choice', 'bible', 'character'])
@@ -252,6 +265,15 @@ describe('the 3D pipeline', () => {
     const bible = await store.readBible('mini-vehicles')
     expect(bible.cast.map((c) => c.sheet?.specHash)).toEqual(await Promise.all(bible.cast.map((c) => specHashOf(store, 'mini-vehicles', c.id))))
 
+    // CTS-37: the voice review holds the run after the casting: the auditions were spoken by the cast's ElevenLabs voices (credits in spend.json), no line yet
+    const voicePause = await pauseOf(pipe, 'the pause at voice_review')
+    expect(voicePause.step).toBe('voice_review')
+    expect(eleven.spoken.map((a) => `${a.voice}:${a.timestamps}`).sort()).toEqual(['premade-bright:false', 'premade-bright:false', 'premade-deep:false', 'premade-deep:false'])
+    expect(await stat(path.join(series, 'cast', 'pip', 'voice', 'audition-en-premade-bright.wav'))).toBeTruthy()
+    expect((await store.readSpend('mini-vehicles', 'ep00-wheels')).entries.filter((x) => x.what.startsWith('audition '))).toHaveLength(4)
+    expect(voicePause.steps.find((s) => s.id === 'voice')?.state).toBe('pending')
+    await pipe.approveVoices('mini-vehicles', true)
+
     const done = await waitFor(async () => {
       const r = await pipe.status('mini-vehicles', 'ep00-wheels')
       if (r?.state === 'failed') throw new Error(`failed: ${JSON.stringify(r.steps.filter((s) => s.state === 'failed'))}`)
@@ -268,7 +290,7 @@ describe('the 3D pipeline', () => {
     // the voice director was offered the premade ElevenLabs voices only, and both languages were spoken by ElevenLabs with alignment word times
     expect(inputs.get('voice-director/voice-cast')).toContain('premade-deep')
     expect(inputs.get('voice-director/voice-cast')).not.toContain('cloned-one')
-    expect(eleven.spoken.map((a) => `${a.engine}:${a.voice}`).sort()).toEqual(['elevenlabs:premade-bright', 'elevenlabs:premade-bright', 'elevenlabs:premade-deep', 'elevenlabs:premade-deep'])
+    expect(eleven.spoken.filter((a) => a.timestamps).map((a) => `${a.engine}:${a.voice}`).sort()).toEqual(['elevenlabs:premade-bright', 'elevenlabs:premade-bright', 'elevenlabs:premade-deep', 'elevenlabs:premade-deep'])
     for (const lang of ['hr', 'en'] as const) {
       const m = await store.readVoiceManifest('mini-vehicles', 'ep00-wheels', lang)
       for (const line of Object.values(m.lines)) expect(line).toMatchObject({ provider: 'elevenlabs', wordsFrom: 'elevenlabs', wordsCoverage: 1 })

@@ -14,6 +14,7 @@ import { loadVoiceConfig } from '../voice/run'
 import { checkOmniInstruct, comfySpeaker } from '../voice/providers/comfy'
 import { vibettsSpeaker } from '../voice/providers/vibetts'
 import { voiceDeps } from '../voice/tools'
+import { elevenAudition } from '../voice/audition'
 import type { ClipJob } from '../voice/providers/types'
 import { INTRO_ID, OUTRO_ID, badClipIds, buildScreenplay, clipBeats, missingClips, readClipEntry, readShots, upsertClip, videoDir } from './clips'
 import { lintSeries } from '../series/lint'
@@ -22,7 +23,7 @@ import type { Env } from './env'
 import { clipsStep, finalRenderStep, makeClip, previewRenderStep, reviewClip, timelineStep, voiceStep, frameReviews } from './media'
 import { assembleStep, characterStep, ensureStyle3d, facts3d, scriptProblems3d, set3dStep } from './media3d'
 import type { Facts3d } from './media3d'
-import { Pipeline } from './run'
+import { Pipeline, VOICE_REDO_FILE } from './run'
 import { ALL_STEPS, emptyState, taskOf } from './steps'
 import type { StepDef } from './steps'
 import type { bibleAnswer, clipShotAnswer, musicAnswer, pitchesAnswer, reviewAnswer, scriptAnswer, voiceCastAnswer } from './tasks'
@@ -362,9 +363,30 @@ async function auditionLine(e: Env, bible: Bible, castId: string, lang: Lang, te
   }
 }
 
+/**
+ * CTS-37: the audition through ElevenLabs when the cast has an ElevenLabs voice for this language and the free tier is ready (the same code, files and
+ * credit records as `cts_voice_audition`, the credits in this episode's spend.json); null when it cannot (then the local audition is made).
+ */
+async function elevenAuditionLine(e: Env, castId: string, lang: Lang, text: string, spec: NonNullable<Bible['cast'][number]['voice'][Lang]>): Promise<string | null> {
+  const voiceId = spec.elevenlabs?.voiceId
+  if (!voiceId) return null
+  try {
+    const r = await elevenAudition(e.svc, { series: e.series, cast: castId, lang, voiceIds: [voiceId], text, episode: e.episode, signal: e.ctx.signal, ...(spec.elevenlabs?.model ? { model: spec.elevenlabs.model } : {}) })
+    if (r.error) e.log(`audition ${castId} ${lang} (ElevenLabs): ${r.error}`)
+    return r.clips[0] ? e.store.resolve(e.series, r.clips[0].file) : null
+  } catch (err) {
+    e.log(`audition ${castId} ${lang}: ElevenLabs not used (${(err as Error).message.split('\n')[0]}); the local voice auditions instead`)
+    return null
+  }
+}
+
 async function voiceCastStep(e: Env): Promise<string> {
   const bible = await requireChosen(e)
   const config = await loadVoiceConfig(e.svc.dataDir)
+  // CTS-37: the user's notes from the voice review (cts_voice_approve ok: false), with the voices they heard
+  const redoFile = path.join(e.store.paths(e.series).root, VOICE_REDO_FILE)
+  const redoText = await fs.readFile(redoFile, 'utf8').catch(() => null)
+  const userNotes = redoText ? (((JSON.parse(redoText) as { notes?: unknown }).notes as string[] | undefined) ?? []) : []
   let english: string[] = []
   let elevenVoices: { voiceId: string; name: string; labels: unknown }[] = []
   try {
@@ -386,8 +408,8 @@ async function voiceCastStep(e: Env): Promise<string> {
       id: 'voice-cast',
       role: 'voice-director',
       kind: 'voice-cast',
-      prompt: 'Give every character a voice in Croatian and in English, and one short audition line each (in the character\'s own voice and language). Croatian: OmniVoice attribute tags only (comma separated, one per category), a fixed seed, and a Supertonic fallback voice id. English: a Kokoro voice, different for each lead. Also name a Gemini voice for each (used only when the free quota allows).',
-      inputs: { paths: [], json: { cast: bible.cast.map(castView), omniVoiceTags: OMNIVOICE_TAGS, omniVoiceEngine: config.engine, kokoroVoices: english.length ? english : ['af_bella', 'af_heart', 'af_nicole', 'af_sarah', 'af_sky', 'am_adam', 'am_michael', 'bf_emma', 'bm_george'], geminiVoices: GEMINI_VOICES, supertonicFallback: ['supertonic:F1', 'supertonic:F2', 'supertonic:F3', 'supertonic:M1', 'supertonic:M2', 'supertonic:M3'], note: 'the voice record shape is {provider:"auto", gemini, comfy:{engine,instruct,ref:null,refText:null,seed}, vibetts, speed:1, style}', ...(elevenVoices.length ? { elevenVoices } : {}) } },
+      prompt: `Give every character a voice in Croatian and in English, and one short audition line each (in the character's own voice and language). Croatian: OmniVoice attribute tags only (comma separated, one per category), a fixed seed, and a Supertonic fallback voice id. English: a Kokoro voice, different for each lead. Also name a Gemini voice for each (used only when the free quota allows).${userNotes.length ? ` The user listened to the last cast (previousVoices) and asked: ${userNotes.join(' / ')}` : ''}`,
+      inputs: { paths: [], json: { cast: bible.cast.map(castView), ...(userNotes.length ? { userNotes, previousVoices: Object.fromEntries(bible.cast.map((c) => [c.id, c.voice])) } : {}), omniVoiceTags: OMNIVOICE_TAGS, omniVoiceEngine: config.engine, kokoroVoices: english.length ? english : ['af_bella', 'af_heart', 'af_nicole', 'af_sarah', 'af_sky', 'am_adam', 'am_michael', 'bf_emma', 'bm_george'], geminiVoices: GEMINI_VOICES, supertonicFallback: ['supertonic:F1', 'supertonic:F2', 'supertonic:F3', 'supertonic:M1', 'supertonic:M2', 'supertonic:M3'], note: 'the voice record shape is {provider:"auto", gemini, comfy:{engine,instruct,ref:null,refText:null,seed}, vibetts, speed:1, style}', ...(elevenVoices.length ? { elevenVoices } : {}) } },
       output: { schema: 'voice-cast', path: 'tasks/voice-cast.json' }
     },
     {
@@ -422,13 +444,17 @@ async function voiceCastStep(e: Env): Promise<string> {
       try {
         const spec = r.value.voices[c.id]?.[lang]
         const text = r.value.audition[c.id]?.[lang]
-        if (spec && text && (await auditionLine(e, bible, c.id, lang, text, spec))) heard.push(`${c.id}/${lang}`)
+        if (!spec || !text) continue
+        if (await elevenAuditionLine(e, c.id, lang, text, spec)) heard.push(`${c.id}/${lang} (ElevenLabs)`)
+        else if (await auditionLine(e, bible, c.id, lang, text, spec)) heard.push(`${c.id}/${lang}`)
       } catch (err) {
         e.log(`audition ${c.id} ${lang} failed: ${(err as Error).message.split('\n')[0]}`)
       }
     }
   }
-  return `voices for ${bible.cast.map((c) => c.id).join(', ')}; auditions ${heard.length ? heard.join(', ') : e.options.skipAuditions === true ? 'skipped' : 'none (the voice services were not up)'}`
+  // the notes are taken only if no newer one came in meanwhile (the voice review then asks for another round)
+  if (redoText !== null && (await fs.readFile(redoFile, 'utf8').catch(() => null)) === redoText) await fs.rm(redoFile, { force: true })
+  return `voices for ${bible.cast.map((c) => c.id).join(', ')}${userNotes.length ? ` (recast with ${userNotes.length} note(s))` : ''}; auditions ${heard.length ? heard.join(', ') : e.options.skipAuditions === true ? 'skipped' : 'none (the voice services were not up)'}`
 }
 
 // ---------------------------------------------------------------- step 9: music
