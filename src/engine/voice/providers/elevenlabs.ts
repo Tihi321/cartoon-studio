@@ -16,6 +16,7 @@ export const ELEVEN_STOP: Record<ElevenCode, 'quota' | 'down' | 'unreadable'> = 
   E_ELEVEN_PAID_TIER: 'quota',
   E_ELEVEN_KEY: 'down',
   E_ELEVEN_API: 'down',
+  E_ELEVEN_RATE: 'down',
   E_ELEVEN_BLOCKED: 'down',
   E_ELEVEN_LANG: 'unreadable',
   E_ELEVEN_MODEL: 'unreadable'

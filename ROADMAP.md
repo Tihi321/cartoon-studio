@@ -89,6 +89,7 @@ Branch `CTS-30_vehicles-elevenlabs`, cut from `CTS-18_blender-3d`. The plan is `
 | **CTS-49** | The keyframe polish prompt collapsed runs of the letter "s" (`/s+/g`) instead of whitespace and the polished file name matched any character before `png`: `/\s+/g` and `/\.png$/i` in `clips.ts`. | Done |
 | **CTS-50** | CTS-45 gap: a job that was running while a `from` / `retry` run reset its step could still mark that step done (or failed) when it ended. `markDone` and `noteFailure` now take the job id from `runStep` and drop the report with a log line unless `state.steps[step].job` is still that job. | Done |
 | **CTS-51** | Canvas leftovers: `config/roles.md` describes the character designer the 3D way (canvas as the old case), the `docs/contracts.md` bible example has the toon 3D look, a new run without `options.renderer` is a `blender` series (an existing series keeps the renderer of its bible), the voice director's rule names ElevenLabs first, then Gemini TTS, then the local voices; the old voice-director seed is in `SEED_HISTORY` so an untouched copy updates (`config/roles.md` refreshes through its recorded hash). | Done |
+| **CTS-52** | flow-music-mcp FMM-21 returns `E_ELEVEN_RATE` for an HTTP 429 on the ElevenLabs TTS POST (the line is not resent): known to `ELEVEN_CODES` and `elevenCodeOf` and stopping the provider as `down` in `ELEVEN_STOP`, like `E_ELEVEN_API`. | Done |
 
 Pilot 4 (series `pip-bruno-wheels`, about 60 s, hr and en, ElevenLabs voices, $0 and 0 Flow credits) and its acceptance criteria are in the creative hub's `HUB-31` plan.
 

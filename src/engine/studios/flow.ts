@@ -147,11 +147,11 @@ export interface ElevenVoiceInfo {
 }
 
 /** The ElevenLabs error codes flow-music-mcp puts at the start of a tool error (`E_ELEVEN_QUOTA: ...`). */
-export const ELEVEN_CODES = ['E_ELEVEN_KEY', 'E_ELEVEN_QUOTA', 'E_ELEVEN_PAID_TIER', 'E_ELEVEN_LANG', 'E_ELEVEN_BLOCKED', 'E_ELEVEN_MODEL', 'E_ELEVEN_API'] as const
+export const ELEVEN_CODES = ['E_ELEVEN_KEY', 'E_ELEVEN_QUOTA', 'E_ELEVEN_PAID_TIER', 'E_ELEVEN_LANG', 'E_ELEVEN_BLOCKED', 'E_ELEVEN_MODEL', 'E_ELEVEN_API', 'E_ELEVEN_RATE'] as const
 export type ElevenCode = (typeof ELEVEN_CODES)[number]
 /** The ElevenLabs code in an error message, or undefined. */
 export function elevenCodeOf(message: string): ElevenCode | undefined {
-  const m = /\b(E_ELEVEN_(?:KEY|QUOTA|PAID_TIER|LANG|BLOCKED|MODEL|API))\b/.exec(message)
+  const m = /\b(E_ELEVEN_(?:KEY|QUOTA|PAID_TIER|LANG|BLOCKED|MODEL|API|RATE))\b/.exec(message)
   return m ? (m[1] as ElevenCode) : undefined
 }
 
