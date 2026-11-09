@@ -48,7 +48,8 @@ export const LINT_CODES = [
   'W_PLACEHOLDER',
   'W_MIX_MUSIC_LOUD',
   'W_VOICE_MIXED',
-  'W_VOICE_ID_CHANGED'
+  'W_VOICE_ID_CHANGED',
+  'W_SFX_MISSING'
 ] as const
 export type LintCode = (typeof LINT_CODES)[number]
 
@@ -623,6 +624,17 @@ async function lintEpisode(
       if (prev?.type === 'clip' && b.with === 'prev') issues.add('E_SCHEMA', 'no beat runs with "prev" over a clip', { file: scriptRel, where })
       prev = b
     }
+  }
+
+  // HUB-31 decision 14: a sound cue whose file was not made is a warning; the render plays silence there
+  for (const [cue, file] of Object.entries(script.sfx)) {
+    let abs: string | null
+    try {
+      abs = p.resolve(file)
+    } catch {
+      abs = null
+    }
+    if (!abs || !(await exists(abs))) issues.add('W_SFX_MISSING', `sound cue "${cue}": ${file} is not there yet (the render plays silence; the composer makes it)`, { file: scriptRel, where: cue })
   }
 
   const langs = bible.languages

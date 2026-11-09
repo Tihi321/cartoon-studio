@@ -80,7 +80,7 @@ async function bibleStep(e: Env): Promise<string> {
       role: 'showrunner',
       kind: 'bible',
       prompt: blender
-        ? 'Turn the chosen premise into the series bible of a 3D toon cartoon (Blender, simple rounded characters built from primitives with a thin dark outline): title, logline, tone, rules, the visual style (look, a palette of 4 to 6 hex colours the characters and sets will use, outline width, a one-line reference prompt), the cast (the two leads of the pitch, plus at most two more if the premise needs them) with a concrete look for each (shape, colours, one telling detail such as a scarf or spines), and the sets of the pitch. If the brief or the premise already describes the leads, keep their looks and the palette. Voices are filled in later.'
+        ? 'Turn the chosen premise into the series bible of a 3D toon cartoon (Blender, simple rounded characters built from primitives with a thin dark outline): title, logline, tone, rules, the visual style (look, a palette of 4 to 6 hex colours the characters and sets will use, outline width, a one-line reference prompt), the cast (the two leads of the pitch, plus at most two more if the premise needs them) with a concrete look for each (shape, colours, one telling detail such as a scarf or spines; a lead may be a vehicle, a car or a train with lamp eyes and no arms or legs, when the premise says so), and the sets of the pitch. If the brief or the premise already describes the leads, keep their looks and the palette. Voices are filled in later.'
         : 'Turn the chosen premise into the series bible: title, logline, tone, rules, the visual style (look, palette of 4 to 6 colours, outline width, a reference prompt), the cast (the two leads of the pitch, plus at most two more if the premise needs them) with a concrete look for each, and the sets of the pitch. Voices are filled in later.',
       inputs: { paths: [], json: { brief: e.brief, renderer: blender ? 'blender' : 'canvas', chosenPitch: pitch, audience: bible.audience, current: { tone: bible.tone, rules: bible.rules, style: bible.style } } },
       output: { schema: 'bible', path: 'tasks/bible.json' }
@@ -210,10 +210,21 @@ async function castMotion(e: Env, bible: Bible): Promise<Record<string, unknown>
   const out: Record<string, unknown> = {}
   for (const c of bible.cast) {
     const spec = await e.store.readCharacter3d(e.series, c.id).catch(() => null)
-    out[c.id] = spec ? { height: spec.height, tempo: spec.motion.tempo, ...('walk' in spec.motion ? { walk: spec.motion.walk } : { kind: spec.kind, drive: spec.motion.drive }) } : null
+    out[c.id] = spec ? { height: spec.height, tempo: spec.motion.tempo, ...('walk' in spec.motion ? { walk: spec.motion.walk } : { kind: spec.kind, vehicle: spec.vehicle?.type, runsOn: spec.vehicle?.track ? 'track' : 'road', drive: spec.motion.drive }) } : null
   }
   return out
 }
+
+/** The voice credit a brief asks the closing title card to carry (`brief.credits: {hr, en}`, HUB-31 decision 15), when it gives both languages. */
+export function creditsOf(brief: Record<string, unknown>): { hr: string; en: string } | null {
+  const c = brief.credits as Record<string, unknown> | undefined
+  return c && typeof c.hr === 'string' && typeof c.en === 'string' && c.hr.trim() && c.en.trim() ? { hr: c.hr.trim(), en: c.en.trim() } : null
+}
+
+const PROMPT_3D_CREATURE =
+  ' This is a 3D series: a gesture beat or a line gesture is an action name of facts.actions (kind gesture or react); an action with needsTarget (point, sit, look_at) needs a "target" (a cast id, a prop id or a mark of the scene set; sit needs a prop with a seat); a move beat may set "style" (walk, hop, run, tiptoe; default is the character) and its "seconds" must give a believable pace; a camera beat names a shot of the set (its cameras, wide, two, cu-<cast id>, ots-<a>-<b>) with transition cut, pan or push. Use the library: at least 8 different actions in a 60 second episode, including a walk of 3 metres or more, a sit on a prop with a seat, a point, a reaction and a laugh, and one push or pan.'
+const PROMPT_3D_VEHICLE =
+  ' This is a 3D series of vehicles (no arms, no legs): a gesture beat or a line gesture is an action of facts.gesturesByCast for that character (kind gesture or react in facts.actions); an action with needsTarget (lean, point_nose, look_at) needs a "target" (a cast id, a prop id or a mark of the scene set); a move beat goes between two marks on the same road (a car: style drive, zoom or reverse) or the same track (a train: style chug; a train never leaves its track and never turns), see facts.moveStylesByCast, and its "seconds" must fit the vehicle (castHeightsAndMotion: topSpeed in m/s, accel); a camera beat names a shot of the set (its cameras, wide, two, cu-<cast id>, ots-<a>-<b>) with transition cut, pan or push. "honk" and "whistle" are sounds: right after each, an sfx beat with "with":"prev" (cue "horn" for honk, "whistle" for whistle). Use the library: at least 8 different actions in a 60 second episode, including a drive of 5 metres or more on the road, a chug on the track, a honk and a whistle (each with its sfx beat), a react_surprised, a laugh, and one push or pan.'
 
 async function scriptStep(e: Env): Promise<string> {
   const bible = await requireChosen(e)
@@ -226,7 +237,10 @@ async function scriptStep(e: Env): Promise<string> {
   const range = Array.isArray(b.lineRange) && b.lineRange.length === 2 ? ([Number(b.lineRange[0]), Number(b.lineRange[1])] as [number, number]) : ([12, 16] as [number, number])
   // a Blender series: the gestures are the acting library's, the emotions the assembler's, the marks and shots the 3D sets' (HUB-30)
   const f3: Facts3d | null = bible.renderer === 'blender' ? await facts3d(e, bible) : null
-  const rigs = f3 ? Object.fromEntries(bible.cast.map((c) => [c.id, { gestures: [...f3.library.scriptable], emotions: [...f3.emotions] }])) : await rigFacts(e, bible)
+  // HUB-31: each character may use only what its body can do (a car honks, a train whistles, neither waves)
+  const rigs = f3 ? Object.fromEntries(bible.cast.map((c) => [c.id, { gestures: f3.gestures[c.id] ?? [...f3.library.scriptable], emotions: [...f3.emotions] }])) : await rigFacts(e, bible)
+  const vehicles = !!f3 && Object.values(f3.bodies).some((x) => x.kind === 'vehicle')
+  const credits = f3 ? creditsOf(b) : null
   const sets = f3 ? Object.fromEntries(Object.entries(f3.sets).map(([id, v]) => [id, { marks: v.marks, shots: v.shots }])) : await setFacts(e, bible)
   const revise = e.detail.startsWith('revise') ? await e.store.readReview(e.series, e.episode, 'safety').catch(() => null) : null
   const previous = revise ? await e.store.readScript(e.series, e.episode).catch(() => null) : null
@@ -238,7 +252,7 @@ async function scriptStep(e: Env): Promise<string> {
       id: 'script',
       role: 'writer',
       kind: 'script',
-      prompt: `Write episode "${e.episode}" for the series: the language-independent script (scenes, beats in order) and the texts in Croatian and English. ${range[0]} to ${range[1]} spoken lines in all, each at most 12 words in BOTH languages. Use only the beat types ${ALLOWED_BEATS.join(', ')}, only the marks, shots, gestures and emotions listed in "facts".${f3 ? ' This is a 3D series: a gesture beat or a line gesture is an action name of facts.actions (kind gesture or react); an action with needsTarget (point, sit, look_at) needs a "target" (a cast id, a prop id or a mark of the scene set; sit needs a prop with a seat); a move beat may set "style" (walk, hop, run, tiptoe; default is the character) and its "seconds" must give a believable pace; a camera beat names a shot of the set (its cameras, wide, two, cu-<cast id>, ots-<a>-<b>) with transition cut, pan or push. Use the library: at least 8 different actions in a 60 second episode, including a walk of 3 metres or more, a sit on a prop with a seat, a point, a reaction and a laugh, and one push or pan.' : ''} ${wantIntro ? 'Start with one clip beat {"type":"clip","clip":"intro","seconds":8,"audio":"keep"} (the series intro; no beat runs "with":"prev" over it).' : 'No intro clip.'} ${wantOutro ? 'End with one clip beat {"type":"clip","clip":"outro","seconds":8,"audio":"keep"} (the series outro, the last beat). There is no other clip: no hero clip.' : 'No outro clip, and no other clip either.'} Music cue "theme" is music/theme.ogg; a sound effect cue is music/sfx-<cue>.ogg (at most two). The target length is about ${b.seconds ?? 60} seconds.${revise ? ' This is a REVISION: fix every problem of the safety review and keep what was fine.' : ''}`,
+      prompt: `Write episode "${e.episode}" for the series: the language-independent script (scenes, beats in order) and the texts in Croatian and English. ${range[0]} to ${range[1]} spoken lines in all, each at most 12 words in BOTH languages. Use only the beat types ${ALLOWED_BEATS.join(', ')}, only the marks, shots, gestures and emotions listed in "facts".${f3 ? (vehicles ? PROMPT_3D_VEHICLE : PROMPT_3D_CREATURE) : ''}${credits ? ' End the episode (after the last line, before an outro clip) with a title beat {"type":"title","key":"credits","seconds":3}; its text strings.credits is facts.credits in each language, word for word.' : ''} ${wantIntro ? 'Start with one clip beat {"type":"clip","clip":"intro","seconds":8,"audio":"keep"} (the series intro; no beat runs "with":"prev" over it).' : 'No intro clip.'} ${wantOutro ? 'End with one clip beat {"type":"clip","clip":"outro","seconds":8,"audio":"keep"} (the series outro, the last beat). There is no other clip: no hero clip.' : 'No outro clip, and no other clip either.'} Music cue "theme" is music/theme.ogg; a sound effect cue is music/sfx-<cue>.ogg (at most two). The target length is about ${b.seconds ?? 60} seconds.${revise ? ' This is a REVISION: fix every problem of the safety review and keep what was fine.' : ''}`,
       inputs: {
         paths: [],
         json: {
@@ -247,7 +261,14 @@ async function scriptStep(e: Env): Promise<string> {
           episode: e.episode,
           bible: { title: bible.title, logline: bible.logline, tone: bible.tone, rules: bible.rules, cast: bible.cast.map(castView), sets: bible.sets },
           facts: f3
-            ? { actions: f3.actions, emotions: f3.emotions, moveStyles: ['walk', 'hop', 'run', 'tiptoe'], marksShotsAndPropsBySet: f3.sets, castHeightsAndMotion: await castMotion(e, bible) }
+            ? {
+                actions: f3.actions,
+                emotions: f3.emotions,
+                ...(vehicles ? { gesturesByCast: f3.gestures, moveStylesByCast: f3.moveStyles, pathsBySet: Object.fromEntries(Object.entries(f3.specs).map(([id, x]) => [id, x.paths ?? {}])) } : { moveStyles: ['walk', 'hop', 'run', 'tiptoe'] }),
+                marksShotsAndPropsBySet: f3.sets,
+                castHeightsAndMotion: await castMotion(e, bible),
+                ...(credits ? { credits } : {})
+              }
             : { gesturesAndEmotionsByCast: rigs, marksAndShotsBySet: sets },
           ...(revise ? { safetyReview: revise, previousScript: previous } : {})
         }
@@ -257,7 +278,7 @@ async function scriptStep(e: Env): Promise<string> {
     {
       check: (v) => {
         const a = v as z.infer<typeof scriptAnswer>
-        return [...scriptProblems(a, { series: e.series, episode: e.episode, bible, rigs, sets, lineRange: range, maxWords: 12 }), ...(f3 ? scriptProblems3d(a.script, f3) : [])]
+        return [...scriptProblems(a, { series: e.series, episode: e.episode, bible, rigs, sets, lineRange: range, maxWords: 12 }), ...(f3 ? scriptProblems3d(a.script, f3, { credits: credits?.en }) : [])]
       },
       rounds: 3,
       maxTokens: 16000
@@ -265,8 +286,10 @@ async function scriptStep(e: Env): Promise<string> {
   )
   const { script, text } = r.value
   await e.store.writeScript(e.series, e.episode, { ...script, series: e.series, id: e.episode })
-  await e.store.writeText(e.series, e.episode, 'hr', { ...text.hr, lang: 'hr' })
-  await e.store.writeText(e.series, e.episode, 'en', { ...text.en, lang: 'en' })
+  // the credit line is the brief's, word for word (decision 15)
+  const withCredit = (t: typeof text.hr, lang: Lang) => (credits ? { ...t, strings: { ...t.strings, credits: credits[lang] } } : t)
+  await e.store.writeText(e.series, e.episode, 'hr', { ...withCredit(text.hr, 'hr'), lang: 'hr' })
+  await e.store.writeText(e.series, e.episode, 'en', { ...withCredit(text.en, 'en'), lang: 'en' })
   const fresh = await e.store.readBible(e.series)
   if (!fresh.episodes.some((x) => x.id === e.episode)) {
     await e.store.writeBible(e.series, { ...fresh, episodes: [...fresh.episodes, { id: e.episode, title: { hr: text.hr.strings[script.titleKey] ?? e.episode, en: text.en.strings[script.titleKey] ?? e.episode }, status: 'draft' }] })
@@ -343,8 +366,16 @@ async function voiceCastStep(e: Env): Promise<string> {
   const bible = await requireChosen(e)
   const config = await loadVoiceConfig(e.svc.dataDir)
   let english: string[] = []
+  let elevenVoices: { voiceId: string; name: string; labels: unknown }[] = []
   try {
     const { deps } = await voiceDeps(e.svc, { autoStart: false })
+    // HUB-31: the account's premade ElevenLabs voices (the only ones a free API key may use), when the free tier is ready
+    try {
+      const st = deps.flow.elevenStatus ? await deps.flow.elevenStatus(e.ctx.signal) : null
+      if (st?.ready && deps.flow.elevenVoices) elevenVoices = (await deps.flow.elevenVoices(e.ctx.signal)).filter((v) => v.category === 'premade').map((v) => ({ voiceId: v.voiceId, name: v.name, labels: v.labels }))
+    } catch {
+      /* flow-music-mcp is not up: no ElevenLabs voices to offer */
+    }
     english = (await deps.vibetts.listVoices()).voices.filter((v) => v.languages.includes('en')).map((v) => v.id)
   } catch {
     /* VibeTTS is not up: the director picks from the usual Kokoro names */
@@ -356,7 +387,7 @@ async function voiceCastStep(e: Env): Promise<string> {
       role: 'voice-director',
       kind: 'voice-cast',
       prompt: 'Give every character a voice in Croatian and in English, and one short audition line each (in the character\'s own voice and language). Croatian: OmniVoice attribute tags only (comma separated, one per category), a fixed seed, and a Supertonic fallback voice id. English: a Kokoro voice, different for each lead. Also name a Gemini voice for each (used only when the free quota allows).',
-      inputs: { paths: [], json: { cast: bible.cast.map(castView), omniVoiceTags: OMNIVOICE_TAGS, omniVoiceEngine: config.engine, kokoroVoices: english.length ? english : ['af_bella', 'af_heart', 'af_nicole', 'af_sarah', 'af_sky', 'am_adam', 'am_michael', 'bf_emma', 'bm_george'], geminiVoices: GEMINI_VOICES, supertonicFallback: ['supertonic:F1', 'supertonic:F2', 'supertonic:F3', 'supertonic:M1', 'supertonic:M2', 'supertonic:M3'], note: 'the voice record shape is {provider:"auto", gemini, comfy:{engine,instruct,ref:null,refText:null,seed}, vibetts, speed:1, style}' } },
+      inputs: { paths: [], json: { cast: bible.cast.map(castView), omniVoiceTags: OMNIVOICE_TAGS, omniVoiceEngine: config.engine, kokoroVoices: english.length ? english : ['af_bella', 'af_heart', 'af_nicole', 'af_sarah', 'af_sky', 'am_adam', 'am_michael', 'bf_emma', 'bm_george'], geminiVoices: GEMINI_VOICES, supertonicFallback: ['supertonic:F1', 'supertonic:F2', 'supertonic:F3', 'supertonic:M1', 'supertonic:M2', 'supertonic:M3'], note: 'the voice record shape is {provider:"auto", gemini, comfy:{engine,instruct,ref:null,refText:null,seed}, vibetts, speed:1, style}', ...(elevenVoices.length ? { elevenVoices } : {}) } },
       output: { schema: 'voice-cast', path: 'tasks/voice-cast.json' }
     },
     {

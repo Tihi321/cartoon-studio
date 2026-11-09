@@ -67,7 +67,8 @@ describe('contracts and lint', () => {
 
     const clean = await lintSeries(store, 'mini-vehicles', { episode: 'ep00-wheels', requireAudio: true })
     expect(clean.errors).toEqual([])
-    expect(clean.warnings).toEqual([])
+    // the horn the script cues is not made yet: a warning and silence, never an error (HUB-31 decision 14)
+    expect(clean.warnings.map((w) => `${w.code} ${w.where}`)).toEqual(['W_SFX_MISSING horn'])
 
     const pipFile = path.join(root, 'cast', 'pip', 'character.json')
     const pip = JSON.parse(await readFile(pipFile, 'utf8'))

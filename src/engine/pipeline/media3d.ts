@@ -4,8 +4,8 @@ import type { z } from 'zod'
 import type { Bible, Character3d, Set3d } from '../../shared/contracts'
 import { assembleScene, buildCharacter, buildSet, sha1 } from '../blender/jobs'
 import type { BuildResult } from '../blender/jobs'
-import { EMOTIONS_3D, loadActingLibrary } from '../blender/library'
-import type { ActingLibrary } from '../blender/library'
+import { EMOTIONS_3D, bodyCannot, bodyOf, loadActingLibrary, scriptableFor } from '../blender/library'
+import type { ActingLibrary, ActorBody } from '../blender/library'
 import { findSeedDir } from '../store/dataFolder'
 import { shotNames3d } from '../series/lint'
 import { castView, ask, relTo, requireChosen } from './env'
@@ -275,11 +275,33 @@ export interface Facts3d {
   sets: Record<string, { marks: string[]; shots: string[]; props: { id: string; kind: string; seat: boolean }[] }>
   /** The 3D set specs by id, for the checks. */
   specs: Record<string, Set3d>
+  /** HUB-31: the body of each cast member whose spec exists (a creature, a car, a train); `actions` lists only what one of them can do. */
+  bodies: Record<string, ActorBody>
+  /** HUB-31: per cast member, the gesture and reaction names its body can do (`scriptableFor`), and the move styles it has. */
+  gestures: Record<string, string[]>
+  moveStyles: Record<string, string[]>
 }
 
-/** The acting library names and the 3D sets of a series. */
+/** The move styles of a body: a car drives, zooms or reverses, a train chugs, a creature walks, hops, runs or tiptoes. */
+export const moveStylesOf = (body: ActorBody): string[] => (body.kind === 'creature' ? ['walk', 'hop', 'run', 'tiptoe'] : body.vehicleType === 'train' ? ['chug'] : ['drive', 'zoom', 'reverse'])
+
+/** The two vehicle actions that are sounds (HUB-31 decision 14): each needs an `sfx` beat with "with": "prev" right after it. */
+export const SOUND_ACTIONS: Record<string, string> = { honk: 'horn', whistle: 'whistle' }
+/** A script may use at most this many sound-effect cues. */
+export const MAX_SFX_CUES = 2
+
+/** The acting library names and the 3D sets of a series; the actions are those the series' bodies can do (HUB-31). */
 export async function facts3d(e: Pick<Env, 'store' | 'series'>, bible: Bible): Promise<Facts3d> {
   const library = loadActingLibrary()
+  const bodies: Record<string, ActorBody> = {}
+  for (const c of bible.cast) {
+    const spec: Character3d | null = await e.store.readCharacter3d(e.series, c.id).catch(() => null)
+    if (spec) bodies[c.id] = bodyOf(spec)
+  }
+  const known = Object.values(bodies)
+  const canDo = (name: string) => !known.length || known.some((b) => !bodyCannot(library.byName.get(name)!, b))
+  const gestures = Object.fromEntries(bible.cast.map((c) => [c.id, bodies[c.id] ? scriptableFor(library, bodies[c.id]!) : [...library.scriptable]]))
+  const moveStyles = Object.fromEntries(bible.cast.map((c) => [c.id, bodies[c.id] ? moveStylesOf(bodies[c.id]!) : ['walk', 'hop', 'run', 'tiptoe']]))
   const sets: Facts3d['sets'] = {}
   const specs: Record<string, Set3d> = {}
   for (const s of bible.sets) {
@@ -290,15 +312,39 @@ export async function facts3d(e: Pick<Env, 'store' | 'series'>, bible: Bible): P
   }
   const actions = library.actions
     .filter((a) => library.scriptable.has(a.name) || a.kind === 'locomotion' || a.kind === 'camera')
+    .filter((a) => canDo(a.name))
     .map((a) => ({ name: a.name, kind: a.kind, seconds: a.seconds, overLine: a.overLine, needsTarget: a.needsTarget }))
-  return { library, actions, emotions: EMOTIONS_3D, sets, specs }
+  return { library, actions, emotions: EMOTIONS_3D, sets, specs, bodies, gestures, moveStyles }
 }
 
-/** Extra checks of a 3D script (on top of `scriptProblems`): a gesture that needs a target has a valid one, `sit` has a seat. */
-export function scriptProblems3d(script: { cast: string[]; scenes: { id: string; set: string; beats: { id: string; type: string; gesture?: string; target?: string }[] }[] }, facts: Facts3d): string[] {
+/**
+ * Extra checks of a 3D script (on top of `scriptProblems`): a gesture that needs a target has a valid one, `sit` has a seat; HUB-31: an action or
+ * a move style the actor's body cannot do, a `honk` or `whistle` without its `sfx` beat right after it ("with": "prev"), more than two sound
+ * cues, and (when the brief asks for a credit line) the closing title card that carries it.
+ */
+export function scriptProblems3d(
+  script: { cast: string[]; sfx?: Record<string, string>; scenes: { id: string; set: string; beats: { id: string; type: string; gesture?: string; target?: string; who?: string; style?: string; with?: string; key?: string }[] }[] },
+  facts: Facts3d,
+  o: { credits?: string } = {}
+): string[] {
   const out: string[] = []
+  const cues = Object.keys(script.sfx ?? {})
+  if (cues.length > MAX_SFX_CUES) out.push(`the script has ${cues.length} sound-effect cues (${cues.join(', ')}); at most ${MAX_SFX_CUES}`)
   for (const scene of script.scenes) {
     const set = facts.sets[scene.set]
+    scene.beats.forEach((b, i) => {
+      const body = b.who ? facts.bodies[b.who] : undefined
+      if (body && (b.type === 'gesture' || b.type === 'line') && b.gesture && facts.library.byName.has(b.gesture)) {
+        const why = bodyCannot(facts.library.byName.get(b.gesture)!, body)
+        if (why) out.push(`beat ${b.id}: ${b.who} cannot do it: ${why} (${b.who} can: ${facts.gestures[b.who!]!.join(', ')})`)
+      }
+      if (body && b.type === 'move' && b.style && !facts.moveStyles[b.who!]!.includes(b.style)) out.push(`beat ${b.id}: move style "${b.style}" is not one ${b.who} has (${facts.moveStyles[b.who!]!.join(', ')})`)
+      const sound = b.type === 'gesture' && b.gesture ? SOUND_ACTIONS[b.gesture] : undefined
+      if (sound) {
+        const next = scene.beats[i + 1]
+        if (!next || next.type !== 'sfx' || next.with !== 'prev') out.push(`beat ${b.id}: "${b.gesture}" is a sound: put an sfx beat right after it with "with": "prev" (cue "${sound}", file music/sfx-${sound}.ogg)`)
+      }
+    })
     for (const b of scene.beats) {
       if (b.type !== 'gesture' || !b.gesture) continue
       const action = facts.library.byName.get(b.gesture)
@@ -307,6 +353,10 @@ export function scriptProblems3d(script: { cast: string[]; scenes: { id: string;
       if (b.target && !script.cast.includes(b.target) && !set.marks.includes(b.target) && !set.props.some((p) => p.id === b.target)) out.push(`beat ${b.id}: target "${b.target}" is not a cast id, a prop or a mark of set ${scene.set}`)
       if (b.gesture === 'sit' && b.target && !set.props.find((p) => p.id === b.target)?.seat) out.push(`beat ${b.id}: "sit" needs a prop with a seat; "${b.target}" has none (${set.props.filter((p) => p.seat).map((p) => p.id).join(', ') || 'no prop has a seat'})`)
     }
+  }
+  if (o.credits) {
+    const last = script.scenes.flatMap((s) => s.beats).filter((b) => b.type !== 'music' && b.type !== 'clip').pop()
+    if (!last || last.type !== 'title' || last.key !== 'credits') out.push(`end with a title beat {"type":"title","key":"credits","seconds":3} (the voice credit; its text is strings.credits in each language)`)
   }
   return out
 }

@@ -128,6 +128,31 @@ export interface Character3dInfo {
   stale: boolean
   approvedSpecHash: string | null
   approvalHolds: boolean
+  /** HUB-31: the body of the spec (a creature, or a vehicle that is a car or a train); null when the spec does not parse. */
+  body?: { kind: 'creature' | 'vehicle'; vehicleType?: 'car' | 'train' } | null
+}
+
+/** `cts_voice_quota` (HUB-31): today's Gemini counter and the ElevenLabs free tier read live through flow-music-mcp. */
+export interface VoiceQuotaView {
+  gemini: { limit: number; used: number; remaining: number; day?: string }
+  elevenlabs: { ready: boolean; tier: string | null; remaining: number | null; reserve: number; resetAt: string | null; reason?: string }
+}
+
+export function normalizeVoiceQuota(r: Record<string, unknown>): VoiceQuotaView {
+  const g = (r.gemini ?? {}) as Record<string, unknown>
+  const e = (r.elevenlabs ?? {}) as Record<string, unknown>
+  const num = (x: unknown): number | null => (typeof x === 'number' && Number.isFinite(x) ? x : null)
+  return {
+    gemini: { limit: num(g.limit) ?? 0, used: num(g.used) ?? 0, remaining: num(g.remaining) ?? 0, ...(typeof g.day === 'string' ? { day: g.day } : {}) },
+    elevenlabs: {
+      ready: e.ready === true,
+      tier: typeof e.tier === 'string' ? e.tier : null,
+      remaining: num(e.remaining),
+      reserve: num(e.reserve) ?? 0,
+      resetAt: typeof e.resetAt === 'string' ? e.resetAt : null,
+      ...(typeof e.reason === 'string' ? { reason: e.reason } : {})
+    }
+  }
 }
 export interface CastInfo {
   id: string

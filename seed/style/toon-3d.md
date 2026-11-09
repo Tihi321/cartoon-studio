@@ -232,7 +232,7 @@ A set is a ground, a sky, props from a small kit (round and cone trees, bush, be
 
 A series about vehicles (a car, a train engine) uses the same spec with `"kind": "vehicle"`. A vehicle has **no arms, hands or legs**: an `arm_*`, `hand_*` or `leg_*` control is the error `E_VEHICLE_LIMB`.
 
-- **Controls.** Required: `root`, `squash`, `body`, `head` (the front block with the face; it tilts and turns a little), `lid_L/R`, `pupil_L/R`, `mouth`, and one `wheel_<n>` per wheel (parent `root`, at the wheel centre, **no rotation**, `z` equal to `vehicle.wheelRadius` so the tyre touches the ground). Optional: `brow_L/R` (the lamp visors), `chimney` and `exhaust` (puff sources), `horn`, `antenna1..n` (a chain: each the parent of the next; the pennant hangs on the last link), `acc_<name>1..n`.
+- **Controls.** Required: `root`, `squash`, `body`, `head` (the front block with the face; it tilts and turns a little), `lid_L/R`, `pupil_L/R`, `mouth`, and one `wheel_<n>` per wheel (parent `root`, at the wheel centre, **no rotation**, `z` equal to `vehicle.wheelRadius` so the tyre touches the ground); a train's wheels run on the rails, so their `x` is ±0.48 m (half the 0.96 m gauge of a track 1.6 m wide: 0.3 x the track width). Optional: `brow_L/R` (the lamp visors), `chimney` and `exhaust` (puff sources), `horn`, `antenna1..n` (a chain: each the parent of the next; the pennant hangs on the last link), `acc_<name>1..n`.
 - **`vehicle`**: `{type: car | train, wheelRadius, wheels: [every wheel control], track}` (a train has `track: true`). **`motion`** has `drive {style: zip | chug, topSpeed, accel, suspension}` instead of `walk`.
 - **Wheels.** Give each wheel control a `cylinder` part `[radius, width]` with `rot [0, 90, 0]` (the tyre turns about x). The builder adds a hub with three bolts on the outer face (palette `hub`, else `cream`, `chrome`, `brass`) so the spin reads, and records each wheel's axis and radius in `build.json`. Without a tyre part the builder makes a default one.
 - **Shapes.** `cylinder` `[radius, length]` (along z, centred) for wheels, chimneys, buffers, a whip antenna. On a vehicle a `box` has well rounded corners (30 % of its smallest side, up to 30 cm): a loaf body, a flat rounded-rectangle nose.
@@ -332,12 +332,12 @@ Bruno, a big gentle train engine: a long rounded "loaf" in two browns on six whe
     "brow_R": {"parent": "head", "at": [0.36, -0.22, 0.3]},
     "mouth": {"parent": "head", "at": [0, -0.29, -0.28]},
     "chimney": {"parent": "body", "at": [0, -1.45, 0.8]},
-    "wheel_1": {"parent": "root", "at": [-0.6, -1.25, 0.32]},
-    "wheel_2": {"parent": "root", "at": [0.6, -1.25, 0.32]},
-    "wheel_3": {"parent": "root", "at": [-0.6, 0, 0.32]},
-    "wheel_4": {"parent": "root", "at": [0.6, 0, 0.32]},
-    "wheel_5": {"parent": "root", "at": [-0.6, 1.25, 0.32]},
-    "wheel_6": {"parent": "root", "at": [0.6, 1.25, 0.32]}
+    "wheel_1": {"parent": "root", "at": [-0.48, -1.25, 0.32]},
+    "wheel_2": {"parent": "root", "at": [0.48, -1.25, 0.32]},
+    "wheel_3": {"parent": "root", "at": [-0.48, 0, 0.32]},
+    "wheel_4": {"parent": "root", "at": [0.48, 0, 0.32]},
+    "wheel_5": {"parent": "root", "at": [-0.48, 1.25, 0.32]},
+    "wheel_6": {"parent": "root", "at": [0.48, 1.25, 0.32]}
   },
   "parts": [
     {"id": "frame", "shape": "box", "size": [1.36, 3.7, 0.3], "at": [0, 0.05, -0.28], "colour": "dark", "control": "body", "outline": 0.015},

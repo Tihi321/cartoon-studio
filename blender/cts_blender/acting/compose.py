@@ -182,7 +182,15 @@ def write(ctx, scene):
                 put(obj, f"{aid}_mouth_{slot}", {("scale", a): (frames, sc[:, a], "CONSTANT") for a in range(3)})
         sh = info.get("shadow")
         z = mix.value("root", "location")[:, 2]
-        if sh is not None and np.ptp(z) > 1e-6:
+        floor = info.get("floor")  # a vehicle (HUB-31): fn(xy) -> the ground under it (road top, sleepers, crossing boards), so the shadow lies on it
+        if sh is not None and floor is not None:
+            fl = np.asarray(floor(mix.value("root", "location")[:, :2]), dtype=float)
+            k = 1.0 - 0.35 * np.clip((z - fl) / max(rig.height, 1e-6), 0, 1)
+            curves = {("location", 2): (frames, sh.location.z + fl - z, "LINEAR")}
+            for axis in (0, 1):
+                curves[("scale", axis)] = (frames, sh.scale[axis] * k, "LINEAR")
+            put(sh, f"{aid}_shadow", curves)
+        elif sh is not None and np.ptp(z) > 1e-6:
             k = 1.0 - 0.35 * np.clip(z / max(rig.height, 1e-6), 0, 1)
             curves = {("location", 2): (frames, sh.location.z - z, "LINEAR")}
             for axis in (0, 1):

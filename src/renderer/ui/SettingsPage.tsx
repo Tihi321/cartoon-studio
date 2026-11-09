@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { LANGS, VOICE_PROVIDERS } from '../../shared/contracts'
 import type { Lang, VoiceSpec } from '../../shared/contracts'
 import { getStartWithWindows, sendCommand, setStartWithWindows } from '../api'
-import { callTool, normalizeBlenderConfig, normalizeBudget, normalizeMediaConfig, useTool } from '../lib/studio'
+import { callTool, normalizeBlenderConfig, normalizeBudget, normalizeMediaConfig, normalizeVoiceQuota, useTool } from '../lib/studio'
 import type { BlenderStatusView, BudgetInfo } from '../lib/studio'
 import { useCts } from '../store/hooks'
 import { SCHEMES, type Scheme } from '../lib/scheme'
@@ -76,7 +76,7 @@ export function SettingsPage() {
 /** What each generator makes for the studio, shown next to whether it answers. */
 const STUDIO_USE: Record<string, string> = {
   comfy: 'images (Z-Image), theme music and sound effects, the Croatian voice (OmniVoice)',
-  flow: 'Gemini voices and the intro and outro video clips (credits); no images',
+  flow: 'ElevenLabs and Gemini voices (free tiers) and the intro and outro video clips (credits); no images',
   vibetts: 'local voices: English (Kokoro), Croatian fallback'
 }
 
@@ -285,8 +285,9 @@ function VoiceProviders() {
         Provider choice
       </h2>
       <p className="dim">
-        Images and music come from ComfyUI (the models in config/providers.md); Flow makes video clips only, and the paid providers only behind the budget below. Voices: auto picks Gemini within its free quota, else the local engines.
+        Images and music come from ComfyUI (the models in config/providers.md); Flow makes video clips only, and the paid providers only behind the budget below. Voices: auto gives each language, Croatian first, to ElevenLabs when its free credits allow, else Gemini within its free quota, else the local engines.
       </p>
+      <VoiceQuota />
       {!slug && <p className="dim">Choose a series to set its voices.</p>}
       {slug && cast.length === 0 && <p className="dim">The cast is made after you choose a premise.</p>}
       {cast.length > 0 && (
@@ -327,6 +328,40 @@ function VoiceProviders() {
         </p>
       )}
     </section>
+  )
+}
+
+/**
+ * The free voice quotas (cts_voice_quota, HUB-31): the ElevenLabs free tier read live through flow-music-mcp (ready, tier, credits left, the
+ * reserve that is never spent, the reset date) and today's Gemini requests. Read-only: the ElevenLabs key is set by the user outside the app.
+ */
+function VoiceQuota() {
+  const t = useTool('cts_voice_quota', {}, normalizeVoiceQuota)
+  const e = t.data?.elevenlabs
+  return (
+    <ToolGate state={t} tool="cts_voice_quota" testId="voice-quota">
+      {t.data && e && (
+        <dl className="variant-facts" data-testid="voice-quota">
+          <dt>ElevenLabs</dt>
+          <dd data-testid="voice-quota-eleven">
+            <Pill tone={e.ready ? 'good' : 'dim'} testId="voice-quota-eleven-ready">
+              {e.ready ? 'ready' : 'not ready'}
+            </Pill>{' '}
+            {e.ready ? (
+              <>
+                {e.tier ?? 'tier unknown'} tier, {e.remaining ?? '?'} credits left ({e.reserve} kept in reserve){e.resetAt ? `, resets ${e.resetAt.slice(0, 10)}` : ''}
+              </>
+            ) : (
+              <span className="dim">{e.reason ?? 'flow-music-mcp has no ElevenLabs key (the user sets ELEVENLABS_API_KEY)'}</span>
+            )}
+          </dd>
+          <dt>Gemini TTS</dt>
+          <dd data-testid="voice-quota-gemini">
+            {t.data.gemini.remaining} of {t.data.gemini.limit} free requests left today
+          </dd>
+        </dl>
+      )}
+    </ToolGate>
   )
 }
 

@@ -67,6 +67,11 @@ function CastMemberView({ slug, member }: { slug: string; member: CastMember }) 
               3D character, spec {t.data.character.specHash.slice(0, 8)}
             </Pill>
           )}
+          {t.data?.character?.body && (
+            <Pill tone="dim" testId="cast3d-body">
+              {bodyText(t.data.character.body)}
+            </Pill>
+          )}
         </div>
       </section>
 
@@ -337,6 +342,12 @@ function VoiceSection({ slug, member }: { slug: string; member: CastMember }) {
             <li key={lang} className="voice-row" data-testid={`voice-${lang}`}>
               <b className="voice-lang">{LANG_NAME[lang]}</b>
               <span data-testid={`voice-${lang}-spec`}>{spec ? voiceText(spec) : <span className="dim">no voice set yet</span>}</span>
+              {spec?.elevenlabs && (
+                <span className="dim" data-testid={`voice-${lang}-eleven`} title={`ElevenLabs voice id ${spec.elevenlabs.voiceId}`}>
+                  ElevenLabs: {spec.elevenlabs.name} <code>{spec.elevenlabs.voiceId}</code>
+                  {spec.elevenlabs.model ? `, ${spec.elevenlabs.model}` : ''}
+                </span>
+              )}
               <span className="voice-audition">
                 <PlayButton src={seriesFile(slug, `cast/${member.id}/voice/${lang}.wav`)} label={`${member.name.en} in ${LANG_NAME[lang]}`} testId={`voice-${lang}-play`} onFail={() => setMissing((m) => ({ ...m, [lang]: true }))} />
                 <span className="dim" data-testid={`voice-${lang}-note`}>
@@ -354,4 +365,9 @@ function VoiceSection({ slug, member }: { slug: string; member: CastMember }) {
 function voiceText(s: VoiceSpec): string {
   const detail = s.provider === 'comfy' ? s.comfy?.engine : s.provider === 'vibetts' ? s.vibetts : s.provider === 'gemini' ? s.gemini : undefined
   return `${s.provider}${detail ? `, ${detail}` : ''}${s.speed !== 1 ? `, speed ${s.speed}` : ''}`
+}
+
+/** The body kind of a 3D character, as the Cast page names it (HUB-31). */
+function bodyText(b: { kind: 'creature' | 'vehicle'; vehicleType?: 'car' | 'train' }): string {
+  return b.kind === 'vehicle' ? `vehicle: ${b.vehicleType ?? 'car'} (no arms, no legs)` : 'creature'
 }

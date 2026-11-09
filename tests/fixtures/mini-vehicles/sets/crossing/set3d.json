@@ -14,7 +14,7 @@
     { "id": "platform", "kind": "platform", "at": [4, 5], "rot": 90 },
     { "id": "signal", "kind": "signal", "at": [3.2, -4] },
     { "id": "oak", "kind": "tree_round", "at": [-6, 4], "scale": 1.4 },
-    { "id": "house", "kind": "house", "at": [-8, -6] }
+    { "id": "house", "kind": "house", "at": [-9, 5] }
   ],
   "marks": {
     "road_left": [-8, -1],

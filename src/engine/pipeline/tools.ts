@@ -15,6 +15,7 @@ import { readManifest } from '../voice/manifest'
 import { CLIP_IDS, clipLocation, missingClips, videoDir } from './clips'
 import { readVariants } from './rig'
 import { blenderStageOf } from '../blender/stage'
+import { bodyOf } from '../blender/library'
 import { Pipeline, specHashOf } from './run'
 
 /**
@@ -148,9 +149,12 @@ export function pipelineTools(svc: CtsService, def: ToolDef): Tool[] {
           // a Blender series: the spec hash, the last build and whether the approval still holds for the current spec (CTS-27)
           const specHash = bible.renderer === 'blender' ? await specHashOf(st, a.series, id) : null
           const build = specHash ? await fs.readFile(path.join(p.castDir(id), 'build.json'), 'utf8').then((x) => JSON.parse(x) as Record<string, unknown>, () => null) : null
+          const spec3d = specHash ? await st.readCharacter3d(a.series, id).catch(() => null) : null
           const character = specHash
             ? {
                 specHash,
+                // HUB-31: the body kind (a creature, a car, a train)
+                body: spec3d ? bodyOf(spec3d) : null,
                 build: build ? { specHash: build.specHash ?? null, buildSeconds: build.buildSeconds ?? null, blender: build.blender ?? null, warnings: build.warnings ?? [] } : null,
                 stale: !build || build.specHash !== specHash,
                 approvedSpecHash: member.sheet?.specHash ?? null,

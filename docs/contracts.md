@@ -617,6 +617,7 @@ Errors fail a step; warnings are listed. Every issue has `code`, `message`, `fil
 | `W_LANG_DRIFT` | the languages' durations differ by more than 25 % |
 | `W_PLACEHOLDER` | a voice line is a silent placeholder |
 | `W_VOICE_MIXED` | a language's voice lines mix ElevenLabs with another provider (ElevenLabs ran out in the middle of the language) |
+| `W_SFX_MISSING` | a sound cue of the script (`sfx`) points at a file that is not there (the composer has not made it); the render plays silence there |
 | `W_VOICE_ID_CHANGED` | an ElevenLabs line's `voice` differs from its speaker's bible `elevenlabs.voiceId` (`cts_voice_plan` also warns when the bible's id differs from the one the character's first episode used) |
 
 The result also carries `rigs` (one `cts_rig_check` result per cast member of the episode) and `stats.lines`: per line and language the

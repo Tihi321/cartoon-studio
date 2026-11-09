@@ -19,13 +19,13 @@
     "brow_L": { "parent": "head", "at": [-0.35, -0.1, 0.25] },
     "brow_R": { "parent": "head", "at": [0.35, -0.1, 0.25] },
     "mouth": { "parent": "head", "at": [0, -0.15, -0.25] },
-    "chimney": { "parent": "body", "at": [0, -1.2, 0.7] },
-    "wheel_1": { "parent": "root", "at": [-0.6, -1.2, 0.3] },
-    "wheel_2": { "parent": "root", "at": [0.6, -1.2, 0.3] },
-    "wheel_3": { "parent": "root", "at": [-0.6, 0, 0.3] },
-    "wheel_4": { "parent": "root", "at": [0.6, 0, 0.3] },
-    "wheel_5": { "parent": "root", "at": [-0.6, 1.2, 0.3] },
-    "wheel_6": { "parent": "root", "at": [0.6, 1.2, 0.3] }
+    "chimney": { "parent": "body", "at": [0, -1.2, 0.5] },
+    "wheel_1": { "parent": "root", "at": [-0.48, -1.2, 0.3] },
+    "wheel_2": { "parent": "root", "at": [0.48, -1.2, 0.3] },
+    "wheel_3": { "parent": "root", "at": [-0.48, 0, 0.3] },
+    "wheel_4": { "parent": "root", "at": [0.48, 0, 0.3] },
+    "wheel_5": { "parent": "root", "at": [-0.48, 1.2, 0.3] },
+    "wheel_6": { "parent": "root", "at": [0.48, 1.2, 0.3] }
   },
   "parts": [
     { "id": "body", "shape": "ellipsoid", "size": [0.75, 1.9, 0.7], "at": [0, 0, 0], "colour": "body", "control": "body", "outline": 0.015 },

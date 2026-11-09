@@ -508,7 +508,8 @@ class Actor:
         self.mix = Mix(ctx.n, self.rig)
         x, y = start["xy"]
         yaw = math.radians(start.get("yaw", 0.0))
-        self.mix.hold("base", "root", "location", 0, np.array([[x, y, 0.0]] * ctx.n))
+        z = float(start.get("z", 0.0))  # a vehicle stands on the road top or the rail top (HUB-31); a creature on the ground
+        self.mix.hold("base", "root", "location", 0, np.array([[x, y, z]] * ctx.n))
         self.mix.hold("base", "root", "rotation_euler", 0, np.array([[0.0, 0.0, yaw]] * ctx.n))
         from .limbs import arm_delta, hang_dir
 
@@ -540,6 +541,7 @@ class Ctx:
         self.actors = {}
         self.settle = int(round(SETTLE_S * fps))
         self.camera = None
+        self.surface = None  # vehicles (HUB-31): fn(xy (m, 2)) -> the height a car's wheels run on there (the assembler sets it; None = flat)
 
     def f(self, t):
         return int(round(t * self.fps))

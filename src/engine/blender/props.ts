@@ -55,6 +55,45 @@ export function distanceToPath(p: XY, path: Pick<Set3dPath, 'points'>): number {
 
 export const pathWidth = (path: Set3dPath): number => path.width ?? PATH_WIDTH_DEFAULT[path.kind]
 
+/** Where a ground point falls on a path: the arc length from the path's first point and the foot point on the centre line. */
+export function projectOnPath(p: XY, path: Pick<Set3dPath, 'points'>): { s: number; at: [number, number]; distance: number } {
+  const pts = path.points
+  let best = { s: 0, at: [pts[0]![0], pts[0]![1]] as [number, number], distance: Infinity }
+  let run = 0
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const [ax, ay] = pts[i]!
+    const [bx, by] = pts[i + 1]!
+    const dx = bx - ax
+    const dy = by - ay
+    const len = Math.hypot(dx, dy)
+    const u = len > 0 ? Math.max(0, Math.min(1, ((p[0] - ax) * dx + (p[1] - ay) * dy) / (len * len))) : 0
+    const at: [number, number] = [ax + u * dx, ay + u * dy]
+    const d = Math.hypot(p[0] - at[0], p[1] - at[1])
+    if (d < best.distance - 1e-12) best = { s: run + u * len, at, distance: d }
+    run += len
+  }
+  return best
+}
+
+/**
+ * The stretch of a path between two ground points, each put on the centre line: the polyline from `a` to `b` along the path (either way) with
+ * its length. A vehicle move between two marks of one path follows it (CTS-35).
+ */
+export function pathBetween(path: Pick<Set3dPath, 'points'>, a: XY, b: XY): { points: [number, number][]; length: number } {
+  const pa = projectOnPath(a, path)
+  const pb = projectOnPath(b, path)
+  const pts = path.points
+  const cum = [0]
+  for (let i = 0; i + 1 < pts.length; i++) cum.push(cum[i]! + Math.hypot(pts[i + 1]![0] - pts[i]![0], pts[i + 1]![1] - pts[i]![1]))
+  const lo = Math.min(pa.s, pb.s)
+  const hi = Math.max(pa.s, pb.s)
+  const inner = pts.filter((_, i) => cum[i]! > lo + 1e-6 && cum[i]! < hi - 1e-6).map((q) => [q[0], q[1]] as [number, number])
+  const forward: [number, number][] = [pa.s <= pb.s ? pa.at : pb.at, ...inner, pa.s <= pb.s ? pb.at : pa.at]
+  const points = pa.s <= pb.s ? forward : forward.reverse()
+  const r3 = (x: number) => Math.round(x * 1000) / 1000
+  return { points: points.map(([x, y]) => [r3(x), r3(y)]), length: hi - lo }
+}
+
 /** The ids of the set's paths of this kind that pass within `PATH_MARK_TOLERANCE` of the point (nearest first). */
 export function pathsAt(set: Set3d, p: XY, kind: PathKind): string[] {
   return Object.entries(set.paths ?? {})

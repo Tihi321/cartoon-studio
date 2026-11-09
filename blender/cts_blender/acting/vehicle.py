@@ -310,6 +310,10 @@ def locomote(ctx, actor, t0, t1, params, style):
     off = yaw0 - head[0]
     yaw = head + off * (1 - smoothstep(s / max(2 * a, 0.3)))
     z = z0 + (z1 - z0) * smoothstep(s / max(D, 1e-6))
+    surface = getattr(ctx, "surface", None)  # the assembler's ground height under a car (the crossing boards over a track, CTS-35)
+    if surface is not None and not vi.train:  # the mean of what is under the front and the rear axle, so the car rides up the ramp
+        ax = np.stack([np.sin(yaw), -np.cos(yaw)], axis=1) * vi.half_base
+        z = np.maximum(z, 0.5 * (surface(xy + ax) + surface(xy - ax)))
     anti_f = int(round(A * FPS))
     speed = _carry(ctx, actor, clip, f0, xy, yaw, z, anti_f, st["anti"], st["stretch"])
     puffs = []

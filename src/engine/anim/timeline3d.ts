@@ -1,6 +1,7 @@
-import type { Beat, Character3d, Lang, Lipsync, Set3d, TextCatalog, Timeline3d, TimelineClip, Viseme, VoiceLine, VoiceManifest } from '../../shared/contracts'
+import type { Beat, Character3d, Lang, Lipsync, PathKind, Set3d, TextCatalog, Timeline3d, TimelineClip, VehicleCharacter3d, Viseme, VoiceLine, VoiceManifest } from '../../shared/contracts'
 import { isVehicle } from '../../shared/contracts'
 import { loadActingLibrary, moveAction } from '../blender/library'
+import { pathBetween, pathsAt, projectOnPath } from '../blender/props'
 import type { ActingAction, ActingLibrary } from '../blender/library'
 import type { SeriesStore } from '../series/service'
 import { hashString, mulberry32 } from './blink'
@@ -18,6 +19,13 @@ import type { EpisodeBuildSummary, TimelineOptions } from './timeline'
  * minimum and maximum seconds of the acting library manifest: a gesture on a line takes the line's length clamped to them, and inside a longer
  * line the speaker fills the time with accents on the word onsets (small head beats, made by the library), so a gesture is never stretched past
  * its maximum. Blinks are seeded, mouths come from the six-viseme lip-sync (`rest` outside every line of the actor).
+ *
+ * Vehicles (HUB-31 CTS-35): a `move` of a car or a train runs `drive`, `zoom`, `reverse` or `chug` (the beat's style, else the body's own) along
+ * its path: when the vehicle and the end mark are on one path of its kind (a road for a car, a track for a train), the action gets `path` (the
+ * polyline between them, `pathBetween`) and `pathId` (the assembler takes the running height from it); a train whose end mark is off its
+ * track goes to the nearest point of its track (a warning; lint says E_OFF_TRACK); a train's `turn` is dropped. The move lasts the beat's
+ * seconds, at least the vehicle's usual time over 1.25 (`vehicleSeconds`, the twin of `vehicle.nominal_seconds`) and within the library's min
+ * and max. A vehicle starts facing along its path, the way its first move goes.
  */
 
 /** A walk is never planned faster than this many times the character's nominal pace (the beat's `seconds` grows to fit). */
@@ -28,7 +36,9 @@ export const LEAD_IN = 0.5
 const BLINK_MIN = 2.5
 const BLINK_MAX = 5
 /** Base actions: they set a state that holds (position, posture); two of them must not overlap. */
-const BASE_ACTIONS = new Set(['walk', 'hop', 'run', 'turn', 'sit', 'stand_up'])
+const BASE_ACTIONS = new Set(['walk', 'hop', 'run', 'turn', 'sit', 'stand_up', 'drive', 'zoom', 'reverse', 'chug'])
+/** A vehicle move may be planned this much quicker than its usual duration (`vehicleSeconds`); a shorter beat grows to fit. */
+const VEHICLE_HURRY = 1.25
 
 interface Act {
   beat: string
@@ -54,10 +64,47 @@ interface Actor3 {
 /** Metres a second at the character's usual pace for a style: the same as `nominal_walk_speed` of the acting library. */
 export function nominalWalkSpeed(spec: Character3d | null, style?: string): number {
   if (!spec) return 0.8
-  // a vehicle: its top speed until CTS-35 plans path moves
   if (!('walk' in spec.motion)) return spec.motion.drive.topSpeed
   const w = spec.motion.walk
   return w.stride * w.cadence * spec.motion.tempo * (WALK_KIND[style ?? w.style] ?? 1)
+}
+
+/** Per vehicle move style: the acceleration and the top speed against the spec's `drive` (= `STYLES` and `nominal_seconds` of acting/vehicle.py). */
+const VEHICLE_STYLE: Record<string, { accel: number; top: number }> = { drive: { accel: 1, top: 1 }, zoom: { accel: 2.2, top: 1.5 }, reverse: { accel: 0.7, top: 0.6 }, chug: { accel: 1, top: 1 } }
+
+/** The usual seconds of a vehicle move of `distance` metres: the anticipation, then a trapezoid at the spec's top speed and acceleration (the TS twin of `vehicle.nominal_seconds`). */
+export function vehicleSeconds(spec: VehicleCharacter3d, distance: number, style: string): number {
+  const train = spec.vehicle.type === 'train'
+  const st = VEHICLE_STYLE[style] ?? VEHICLE_STYLE.drive!
+  const top = spec.motion.drive.topSpeed * st.top
+  const acc = spec.motion.drive.accel * st.accel
+  const ramp = top / acc
+  const move = distance < top * ramp ? 2 * Math.sqrt(distance / acc) : distance / top + ramp
+  return Math.round(((train ? 0.32 : 0.16) / spec.motion.tempo + move) * 100) / 100
+}
+
+/** The path kind a vehicle runs on: a train (`vehicle.track`) on a track, a car on a road (the lint's rule). */
+const pathKindOf = (spec: VehicleCharacter3d): PathKind => (spec.vehicle.track ? 'track' : 'road')
+
+/** The yaw in degrees (the assembler's facing: 0 looks at -y, 90 at +x) of a direction on the ground. */
+const yawOf = (dx: number, dy: number): number => round3((Math.atan2(dx, -dy) * 180) / Math.PI)
+
+/**
+ * The route of a vehicle move (HUB-31): when the vehicle stands on a path of its kind and the end mark is on the same path, the stretch of the
+ * path between them; a train whose end mark is off its track is held to the track (it goes to the point of its track nearest the mark).
+ * Otherwise a straight line (a car off the road). `end` is where the vehicle stops.
+ */
+export function vehicleRoute(set: Set3d, spec: VehicleCharacter3d, from: [number, number], to: [number, number]): { path: string | null; points: [number, number][]; length: number; end: [number, number]; held: boolean } {
+  const kind = pathKindOf(spec)
+  const here = pathsAt(set, from, kind)
+  const there = pathsAt(set, to, kind)
+  const shared = here.find((id) => there.includes(id))
+  const id = shared ?? (kind === 'track' ? here[0] : undefined)
+  if (id) {
+    const r = pathBetween(set.paths![id]!, from, to)
+    return { path: id, points: r.points, length: r.length, end: r.points[r.points.length - 1]!, held: !shared }
+  }
+  return { path: null, points: [from, to], length: Math.hypot(to[0] - from[0], to[1] - from[1]), end: to, held: false }
 }
 
 const clampTo = (a: ActingAction, seconds: number): number => round3(Math.min(a.seconds.max, Math.max(a.seconds.min, seconds)))
@@ -114,6 +161,31 @@ export async function buildTimeline3d(store: SeriesStore, series: string, episod
       speaking: [],
       accents: []
     })
+  }
+
+  // a vehicle starts facing along its path: the way its first move goes (backwards for a reverse), else the path direction nearest its facing
+  for (const a of actors.values()) {
+    if (!a.spec || !isVehicle(a.spec)) continue
+    const firstMove = scene.beats.find((b) => b.type === 'move' && b.who === a.id)
+    let yaw: number | null = null
+    if (firstMove && firstMove.type === 'move' && set.marks[firstMove.to]) {
+      const r = vehicleRoute(set, a.spec, a.pos, markPoint(firstMove.to))
+      const p = r.points[0]!
+      const q = r.points[1] ?? p
+      if (Math.hypot(q[0] - p[0], q[1] - p[1]) > 1e-3) yaw = yawOf(q[0] - p[0], q[1] - p[1]) + (moveAction(firstMove.style, a.spec) === 'reverse' ? 180 : 0)
+    }
+    const on = pathsAt(set, a.pos, pathKindOf(a.spec))[0]
+    if (yaw === null && on) {
+      const path = set.paths![on]!
+      const foot = projectOnPath(a.pos, path).at
+      const dirs = [pathBetween(path, foot, path.points[path.points.length - 1]!), pathBetween(path, foot, path.points[0]!)]
+        .filter((r) => r.length > 1e-3)
+        .map((r) => yawOf(r.points[1]![0] - r.points[0]![0], r.points[1]![1] - r.points[0]![1]))
+      const want = typeof a.start.facing === 'number' ? a.start.facing : a.start.facing === 'left' ? -90 : 90
+      const gap = (y: number) => Math.abs(((((y - want) % 360) + 540) % 360) - 180)
+      if (dirs.length) yaw = dirs.sort((p, q) => gap(p) - gap(q))[0]!
+    }
+    if (yaw !== null) a.start.facing = round3(((((yaw + 180) % 360) + 360) % 360) - 180)
   }
 
   const shots: Timeline3d['shots'] = [{ t: 0, shot: scene.shot, transition: 'cut' }]
@@ -177,12 +249,28 @@ export async function buildTimeline3d(store: SeriesStore, series: string, episod
       }
       case 'move': {
         const a = actors.get(beat.who)
-        if (a) {
+        if (a && a.spec && isVehicle(a.spec)) {
+          // a vehicle drives, zooms, reverses or chugs along its path between the two marks (a train never leaves its track)
+          const action = moveAction(beat.style, a.spec)
+          const route = vehicleRoute(set, a.spec, a.pos, markPoint(beat.to))
+          if (route.held) warn(`move ${beat.id}: mark "${beat.to}" is not on the track of ${beat.who}; the train goes to the nearest point of track "${route.path}" (cts_lint: E_OFF_TRACK)`)
+          const usual = vehicleSeconds(a.spec, route.length, action)
+          const lib = library.byName.get(action)
+          let seconds = Math.max(beat.seconds, usual / VEHICLE_HURRY)
+          if (lib) seconds = Math.min(lib.seconds.max, Math.max(lib.seconds.min, seconds))
+          seconds = round3(seconds)
+          if (seconds > beat.seconds + 1e-9) warn(`move ${beat.id}: ${beat.who} needs ${seconds.toFixed(1)} s to ${action} ${route.length.toFixed(1)} m, the beat said ${beat.seconds} s; lengthened`)
+          else if (seconds < beat.seconds - 1e-9) warn(`move ${beat.id}: a ${action} lasts at most ${seconds.toFixed(1)} s (the acting library); the beat said ${beat.seconds} s`)
+          if (seconds < usual / VEHICLE_HURRY - 1e-6) warn(`move ${beat.id}: ${route.length.toFixed(1)} m in ${seconds.toFixed(1)} s is quicker than ${beat.who} can ${action} (usually ${usual.toFixed(1)} s); split it into two moves`)
+          act(a, beat, action, start, start + seconds, route.path ? { target: beat.to, path: route.points, pathId: route.path } : { target: beat.to })
+          a.pos = route.end
+          dur = seconds
+          len = seconds
+        } else if (a) {
           const to = markPoint(beat.to)
           const dist = Math.hypot(to[0] - a.pos[0], to[1] - a.pos[1])
           const style = beat.style ?? (a.spec && 'walk' in a.spec.motion ? a.spec.motion.walk.style : undefined) ?? 'walk'
-          // a vehicle drives or chugs (CTS-31: the action name only; CTS-35 makes the move follow its path)
-          const action = a.spec && isVehicle(a.spec) ? moveAction(beat.style, a.spec) : style === 'hop' || style === 'run' ? style : 'walk'
+          const action = style === 'hop' || style === 'run' ? style : 'walk'
           const need = dist / (MAX_PACE * Math.max(nominalWalkSpeed(a.spec, style), 0.05))
           const seconds = Math.max(beat.seconds, need)
           if (seconds > beat.seconds + 1e-9) warn(`move ${beat.id}: ${beat.who} needs ${seconds.toFixed(1)} s for ${dist.toFixed(1)} m, the beat said ${beat.seconds} s; lengthened`)
@@ -195,7 +283,8 @@ export async function buildTimeline3d(store: SeriesStore, series: string, episod
       }
       case 'turn': {
         const a = actors.get(beat.who)
-        if (a) act(a, beat, 'turn', start, start + (library.byName.get('turn')?.seconds.default ?? 0.5), { facing: beat.facing })
+        if (a?.spec && isVehicle(a.spec) && a.spec.vehicle.type === 'train') warn(`turn ${beat.id}: a train does not turn on its track; dropped`)
+        else if (a) act(a, beat, 'turn', start, start + (library.byName.get('turn')?.seconds.default ?? 0.5), { facing: beat.facing })
         break
       }
       case 'emote': {

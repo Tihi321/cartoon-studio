@@ -7,6 +7,13 @@ Steps: append the set and the characters from their `.blend` files (the same fil
 run the acting library on the timeline's actions (`acting.compose`), key the mouths, lids and pupils, frame the computed shots over the frames they are on
 screen (`acting.framing`), add the title cards as 3D text over a plate, save `scene.blend`, write `assembly.json` (actions per actor, shots, spec and asset
 hashes, warnings). The camera is one object with dense keys (a cut is a one-frame change, a pan or push an eased move); timeline markers name the shots.
+
+Vehicles (HUB-31 CTS-35). A vehicle stands on its start mark with its wheels on the running surface of the nearest path of its kind (the asphalt
+top `ROAD_TOP` of a road for a car, the rail top `RAIL_TOP` of a track for a train; the ground when there is none), facing the way the timeline
+says (the timeline turns a vehicle along its path). A `drive zoom reverse chug` move gets the height of its path (`z`, from `pathId`, else the
+surface at the end mark); a car rides up over the boards of a level crossing (`ctx.surface`, the boards and their ramps under its axles), and
+its blob shadow lies on what is under it (`floor`: the road, the sleepers, the boards). The puff pools, the lamp control and the objects of each
+vehicle go to the writer, so the puffs and the lamp glow are keyed.
 """
 import hashlib
 import json
@@ -119,9 +126,105 @@ def prop_footprints(set_spec):
     return {p["id"]: KIT[p["kind"]]["footprint"] * p.get("scale", 1.0) for p in set_spec["props"]}
 
 
-def make_plan(ctx, tl, set_spec, warnings):
+# ---------------------------------------------------------------- the road and rail kit under a vehicle (HUB-31)
+
+VEHICLE_MOVES = ("drive", "zoom", "reverse", "chug")
+
+
+class Ground:
+    """The heights of the road and rail kit at ground points: the asphalt top on a road, the sleepers or the rail top on a track, the boards of a
+    level crossing (with their ramps); 0 elsewhere. The numbers are the set builder's (`build_set`), so they match `set.blend`."""
+
+    def __init__(self, set_spec):
+        from . import build_set as B
+
+        self.B = B
+        self.paths = {pid: (p["kind"], np.array(p["points"], dtype=float), B.path_width(p)) for pid, p in (set_spec.get("paths") or {}).items()}
+        self.crossings = []
+        for prop in set_spec.get("props") or []:
+            if prop["kind"] != "crossing":
+                continue
+            track = B.nearest_path(set_spec, prop["at"], "track")
+            road = B.nearest_path(set_spec, prop["at"], "road")
+            if not track or track[1] > 3.0:
+                continue
+            tw = B.path_width(set_spec["paths"][track[0]])
+            rw = B.path_width(set_spec["paths"][road[0]]) if road and road[1] <= 3.0 else B.PATH_WIDTH_DEFAULT["road"]
+            self.crossings.append((np.array(prop["at"], dtype=float), np.array(track[2], dtype=float), tw / 2 + 0.15, rw / 2, B.RAIL_TOP - 0.006))
+
+    def running(self, kind):
+        return self.B.RAIL_TOP if kind == "track" else self.B.ROAD_TOP
+
+    def near(self, xy, kind, tol=0.35):
+        """The id of the path of this kind nearest a ground point, if it is within `tol` metres of its centre line."""
+        from .acting.vehicle import path_distance
+
+        best = None
+        for pid, (k, pts, _w) in self.paths.items():
+            if k != kind:
+                continue
+            d = float(path_distance(pts, np.asarray(xy, dtype=float)[:2])[0])
+            if d <= tol and (best is None or d < best[1]):
+                best = (pid, d)
+        return best and best[0]
+
+    def boards(self, xy):
+        """The crossing boards under ground points (m, 2): their top over the track, a ramp down to the road over 0.7 m on each side, 0 elsewhere."""
+        xy = np.atleast_2d(np.asarray(xy, dtype=float))[:, :2]
+        z = np.zeros(len(xy))
+        for at, tdir, out, rh, top in self.crossings:
+            rel = xy - at
+            along = np.abs(rel @ tdir)
+            across = np.abs(rel @ np.array([-tdir[1], tdir[0]]))
+            ramp = top - (top - self.B.ROAD_TOP) * np.clip((across - out) / 0.7, 0, 1)
+            z = np.maximum(z, np.where((along <= rh + 0.05) & (across <= out + 0.7), ramp, 0.0))
+        return z
+
+    def floor(self, xy, kind):
+        """What lies under a vehicle of this path kind (for its shadow): the road top or the sleepers where it stands on its path, the boards."""
+        from .acting.vehicle import path_distance
+
+        xy = np.atleast_2d(np.asarray(xy, dtype=float))[:, :2]
+        z = np.zeros(len(xy))
+        for _pid, (k, pts, w) in self.paths.items():
+            if k != kind:
+                continue
+            on = path_distance(pts, xy) <= w / 2
+            z = np.maximum(z, np.where(on, self.B.SLEEPER_TOP if k == "track" else self.B.ROAD_TOP, 0.0))
+        return np.maximum(z, self.boards(xy))
+
+
+def vehicle_kind(spec):
+    """The path kind a vehicle runs on (a train, `vehicle.track`, on a track; a car on a road), None for a creature."""
+    if spec.get("kind") != "vehicle":
+        return None
+    return "track" if (spec.get("vehicle") or {}).get("track") else "road"
+
+
+def vehicle_z(ground, kind, xy):
+    """The root height of a vehicle standing at a ground point: the running surface of a path of its kind there, the crossing boards for a car."""
+    z = ground.running(kind) if ground.near(xy, kind) else 0.0
+    if kind == "road":
+        z = max(z, float(ground.boards(xy)[0]))
+    return z
+
+
+def rest_box(rig):
+    """(lo, hi) of the visible meshes of a built character at rest, in its root's frame (the character.blend has the root at the origin)."""
+    lo, hi = np.full(3, np.inf), np.full(3, -np.inf)
+    for ob in rig["objects"]:
+        if ob.type != "MESH" or "cts_shadow" in ob or "cts_puff" in ob or "cts_mouth" in ob or min(ob.matrix_world.to_scale()) < 1e-3:
+            continue
+        for c in ob.bound_box:
+            w = ob.matrix_world @ Vector(c)
+            lo, hi = np.minimum(lo, np.array(w)), np.maximum(hi, np.array(w))
+    return (lo, hi) if np.all(np.isfinite(lo)) else None
+
+
+def make_plan(ctx, tl, set_spec, warnings, ground=None, kinds=None):
     """{actor: {actions, speaking, accents, blinks, mouth, listen}} for compose.build."""
     foot = prop_footprints(set_spec)
+    kinds = kinds or {}
     marks = set(set_spec["marks"])
     plan = {}
     speakers = [aid for aid, a in tl["actors"].items() if a.get("speaking")]
@@ -141,6 +244,16 @@ def make_plan(ctx, tl, set_spec, warnings):
                         p.setdefault("stop", CONVERSATION_STOP)
                     elif tgt in foot:
                         p.setdefault("stop", foot[tgt] + PROP_STOP_EXTRA)
+            kind = kinds.get(aid)
+            if kind and ground is not None and x["action"] in VEHICLE_MOVES and "z" not in p:
+                # the running height of the path the move follows, else of whatever is at the end point
+                pid = p.get("pathId")
+                if pid in ground.paths:
+                    p["z"] = ground.running(ground.paths[pid][0])
+                else:
+                    end = p["path"][-1] if p.get("path") else (ctx.ground(tgt) if tgt is not None else None)
+                    if end is not None:
+                        p["z"] = vehicle_z(ground, kind, end)
             acts.append({"action": x["action"], "t0": float(x["t0"]), "t1": float(x["t1"]), "params": p, "beat": x["beat"]})
         for t, target in a.get("look") or []:
             if target is not None and target not in ctx.actors and target not in ctx.points:
@@ -218,14 +331,16 @@ def add_title_cards(titles, style, horizon, set_name):
         S.add_box(bm, (TITLE_PLATE[0], 0.05, TITLE_PLATE[1]), (0, 0, 0))
         plate = S.make_object(f"title_plate_{k}", bm, plate_mat, None, (x, TITLE_AT[1], TITLE_AT[2]), (0, 0, 0), smooth=False, collection=coll)
         plate["cts_title"] = t["id"]
-        words, lines, cur = str(t["text"]).split(), [], ""
-        for w in words:
-            if cur and len(cur) + 1 + len(w) > 22:
-                lines.append(cur)
-                cur = w
-            else:
-                cur = (cur + " " + w).strip()
-        lines.append(cur)
+        lines = []
+        for para in str(t["text"]).split("\n"):  # a line break in the text (a credit line under the title) is kept
+            cur = ""
+            for w in para.split():
+                if cur and len(cur) + 1 + len(w) > 22:
+                    lines.append(cur)
+                    cur = w
+                else:
+                    cur = (cur + " " + w).strip()
+            lines.append(cur)
         cu = bpy.data.curves.new(f"title_text_{k}", "FONT")
         cu.body = "\n".join(lines)
         cu.align_x, cu.align_y = "CENTER", "CENTER"
@@ -336,15 +451,26 @@ def assemble_command(job):
     frames = int(math.ceil(float(tl["duration"]) * FPS))
     ctx = Ctx(frames + TAIL_FRAMES, seed=int(tl["seed"]), points=points, shots=cameras)
     ctx.seats = seats
+    ground = Ground(set_spec)
+    kinds = {cid: vehicle_kind(specs[cid]) for cid in specs}
+    if any(kinds.values()):
+        ctx.surface = ground.boards  # a car rides up over the crossing boards
     for aid, a in tl["actors"].items():
         if aid not in specs:
             raise CtsError("E_ASSEMBLE_FAILED", f"the timeline has actor {aid!r} but the job has no character for it")
         st = a["start"]
         if st["mark"] not in points:
             raise CtsError("E_MARK_UNKNOWN", f"start mark {st['mark']!r} of {aid} is not a mark of the set")
-        ctx.add_actor(aid, specs[aid], {"xy": points[st["mark"]][:2], "yaw": facing_degrees(st["facing"])})
+        start = {"xy": points[st["mark"]][:2], "yaw": facing_degrees(st["facing"])}
+        if kinds[aid]:
+            start["z"] = vehicle_z(ground, kinds[aid], start["xy"])
+            if not ground.near(start["xy"], kinds[aid]):
+                warnings.append(f"{aid} starts on mark {st['mark']!r}, which is not on a {kinds[aid]}: it stands on the grass")
+        actor = ctx.add_actor(aid, specs[aid], start)
+        if kinds[aid]:
+            actor.rig.box = rest_box(rigs[aid])
     progress(1, 6, "plan")
-    plan = make_plan(ctx, tl, set_spec, warnings)
+    plan = make_plan(ctx, tl, set_spec, warnings, ground, kinds)
     try:
         compose.build(ctx, plan, None)
     except KeyError as e:
@@ -356,7 +482,12 @@ def assemble_command(job):
     cards = add_title_cards(tl.get("titles") or [], style, set_spec["sky"]["horizon"], set_job["id"])
     shots = plan_camera(ctx, tl["shots"], cards, aspect)
     progress(3, 6, "keys")
-    scene = {"actors": {aid: {"controls": r["controls"], "slots": r["slots"], "shadow": shadows[aid]} for aid, r in rigs.items()}, "camera": cam}
+    scene = {"actors": {}, "camera": cam}
+    for aid, r in rigs.items():
+        info = {"controls": r["controls"], "slots": r["slots"], "shadow": shadows[aid]}
+        if kinds.get(aid):  # a vehicle: its puff pools and lamp for the writer, and the ground under its shadow
+            info.update(puffs=r.get("puffs"), lamp=r.get("lamp"), objects=r.get("objects"), floor=lambda xy, k=kinds[aid]: ground.floor(xy, k))
+        scene["actors"][aid] = info
     stats = compose.write(ctx, scene)
     sc.frame_start, sc.frame_end = compose.FIRST_FRAME, compose.FIRST_FRAME + frames - 1
     sc.render.fps = FPS
