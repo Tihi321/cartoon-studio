@@ -51,7 +51,7 @@ export function imageTools(svc: CtsService, def: ToolDef): Tool[] {
     ),
     def(
       'cts_budget_get',
-      'Read an episode budget: the caps (0 when there is no budget.json), what is spent per currency (usd, Flow credits, ElevenLabs free-tier credits), what is left, the ledger (spend.json), and eleven: the ElevenLabs reconciliation (CTS-43) of each voice phase, our estimate against the account counter read before and after it (apiDelta, withinTolerance ±10 %; a billing-period reset between the readings is reset: true and not judged; a status that could not be read is unread).',
+      'Read an episode budget: the caps (0 when there is no budget.json), what is spent per currency (usd, Flow credits, ElevenLabs free-tier credits), what is left, the ledger (spend.json), and eleven: the ElevenLabs reconciliation (CTS-43) of each voice phase, our estimate against the account counter read before and after it (apiDelta, withinTolerance ±10 %; a billing-period reset between the readings is reset: true and not judged, unless the new period used more than the estimate +10 %, which is an overspend (withinTolerance: false, listed in overspends); the overall verdict compares the summed same-period phases and is false if any phase overspent; a status that could not be read is unread).',
       z.object({ series, episode }),
       async (a) => {
         const s = await budgetState(store(), a.series, a.episode)
