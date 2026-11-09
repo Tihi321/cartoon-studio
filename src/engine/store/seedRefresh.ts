@@ -21,9 +21,45 @@ export const seedHash = (content: string | Buffer): string => createHash('sha1')
 
 /**
  * The hashes of earlier seed versions, per file (a file whose hash is in here was never edited, so a newer seed version may replace it).
- * A release that changes a seed file adds the hash of the old version here. Empty: nothing was released before this repo's first commit.
+ * A release that changes a seed file adds the hash of the old version here. The starter agents are listed because their folder is not
+ * refreshed like the rest (`refreshStarterAgents`): their cutout-era versions before CTS-47.
  */
-export const SEED_HISTORY: Record<string, string[]> = {}
+export const SEED_HISTORY: Record<string, string[]> = {
+  'agents/background-artist-mira-castellan.md': ['a1dde74fb8441548b5b58cc958d17bd753b552ed', '28ff1e8f732359019daa9045eb008580bb0ecd1d'],
+  'agents/character-designer-priya-nakamura.md': ['ee82a1b1516de81a6c1fb9d151496a951cb4009f', 'f013a0a8c1c795166b39812f5b43a2c46f01f071'],
+  'agents/composer-tobias-lindqvist.md': ['6f9921b76a813d0e0fd67a81592e5940e523b58d'],
+  'agents/showrunner-mara-quill.md': ['ec82a1ffd4511ccda6cc491c7d9546baa1cbb4db'],
+  'agents/writer-jonas-reyes.md': ['3b8bb9755642c19ebfe45089318155255f66e930', '3dd62958beb00be7b82d11cbb2c5d92dabee3e0b']
+}
+
+/**
+ * The starter staff is yours once `agents/` exists (a fired agent does not come back), so it is not refreshed like the other seed files.
+ * Only a starter agent file that is still exactly an earlier seed version (`SEED_HISTORY`) gets the newer seed text (CTS-48); an edited
+ * or missing one is left as it is. Returns the files it updated (relative, `/`).
+ */
+export async function refreshStarterAgents(seedDir: string, dataDir: string, history: Record<string, string[]> = SEED_HISTORY): Promise<string[]> {
+  const updated: string[] = []
+  let names: string[]
+  try {
+    names = await fs.readdir(path.join(seedDir, 'agents'))
+  } catch {
+    return updated
+  }
+  for (const name of names.filter((n) => n.endsWith('.md')).sort()) {
+    const rel = `agents/${name}`
+    const to = path.join(dataDir, 'agents', name)
+    let mine: Buffer
+    try {
+      mine = await fs.readFile(to)
+    } catch {
+      continue
+    }
+    if (!(history[rel] ?? []).includes(seedHash(mine))) continue
+    await fs.writeFile(to, await fs.readFile(path.join(seedDir, 'agents', name)))
+    updated.push(rel)
+  }
+  return updated
+}
 
 export interface SeedState {
   version: 1
