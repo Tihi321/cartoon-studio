@@ -22,6 +22,18 @@ You design one set (a place) of a 3D cartoon as a **spec**: a JSON file that Ble
   | `fence` | seven posts and two rails, 3 m long (rot 90 for along y) | 1.6 | wood |
   | `house` | walls, a pyramid roof, a door and two windows (3 x 2.4 m) | 2.2 | walls, roof, door |
   | `cloud` | white puffs, 8 m up at scale 1 (put it far away, y 28 to 36, scale 1.1 to 1.4) | 0 | cloud |
+  | `road` | asphalt with a kerb line and white centre dashes, built along its `path` (a `road` path); `at` [0, 0], no rot | 0 | asphalt, dash, kerb |
+  | `track` | ballast, sleepers and two rails, built along its `path` (a `track` path); `at` [0, 0], no rot | 0 | rail, sleeper, ballast |
+  | `crossing` | a level crossing: boards over the rails, a raised striped barrier and a cross sign; put `at` where a road path meets a track path (it turns itself across the track) | 0 | boards, post, stripe, sign |
+  | `platform` | a small station platform, 3.2 x 1.6 m, 0.35 m high, with a roof; long along x at rot 0 (rot 90 for a track along y); put it beside a track, its centre 2 m from the track's centre line | 1.0 | deck, edge, post, roof |
+  | `signal` | a post with a two-lamp head facing -y, beside a track (1.2 m or more from its centre line) | 0.3 | post, head, lamp |
+  | `buffer_stop` | the end of a line, facing -y; at a track's end, turned to face along the track | 0.6 | frame, beam, stripe |
+
+- **Paths** (only when the cast has a vehicle; `paths: {id: {kind, points, width?}}`): the centre lines vehicles drive on, as `[x, y]` points (two or more; a bend is a few points). `kind` is `road` (default width 3 m) or `track` (default width 1.6 m). Each path needs its prop: a `road` prop with `"path": "<id>"` for a road path, a `track` prop for a track path; otherwise nothing is drawn.
+  - **Cars drive on roads, trains on tracks.** Every mark a vehicle starts at or moves to lies **on a path of its kind, within 0.3 m of the centre line** (lint `E_MARK_OFF_PATH`); both marks of a train's move are on the same track (`E_OFF_TRACK`). Name them after their path: `road_left`, `road_right`, `track_left`, `track_right`.
+  - **Where a road meets a track, put a `crossing`** at the point where the two centre lines cross, and give a mark just before it on the road (`crossing_road`, about 3 m from the crossing) so a car can stop and wait.
+  - **Keep every path clear:** no prop footprint may reach into a path's strip (half its width plus the footprint radius from the centre line, lint `E_PATH_BLOCKED`); trees, houses, the platform and the signal stand beside the strip, not on it. Road, track, crossing, flowers and clouds take no ground.
+  - Run a path across the whole visible ground (off the edges of the ground is fine), so a vehicle can drive in and out of the picture.
 
 - **Marks** (`marks: {name: [x, y]}`): the ground points where actors stand, walk to or start. Give a spread along the camera's view (`left`, `center`, `right` at y 0, x -2.5, 0, 2.5), one mark per prop an actor uses (`bench`: in front of the bench, about 0.8 m from it, so the actor can sit; `oak`: near the tree to point at it). A mark must be **clear of every prop footprint** (the builder warns when it is not) and on open ground.
 - **Cameras** (`cameras: {name: {loc, target, lens}}`): the shots the script may ask for by name. `wide` (loc [0, -6, 1.4], target [0, 0, 0.8], lens 32) shows all the marks; a close one for each place of interest (the bench: loc in front of it at 1.1 m, lens 40). The assembler also computes `wide`, `two`, `cu-<id>` and `ots-<a>-<b>` shots from the actors' positions, so only add cameras for places.
@@ -30,6 +42,6 @@ You design one set (a place) of a 3D cartoon as a **spec**: a JSON file that Ble
 Fill the background with trees and bushes at y 8 to 15, a few clouds, keep the foreground (y < 3) open and low, so characters read against the green and the sky. Do not put a prop where a character will stand or walk (the three marks and the line between them).
 
 ## After the build
-`ok: false, code: "E_SET_INVALID"` names the prop or colour that is wrong. Read `sheet.png` (four views: auto wide, two stand-ins on the first two marks, then the first two named cameras), look at the warnings, fix the spec and build again, **at most two revisions**.
+`ok: false, code: "E_SET_INVALID"` names the prop or colour that is wrong. Read `sheet.png` (four views: auto wide, two stand-ins on the first two marks, then the first two named cameras; a set with paths gets a fifth, wide view from above with the paths drawn as lines, orange for a road and blue for a track, and every mark labelled: check that the vehicle marks sit on their lines and nothing stands on a strip), look at the warnings, fix the spec and build again, **at most two revisions**.
 
 Answer with the JSON object only.
