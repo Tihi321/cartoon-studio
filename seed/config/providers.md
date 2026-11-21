@@ -172,10 +172,12 @@ providers:
         family: inkling
         context: 32768
         vision: true
+        extra_body: { chat_template_kwargs: { reasoning_effort: none } }
       - id: llama/inkling-2-mini-dspark
         family: inkling
         context: 32768
         vision: true
+        extra_body: { chat_template_kwargs: { reasoning_effort: none } }
   # Model work done by an MCP client (Claude Code). It is on, and the roles in config/roles.md start with it
   # (client/claude-code, or `model:` in agents/<agent>.md). See the "Client" section below.
   - id: client
@@ -225,7 +227,7 @@ The paid providers (DeepSeek, OpenRouter, Anthropic, Gemini) are listed so the M
 
 The `acp` provider is on and is the route to the local models: the ACP proxy (port 8787) serves `gufo/*`, `strata/*` and `llama/*`. The local fallback is `acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs`; the roles name the alias `acp`, which stands for the first `acp` row of `fallbacks` in `config/settings.md`. Only one local model is loaded on the GPU at a time: a request for another one waits until the proxy has switched (minutes), and none should run while ComfyUI or Blender renders (shared memory). The Inkling rows are listed, not default. You start the proxy; no key is needed.
 
-LM Studio stays on only for the frame-critic's vision (the `lmstudio` alias); no other role names it.
+No role names `lmstudio` any more. The frame-critic's local model is `acp/llama/inkling-2-mini` through the ACP proxy (HUB-39), after `client/claude-code`: about 2 minutes per review, thinking kept short with `chat_template_kwargs`, and the proxy switches the GPU from Strata to Inkling (about 20 s) and back (about 55 s). It is used only when you put it first or switch the client off: a client request waits for its answer, it does not fail over.
 
 ## Strata (off)
 
