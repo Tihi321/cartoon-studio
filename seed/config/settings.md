@@ -2,7 +2,7 @@
 kind: settings
 fallbacks:
   - client/claude-code
-  - strata/default
+  - acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs
   - lmstudio/gemma-4-e4b-it
 fallback_shared: false
 lmstudio_parallel: 4
@@ -13,12 +13,12 @@ lmstudio_ttl_minutes: 60
 
 ## Default models
 
-`fallbacks` is the list of models the pipeline falls back through, first row first. It can have any length, and a kind may repeat. Each row is one `provider/model`. Its **kind** comes from the model's provider, so a row can't disagree with its model: an API provider (free or paid) is `paid`, any other provider is named by its id (`strata`, `lmstudio`, `client` ...). Edit the list here or on the app's Models page. A change applies at once, to running jobs too.
+`fallbacks` is the list of models the pipeline falls back through, first row first. It can have any length, and a kind may repeat. Each row is one `provider/model`. Its **kind** comes from the model's provider, so a row can't disagree with its model: an API provider (free or paid) is `paid`, any other provider is named by its id (`acp`, `lmstudio`, `client` ...). Edit the list here or on the app's Models page. A change applies at once, to running jobs too.
 
-The role lists in `roles.md` and an agent's `model` can name a kind instead of a model: `paid` is the first API row, `strata` the first Strata row, `lmstudio-2` the second LM Studio row, `client` the first client row. A name with no matching row is skipped (the engine logs it once). An agent's own model, picked in the app, still goes first.
+The role lists in `roles.md` and an agent's `model` can name a kind instead of a model: `paid` is the first API row, `acp` the first ACP proxy row, `lmstudio-2` the second LM Studio row, `client` the first client row. A name with no matching row is skipped (the engine logs it once). An agent's own model, picked in the app, still goes first.
 
 - `fallbacks`: the rows. At least one. This repo seeds no paid row.
-- `fallback_shared`: `true` gives every role the rows top to bottom. `false` keeps each role's own order from `roles.md`, and the rows only say what `paid`, `strata`, `lmstudio` ... stand for.
+- `fallback_shared`: `true` gives every role the rows top to bottom. `false` keeps each role's own order from `roles.md`, and the rows only say what `paid`, `acp`, `lmstudio` ... stand for.
 
 ## LM Studio loading
 

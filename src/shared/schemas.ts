@@ -159,15 +159,22 @@ export const factorySchema = configBase('factory').extend({
 
 // ---- settings ----
 
+/** The local fallback model: Strata through the ACP proxy (HUB-38). The `acp` alias stands for the first `acp` row of the fallbacks. */
+export const LOCAL_MODEL = 'acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs'
+
 export const BUILTIN_FALLBACKS = [
   'client/claude-code',
-  'strata/default',
+  LOCAL_MODEL,
   'lmstudio/gemma-4-e4b-it'
 ]
 
-/** The built-in defaults behind the `paid`, `strata` and `lmstudio` aliases. */
+/**
+ * The built-in defaults behind the `paid`, `acp` and `lmstudio` aliases. `strata` stays: the legacy settings preprocessing below and
+ * `groupDefaultsOf` look the key up by name (the provider is off in the seed, the code is kept).
+ */
 export const BUILTIN_GROUP_DEFAULTS: Record<string, string> = {
   paid: 'deepseek/deepseek-flash',
+  acp: LOCAL_MODEL,
   strata: 'strata/default',
   lmstudio: 'lmstudio/gemma-4-e4b-it'
 }

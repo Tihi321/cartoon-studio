@@ -5,9 +5,10 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Engine } from '../src/engine/engine'
 import { MockProvider } from '../src/engine/models/mock'
 import { initDataFolder } from '../src/engine/store/dataFolder'
-import { refreshStarterAgents, seedHash } from '../src/engine/store/seedRefresh'
+import { applySeedMigrations } from '../src/engine/store/seedMigrations'
+import { emptySeedState, refreshStarterAgents, seedHash } from '../src/engine/store/seedRefresh'
 import { parseMd } from '../src/shared/md'
-import { ROLES } from '../src/shared/schemas'
+import { LOCAL_MODEL, ROLES } from '../src/shared/schemas'
 import { SeriesStore } from '../src/engine/series/service'
 import { seedDir } from './helpers'
 
@@ -51,7 +52,26 @@ describe('the seed', () => {
     expect((await readdir(path.join(dir, 'agents'))).sort()).toEqual(['showrunner-mara-quill.md', 'writer-jonas-reyes.md'])
   })
 
-  it('starts an engine: eight roles on client/claude-code, strata, lmstudio; no paid alias; $0 budget; hr voice chain; no series', async () => {
+  it('CTS-54: migration acp-port-8787-v1 moves only the exact 7461 base_url of acp, once, and does not switch acp on', async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'cts-mig-'))
+    await mkdir(path.join(dir, 'config'))
+    const file = path.join(dir, 'config', 'providers.md')
+    const mk = (url: string) => ['---', 'kind: providers', 'providers:', '  - id: acp', '    enabled: false', `    base_url: ${url}`, '---', 'body', ''].join('\n')
+    for (const [from, to] of [['http://127.0.0.1:7461/v1', 'http://127.0.0.1:8787/v1'], ['http://10.0.0.5:7461/v1', 'http://10.0.0.5:7461/v1']] as const) {
+      await writeFile(file, mk(from))
+      const state = emptySeedState()
+      await applySeedMigrations(dir, seedDir, state)
+      expect(state.migrations).toContain('acp-port-8787-v1')
+      expect(await readFile(file, 'utf8')).toBe(mk(to))
+    }
+    const state = emptySeedState()
+    state.migrations.push('acp-port-8787-v1')
+    await writeFile(file, mk('http://127.0.0.1:7461/v1'))
+    await applySeedMigrations(dir, seedDir, state)
+    expect(await readFile(file, 'utf8')).toBe(mk('http://127.0.0.1:7461/v1'))
+  })
+
+  it('starts an engine: eight roles on client/claude-code then the local acp model (frame-critic: lmstudio); acp on at 8787, strata off; no paid alias; $0 budget; hr voice chain; no series', async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'cts-seed-'))
     await initDataFolder(dir, seedDir)
     const logs: string[] = []
@@ -61,7 +81,8 @@ describe('the seed', () => {
       expect(logs.filter((l) => /invalid|roles.md|names no row/.test(l))).toEqual([])
       const roles = Object.keys(engine.registry.roles.roles).sort()
       expect(roles).toEqual([...ROLES].sort())
-      for (const r of ROLES) expect(engine.registry.roles.roles[r]!.models, r).toEqual(['client/claude-code', 'strata', 'lmstudio'])
+      for (const r of ROLES) expect(engine.registry.roles.roles[r]!.models, r).toEqual(['client/claude-code', r === 'frame-critic' ? 'lmstudio' : 'acp'])
+      expect(engine.registry.resolve('acp')).toBe(LOCAL_MODEL)
       expect(engine.agents.list().map((a) => a.data.role).sort()).toEqual([...ROLES].sort())
       expect(engine.cts.seriesModel('any', 'writer')).toBeUndefined()
       expect(await engine.cts.listSeries()).toEqual([])
@@ -73,6 +94,11 @@ describe('the seed', () => {
     const cfg = async (name: string) => parseMd(await readFile(path.join(dir!, 'config', name), 'utf8'), name).data
     expect(await cfg('voice.md')).toMatchObject({ localOrder: { hr: ['comfy', 'vibetts'], en: ['vibetts', 'comfy'] }, geminiDailyLimit: 10 })
     expect(await cfg('providers.md')).toMatchObject({ comfy: { imageModel: 'z-image-turbo', alternatives: ['krea2-turbo'] } })
+    const provs = ((await cfg('providers.md')).providers as { id: string; enabled?: boolean; base_url?: string; models: { id: string }[] }[])
+    const acp = provs.find((p) => p.id === 'acp')!
+    expect(acp).toMatchObject({ enabled: true, base_url: 'http://127.0.0.1:8787/v1' })
+    expect(acp.models.map((m) => m.id)).toEqual(['strata/qwen3.8-flash-next-unsloth-ud-iq4_xs', 'gufo/Qwen3.8-27B', 'gufo/deepseek4', 'gufo/flash-next-q4', 'llama/inkling-2-mini', 'llama/inkling-2-mini-dspark'])
+    expect(provs.find((p) => p.id === 'strata')!.enabled).toBe(false)
     expect(await cfg('render.md')).toMatchObject({ fps: { anim: 12, out: 24 }, final: { width: 1920, height: 1080 }, frameFormat: 'jpeg', loudness: { lufs: -16, truePeak: -1.5 } })
     expect((await readdir(path.join(seedDir, 'config'))).sort()).toEqual(['autostart.md', 'blender.md', 'budget.md', 'prices.md', 'providers.md', 'render.md', 'roles.md', 'settings.md', 'studios.md', 'voice.md'])
   })

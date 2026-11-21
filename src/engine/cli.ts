@@ -4,6 +4,7 @@ import { ModelRegistry, computeCost, isPaidModel } from './models/registry'
 import { resolveKey, setStoredKey } from './models/keys'
 import { PAID_KEY_ACCOUNTS } from './images/provider'
 import { initDataFolder, argValue, resolveDataDir } from './store/dataFolder'
+import { LOCAL_MODEL } from '../shared/schemas'
 import { emptyUsage } from './models/types'
 import type { Usage } from './models/types'
 
@@ -22,7 +23,7 @@ export async function probe(argv: string[]): Promise<number> {
   const router = new ModelRouter(registry, budget, { retries: 0 })
 
   let code = 0
-  const refs = argValue(argv, 'model') ? [argValue(argv, 'model')!] : ['strata/default']
+  const refs = argValue(argv, 'model') ? [argValue(argv, 'model')!] : [LOCAL_MODEL]
   for (const ref of refs) {
     const model = registry.getModel(ref)
     if (!model) {
