@@ -20,7 +20,7 @@ Phase 1 (CTS-01..09) is built: the engine, contracts, Canvas player, timeline, r
 
 | Path | What |
 |---|---|
-| `src/engine/` | The headless engine: job queue and scheduler, agents and roles, model providers (`client`, `mock`, OpenAI-compatible for Strata and LM Studio, Anthropic, Gemini), budget, logs, the MCP server, and the clients of the other tools (ComfyUI, flow-music-mcp, VibeTTS). |
+| `src/engine/` | The headless engine: job queue and scheduler, agents and roles, model providers (`client`, `mock`, OpenAI-compatible for the ACP proxy (the local fallback, Strata under it), LM Studio (the frame-critic's vision), Strata (off), Anthropic, Gemini), budget, logs, the MCP server, and the clients of the other tools (ComfyUI, flow-music-mcp, VibeTTS). |
 | `src/main`, `src/preload`, `src/renderer` | The Electron app: main process, the `window.cartoonstudio` bridge, the React studio UI. |
 | `blender/` | The Blender side (GPL-3.0-or-later): `run.py`, `cts_blender/` (character and set builders, the acting library, the assembler, the render, the 5.x API shims) and its tests. |
 | `src/player/` | The Canvas puppet player (legacy, frozen), used for `canvas` series. It is served by the engine at `/preview/`. |

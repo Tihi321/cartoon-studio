@@ -45,7 +45,7 @@ export function checkBaseUrl(raw: string): { url: string } | { error: string } {
   try {
     u = new URL(text)
   } catch {
-    return { error: 'the base URL is not a valid address (for example http://127.0.0.1:7461/v1)' }
+    return { error: 'the base URL is not a valid address (for example http://127.0.0.1:8787/v1)' }
   }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return { error: 'the base URL must start with http:// or https://' }
   return { url: text.replace(/\/+$/, '') }

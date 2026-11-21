@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { parseDocument } from 'yaml'
+import { isMap, isSeq, parseDocument } from 'yaml'
 import type { Document } from 'yaml'
 import { splitFrontmatter } from '../../shared/md'
 import { atomicWrite } from './atomic'
@@ -21,10 +21,28 @@ export interface SeedMigration {
 }
 
 /**
- * The migrations of Cartoon Studio's seed files. None yet: the repo started with the seed as it is. A later release that adds an entry to
- * a seeded config file adds a migration here (the mechanism is the one of Edu Studio).
+ * The migrations of Cartoon Studio's seed files. A release that adds an entry to a seeded config file adds a migration here (the
+ * mechanism is the one of Edu Studio).
  */
-export const SEED_MIGRATIONS: SeedMigration[] = []
+export const SEED_MIGRATIONS: SeedMigration[] = [
+  {
+    // HUB-38 / CTS-54: the ACP proxy listens on 8787. Rewrites only the exact old default 7461 of the acp row; any other value is kept.
+    // It does not switch acp on in an existing folder.
+    id: 'acp-port-8787-v1',
+    file: 'config/providers.md',
+    apply(doc) {
+      const rows = doc.get('providers')
+      if (!isSeq(rows)) return false
+      for (const row of rows.items) {
+        if (!isMap(row) || row.get('id') !== 'acp') continue
+        if (row.get('base_url') !== 'http://127.0.0.1:7461/v1') return false
+        row.set('base_url', 'http://127.0.0.1:8787/v1')
+        return true
+      }
+      return false
+    }
+  }
+]
 
 async function readFrontmatterDoc(file: string): Promise<{ doc: Document; text: string; frontmatter: string; body: string } | null> {
   let text: string

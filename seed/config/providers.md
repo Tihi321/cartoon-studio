@@ -103,6 +103,7 @@ providers:
         extra_body: { reasoning_effort: none }
   - id: strata
     kind: openai-compat
+    enabled: false                # off (HUB-38): Strata runs under the ACP proxy and is reached as acp/strata/... ; the code stays
     local: true
     base_url: http://127.0.0.1:8080/v1
     api_key_env: STRATA_API_KEY   # optional: only sent if set
@@ -135,17 +136,46 @@ providers:
     concurrency: 1
     discover: true
     models: []
-  # The ACP proxy (api-acp-proxy: Antigravity, Codex and Claude through ACP) as an OpenAI-style server. Off until you start the proxy and switch it on.
-  # Text only.
+  # The ACP proxy (api-acp-proxy, port 8787): the one route to every local model (gufo, strata, llama) and to Antigravity, Codex and Claude
+  # through ACP, as an OpenAI-style server. Text only. On (HUB-38): the local fallback `acp` is LOCAL, the strata row below.
   - id: acp
+    name: ACP proxy
     kind: openai-compat
-    enabled: false
+    enabled: true
     local: true
-    base_url: http://127.0.0.1:7461/v1
+    base_url: http://127.0.0.1:8787/v1
     concurrency: 2
     json_schema: false
     discover: true
-    models: []
+    discover_skip: [ qwen-image, nomic-embed ]
+    models:
+      # Local models through the proxy (HUB-38). One local model is loaded at a time across gufo, strata and llama;
+      # a request for another one waits until the proxy has switched (minutes). LOCAL is the strata row.
+      - id: strata/qwen3.8-flash-next-unsloth-ud-iq4_xs
+        family: qwen
+        context: 131072
+        extra_body: { reasoning_effort: none }
+      - id: gufo/Qwen3.8-27B
+        family: qwen
+        context: 32768
+        extra_body: { reasoning_effort: none }
+      - id: gufo/deepseek4
+        family: deepseek
+        context: 16384
+        extra_body: { reasoning_effort: none }
+      - id: gufo/flash-next-q4
+        family: qwen
+        context: 32768
+        vision: true
+        extra_body: { reasoning_effort: none }
+      - id: llama/inkling-2-mini
+        family: inkling
+        context: 32768
+        vision: true
+      - id: llama/inkling-2-mini-dspark
+        family: inkling
+        context: 32768
+        vision: true
   # Model work done by an MCP client (Claude Code). It is on, and the roles in config/roles.md start with it
   # (client/claude-code, or `model:` in agents/<agent>.md). See the "Client" section below.
   - id: client
@@ -170,7 +200,7 @@ comfy:
 
 One entry per provider. Edit this file and the engine picks the change up without a restart. API keys are never written here: `api_key_env` names an environment variable, and the engine also looks in the Windows credential store (set one with `yarn key:set <NAME>`).
 
-The paid providers (DeepSeek, OpenRouter, Anthropic, Gemini) are listed so the Models page can use them, but **no role in `config/roles.md` names one** and `config/budget.md` caps them at 0. Local models (Strata, LM Studio) and the client provider (Claude Code) cost nothing.
+The paid providers (DeepSeek, OpenRouter, Anthropic, Gemini) are listed so the Models page can use them, but **no role in `config/roles.md` names one** and `config/budget.md` caps them at 0. Local models (the ACP proxy, LM Studio) and the client provider (Claude Code) cost nothing.
 
 ## Fields of a provider
 
@@ -191,9 +221,15 @@ The paid providers (DeepSeek, OpenRouter, Anthropic, Gemini) are listed so the M
 
 `kind: client` has no server and no key: a request waits in the engine's in-memory client task queue until an MCP client takes it (`cts_get_task`) and answers (`cts_submit_task`). It is `local: true`, so it costs nothing here. Each model is a named client: a task made for `client/antigravity` is only handed to a client that asks for `antigravity`; `cts_get_task` without `client` takes the `claude-code` ones. The queue is lost when the engine restarts: the running job is asked again.
 
-## Strata
+## ACP proxy and the local models
 
-Strata is a fast local server with an OpenAI-style API on port 8080. Cartoon Studio only connects to it, you start it. `strata/default` stands for whatever model Strata has loaded (thinking off), `strata/default-low` the same with thinking on low. No key is needed.
+The `acp` provider is on and is the route to the local models: the ACP proxy (port 8787) serves `gufo/*`, `strata/*` and `llama/*`. The local fallback is `acp/strata/qwen3.8-flash-next-unsloth-ud-iq4_xs`; the roles name the alias `acp`, which stands for the first `acp` row of `fallbacks` in `config/settings.md`. Only one local model is loaded on the GPU at a time: a request for another one waits until the proxy has switched (minutes), and none should run while ComfyUI or Blender renders (shared memory). The Inkling rows are listed, not default. You start the proxy; no key is needed.
+
+LM Studio stays on only for the frame-critic's vision (the `lmstudio` alias); no other role names it.
+
+## Strata (off)
+
+The `strata` provider (a server on port 8080) is switched off and kept in the file: Strata now runs under the ACP proxy. Switch it on and point a role at `strata/default` to talk to a Strata server directly.
 
 ## ComfyUI image model
 
