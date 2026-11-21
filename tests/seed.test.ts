@@ -71,7 +71,7 @@ describe('the seed', () => {
     expect(await readFile(file, 'utf8')).toBe(mk('http://127.0.0.1:7461/v1'))
   })
 
-  it('starts an engine: eight roles on client/claude-code then the local acp model (frame-critic: lmstudio); acp on at 8787, strata off; no paid alias; $0 budget; hr voice chain; no series', async () => {
+  it('starts an engine: eight roles on client/claude-code then the local acp model (frame-critic: acp/llama/inkling-2-mini); acp on at 8787, strata off; no paid alias; $0 budget; hr voice chain; no series', async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'cts-seed-'))
     await initDataFolder(dir, seedDir)
     const logs: string[] = []
@@ -81,7 +81,8 @@ describe('the seed', () => {
       expect(logs.filter((l) => /invalid|roles.md|names no row/.test(l))).toEqual([])
       const roles = Object.keys(engine.registry.roles.roles).sort()
       expect(roles).toEqual([...ROLES].sort())
-      for (const r of ROLES) expect(engine.registry.roles.roles[r]!.models, r).toEqual(['client/claude-code', r === 'frame-critic' ? 'lmstudio' : 'acp'])
+      for (const r of ROLES) expect(engine.registry.roles.roles[r]!.models, r).toEqual(['client/claude-code', r === 'frame-critic' ? 'acp/llama/inkling-2-mini' : 'acp'])
+      expect(engine.registry.getModel('acp/llama/inkling-2-mini')).toMatchObject({ vision: true, extraBody: { chat_template_kwargs: { reasoning_effort: 'none' } } })
       expect(engine.registry.resolve('acp')).toBe(LOCAL_MODEL)
       expect(engine.agents.list().map((a) => a.data.role).sort()).toEqual([...ROLES].sort())
       expect(engine.cts.seriesModel('any', 'writer')).toBeUndefined()
