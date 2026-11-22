@@ -171,14 +171,15 @@ export async function firstReachableLane(config: { lanes?: string[] }): Promise<
   return null
 }
 
-/** Asks ComfyUI to drop cached models and free VRAM (weights stay on disk). */
-export async function freeMemory(lane: string, timeoutMs = 30_000): Promise<unknown> {
-  return fetchJson(`${lane}/free`, {
+/** Asks ComfyUI to drop cached models and free VRAM (weights stay on disk). ComfyUI answers 200 with an empty body. */
+export async function freeMemory(lane: string, timeoutMs = 30_000): Promise<void> {
+  const response = await fetchWithDeadline(`${lane}/free`, {
     method: 'POST',
     timeoutMs,
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ unload_models: true, free_memory: true })
   })
+  if (!response.ok) throw new Error(`ComfyUI POST ${lane}/free failed: HTTP ${response.status}`)
 }
 
 /** Model files ComfyUI can see in one folder. */
