@@ -23,7 +23,7 @@ Usage:
   --heartbeat <ms>  Heartbeat interval. Default 3000
   --mcp-only        Serve MCP over HTTP (config/mcp.md, even when it is off there) and print "MCP listening on <url>"; exit 1 if the port or the data folder is taken
   --port <n>        With --mcp-only: the MCP port (default: config/mcp.md, else 7465; CTS_MCP_PORT, CTS_MCP_TOKEN)
-  probe             Stream one short reply from Strata (or --model) and embed one string
+  probe             Stream one short reply from the local model through the ACP proxy (or --model <ref>) and embed one string
   key-set <NAME>    Store an API key in the Windows credential store (hidden prompt); NAME may also be fal or gemini
 `
 

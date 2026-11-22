@@ -25,6 +25,11 @@ export const DEFAULT_REGISTRY = '../creative-hub/services.json'
 export const COOLDOWN_MS = 5 * 60_000
 const DEFAULT_START_TIMEOUT_S = 60
 const POLL_MS = 500
+/** Local model servers that take most of the GPU: ComfyUI is not started while one answers. Llama.cpp (8082, Inkling) is left out: it runs beside ComfyUI (creative-hub HUB-39). */
+const GPU_HOLDERS = [
+  { id: 'strata', name: 'Strata', port: 8080 },
+  { id: 'gufo', name: 'Gufo', port: 8081 }
+]
 
 /** `config/autostart.md`. */
 export const autostartConfigSchema = z.object({
@@ -333,11 +338,13 @@ export class ServiceStarter {
     const running = this.inflight.get(id)
     if (running) return this.raceSignal(running, o.signal)
     if (id === 'comfyui') {
-      const strata = reg.entries.find((e) => e.id === 'strata')
-      if (strata && (await probe(strata))) {
-        const reason = 'ComfyUI not started: Strata is running and uses most of the GPU'
-        this.say(`autostart ${id}: ${reason}`, o)
-        return reason
+      for (const holder of GPU_HOLDERS) {
+        const held = reg.entries.find((e) => e.id === holder.id) ?? ({ id: holder.id, port: holder.port } as RegistryEntry)
+        if (await probe(held)) {
+          const reason = `ComfyUI not started: ${holder.name} is running and uses most of the GPU`
+          this.say(`autostart ${id}: ${reason}`, o)
+          return reason
+        }
       }
     }
     const failed = this.failed.get(id)

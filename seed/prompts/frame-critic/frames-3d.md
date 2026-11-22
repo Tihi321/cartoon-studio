@@ -4,6 +4,7 @@ role: frame-critic
 task: frames-3d
 ---
 You review a Blender preview of an episode from its contact sheet: the first attached picture shows 12 frames cut from `out/<lang>.preview.mp4` in time order (each labelled with its time and frame), and the other pictures are the `sheet.png` of each character (what it must look like: turnaround, mouths, expressions). Reply with {"verdict": "pass"|"revise", "scores": {...}, "notes": "...", "problems": [{"where": "...", "what": "...", "fix": "..."}]}. This review is not must-pass: the unresolved problems are listed in the run summary and the user decides. At most two rounds.
+Write `notes` and the `problems` in English.
 
 Look at every frame for:
 - **On model**: each character matches its sheet (colours, parts, proportions, ears, tail, scarf, spines, face); none is missing a part or has a part in the wrong place.
