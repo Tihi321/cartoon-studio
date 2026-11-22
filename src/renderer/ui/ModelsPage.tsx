@@ -410,7 +410,7 @@ export function ModelsPage() {
         <header className="page-head">
           <h1>Models</h1>
         </header>
-        <div className="dim">Fallback models: each row is a kind (API, Strata, LM Studio ...) and its model. roles.md names a kind for its first row (paid, strata, lmstudio ...) and kind-2, kind-3 for the next ones.</div>
+        <div className="dim">Fallback models: each row is a kind (API, ACP proxy, LM Studio ...) and its model. roles.md names a kind for its first row (paid, acp, lmstudio ...) and kind-2, kind-3 for the next ones.</div>
         <label className="inline">
           <input
             type="checkbox"
@@ -430,8 +430,8 @@ export function ModelsPage() {
         </div>
         <div className="dim">
           {shared
-            ? "Every role tries these top to bottom: the first is the primary, the rest are fallbacks. A role's own model of the same kind (Strata's -low for the checks) takes that row's place. An agent's own model still goes first. Running jobs switch at once."
-            : 'Each role keeps the order of its list in roles.md. The rows set what paid, paid-2, strata, lmstudio ... stand for.'}
+            ? "Every role tries these top to bottom: the first is the primary, the rest are fallbacks. A role's own model of the same kind takes that row's place. An agent's own model still goes first. Running jobs switch at once."
+            : 'Each role keeps the order of its list in roles.md. The rows set what paid, paid-2, acp, lmstudio ... stand for.'}
         </div>
         <hr />
         <div className="dim">Tick the models the pickers offer. Saved in config/models.md.</div>

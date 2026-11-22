@@ -77,10 +77,7 @@ providers:
     discover: true
     discover_skip: [dflash]       # LM Studio lists these, but they are not models it can load here
     load_models: true             # load a model that isn't loaded yet with lmstudio_parallel, lmstudio_context and lmstudio_ttl_minutes from settings.md
-    # For the frame-critic, add a vision model you have in LM Studio (for example a Qwen-VL) with `vision: true`:
-    #   - id: qwen2.5-vl-7b-instruct
-    #     family: qwen
-    #     vision: true
+    # Not for the frame-critic: its local vision model is acp/llama/inkling-2-mini through the ACP proxy (HUB-39).
     models:
       - id: ista-daslab-qwen3.8-27b-gsq-rco-unsloth-mtp
         family: qwen
