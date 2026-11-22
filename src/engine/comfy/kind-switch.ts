@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { fetchWithDeadline, firstReachableLane, loadComfyConfig } from './client'
+import { firstReachableLane, freeMemory, loadComfyConfig } from './client'
 
 /**
  * ComfyUI memory between voice and image jobs (HUB-29 decision 11). A stale Higgs/OmniVoice state broke the Qwen image runs in the bake-off, so
@@ -14,12 +14,6 @@ import { fetchWithDeadline, firstReachableLane, loadComfyConfig } from './client
 export type ComfyJobKind = 'voice' | 'image' | 'music'
 
 const lastKind = new Map<string, ComfyJobKind>()
-
-/** `POST /free {unload_models: true, free_memory: true}`. ComfyUI answers with an empty body, so this does not parse one (`client.ts freeMemory` does and throws). */
-async function postFree(lane: string): Promise<void> {
-  const res = await fetchWithDeadline(`${lane}/free`, { method: 'POST', timeoutMs: 30_000, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ unload_models: true, free_memory: true }) })
-  if (!res.ok) throw new Error(`POST ${lane}/free answered ${res.status}`)
-}
 
 export interface KindSwitchOptions {
   /** The data folder (`config/comfy.md` names the lanes). Not needed with `lane`. */
@@ -51,7 +45,7 @@ export async function comfyKindSwitch(kind: ComfyJobKind, o: KindSwitchOptions =
   const from = lastKind.get(lane) ?? null
   if (from === kind) return { lane, from, freed: false, note: `still ${kind} work` }
   try {
-    await (o.free ?? (postFree))(lane)
+    await (o.free ?? freeMemory)(lane)
     lastKind.set(lane, kind)
     o.log?.(`comfyui: freed memory (${from ?? 'unknown'} -> ${kind})`)
     return { lane, from, freed: true }
@@ -71,7 +65,7 @@ export async function comfyFreeNow(o: KindSwitchOptions = {}): Promise<KindSwitc
   if (!lane) return { lane: null, from: null, freed: false, note: 'ComfyUI does not answer: nothing to free' }
   const from = lastKind.get(lane) ?? null
   try {
-    await (o.free ?? (postFree))(lane)
+    await (o.free ?? freeMemory)(lane)
     lastKind.delete(lane)
     return { lane, from, freed: true }
   } catch (e) {
