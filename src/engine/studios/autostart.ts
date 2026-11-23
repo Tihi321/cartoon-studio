@@ -25,7 +25,7 @@ export const DEFAULT_REGISTRY = '../creative-hub/services.json'
 export const COOLDOWN_MS = 5 * 60_000
 const DEFAULT_START_TIMEOUT_S = 60
 const POLL_MS = 500
-/** Local model servers that take most of the GPU: ComfyUI is not started while one answers. Llama.cpp (8082, Inkling) is left out: it runs beside ComfyUI (creative-hub HUB-39). */
+/** Local model servers that take most of the GPU: ComfyUI is not started while one answers. Llama.cpp (8082, Inkling) is left out: it runs beside ComfyUI (creative-hub HUB-39). Gufo is asked on its own `/health` (`gufoAnswers`, creative-hub HUB-44 P-26), so another program on 8081 does not hold ComfyUI back. */
 const GPU_HOLDERS = [
   { id: 'strata', name: 'Strata', port: 8080 },
   { id: 'gufo', name: 'Gufo', port: 8081 }
@@ -189,7 +189,7 @@ export interface StarterDeps {
   env?: NodeJS.ProcessEnv
   log?: (message: string) => void
   spawner?: Spawner
-  /** Does the service answer? Default: GET of the entry's `http` (2xx), else a TCP connect to its port. */
+  /** Does the service answer? Default: GET of the entry's `http` (2xx); Gufo without a registry entry by `gufoAnswers`; else a TCP connect to its port. */
   probe?: (entry: RegistryEntry) => Promise<boolean>
   /** Opens a log file for appending (writing a header line first) and returns its descriptor. */
   openLog?: (file: string, header: string) => number
@@ -217,7 +217,38 @@ export interface EnsureOptions {
   log?: (message: string) => void
 }
 
-const defaultProbe = async (entry: RegistryEntry): Promise<boolean> => {
+/**
+ * Is Gufo the program on 127.0.0.1:<port>? (creative-hub HUB-44 P-26; recorded 2026-11-23: GET /health -> 200 {"status":"ok"}, GET /v1/models -> owned_by "gufo".)
+ * True for /health 200 with JSON status "ok"; for /health 503 with a JSON body (a model loading, llama-server style: assumed, not recorded,
+ * and the safe side: ComfyUI waits); or, when /health says anything else, for /v1/models 200 with an entry owned_by "gufo" (an image server,
+ * not probed). Refused, timed out (2000 ms for all requests together) or any other answer: not Gufo.
+ */
+async function gufoAnswers(port: number, timeoutMs = 2000): Promise<boolean> {
+  const signal = AbortSignal.timeout(timeoutMs)
+  const base = `http://127.0.0.1:${port}`
+  const json = async (r: Awaited<ReturnType<typeof fetch>>): Promise<unknown> => {
+    try {
+      return await r.json()
+    } catch {
+      return undefined
+    }
+  }
+  try {
+    const health = await fetch(`${base}/health`, { signal })
+    const body = await json(health)
+    if (health.status === 200 && (body as { status?: unknown } | undefined)?.status === 'ok') return true
+    if (health.status === 503 && typeof body === 'object' && body !== null) return true
+    const models = await fetch(`${base}/v1/models`, { signal })
+    if (models.status !== 200) return false
+    const data = ((await json(models)) as { data?: unknown } | undefined)?.data
+    return Array.isArray(data) && data.some((m) => (m as { owned_by?: unknown } | null)?.owned_by === 'gufo')
+  } catch {
+    return false
+  }
+}
+
+/** Does the service answer? Exported for its test (CTS-59). */
+export const defaultProbe = async (entry: RegistryEntry): Promise<boolean> => {
   if (entry.http) {
     try {
       const r = await fetch(entry.http, { signal: AbortSignal.timeout(2000) })
@@ -226,6 +257,7 @@ const defaultProbe = async (entry: RegistryEntry): Promise<boolean> => {
       return false
     }
   }
+  if (entry.id === 'gufo' && entry.port) return gufoAnswers(entry.port)
   const port = entry.port
   if (!port) return false
   return new Promise<boolean>((resolve) => {

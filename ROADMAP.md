@@ -96,6 +96,7 @@ Branch `CTS-30_vehicles-elevenlabs`, cut from `CTS-18_blender-3d`. The plan is `
 | **CTS-56** | Leftovers of CTS-54/55 (creative-hub HUB-40, REQ-0030, branch `CTS-56_extra-ideas`): the frame-critic prompts ask for English notes; autostart does not start ComfyUI while Gufo answers (as for Strata); Models page and `probe` help and the seed's LM Studio comment no longer name Strata or an LM Studio vision model. Live check UNTESTED. | Done (code; live check UNTESTED) |
 | **CTS-57** | freeMemory accepts ComfyUI's empty 200 reply to /free (creative-hub HUB-42, REQ-0030, branch `CTS-57_comfy-free`), as VN's VNO-70. Live check UNTESTED. | Done (code; live check UNTESTED) |
 | **CTS-58** | The ComfyUI kind switch calls the fixed `freeMemory` instead of its own copy of `POST /free` (creative-hub HUB-43, REQ-0030, branch `CTS-58_kind-switch-free`). Live check UNTESTED. | Done (code; live check UNTESTED) |
+| **CTS-59** | ComfyUI autostart is held back for Gufo only when Gufo answers as Gufo (`/health` 200 `{"status":"ok"}`, 503 while a model loads, or `/v1/models` owned by gufo), not for any program on port 8081 (creative-hub HUB-44, REQ-0031, branch `CTS-59_gufo-health-probe`), as VN Studio's VNO-74. Live check UNTESTED. | Done (code; live check UNTESTED) |
 
 Pilot 4 (series `pip-bruno-wheels`, about 60 s, hr and en, ElevenLabs voices, $0 and 0 Flow credits) and its acceptance criteria are in the creative hub's `HUB-31` plan.
 
